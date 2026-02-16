@@ -1,22 +1,22 @@
 {
-  "name": "@charter/cli",
-  "version": "0.1.0",
-  "description": "Charter CLI — repo-level governance checks",
-  "bin": {
-    "charter": "./dist/bin.js"
-  },
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "scripts": {
-    "build": "tsc"
-  },
-  "dependencies": {
-    "@charter/types": "workspace:*",
-    "@charter/core": "workspace:*",
-    "@charter/git": "workspace:*",
-    "@charter/classify": "workspace:*",
-    "@charter/validate": "workspace:*",
-    "@charter/drift": "workspace:*"
-  },
-  "license": "Apache-2.0"
+    "name":  "@charter/cli",
+    "version":  "0.1.0",
+    "description":  "Charter CLI — repo-level governance checks",
+    "bin":  {
+                "charter":  "./dist/bin.js"
+            },
+    "main":  "./dist/index.js",
+    "types":  "./src/index.ts",
+    "scripts":  {
+                    "build":  "pnpm exec tsc -p tsconfig.json"
+                },
+    "dependencies":  {
+                         "@charter/types":  "workspace:*",
+                         "@charter/core":  "workspace:*",
+                         "@charter/git":  "workspace:*",
+                         "@charter/classify":  "workspace:*",
+                         "@charter/validate":  "workspace:*",
+                         "@charter/drift":  "workspace:*"
+                     },
+    "license":  "Apache-2.0"
 }
