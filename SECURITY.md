@@ -8,23 +8,25 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Charter Kit, please report it responsibly.
+If you discover a security issue in Charter Kit, report it responsibly.
 
-**Do NOT open a public GitHub issue for security vulnerabilities.**
+Do not open a public GitHub issue for vulnerabilities.
 
-Instead, email: **security@stackbilt.dev**
+Email: **admin@stackbilt.dev**
 
 Include:
-- Description of the vulnerability
-- Steps to reproduce
+- Vulnerability description
+- Reproduction steps
 - Potential impact
-- Suggested fix (if any)
+- Suggested mitigation (if available)
 
-We will acknowledge receipt within 48 hours and aim to provide a fix within 7 days for critical issues.
+Response targets:
+- Acknowledge within 48 hours
+- Critical-issue fix target within 7 days
 
 ## Scope
 
-This policy covers the open-source Charter Kit packages only:
+This policy covers Charter Kit OSS packages:
 - `@charter/types`
 - `@charter/core`
 - `@charter/git`
@@ -34,12 +36,12 @@ This policy covers the open-source Charter Kit packages only:
 - `@charter/cli`
 - `@charter/ci`
 
-For issues with CSA Cloud (the hosted platform), contact **support@stackbilt.dev**.
+For CSA Cloud issues, contact **support@stackbilt.dev**.
 
 ## Security Design
 
-The Kit is designed with a minimal attack surface:
-- **No network calls** — works fully offline by default
-- **No secrets handling** — the Kit never processes API keys or tokens
-- **No code execution** — pattern matching uses regex only, no eval()
-- **Input sanitization** — all user input is sanitized before processing
+The kit is intentionally minimal:
+- No network calls by default (offline runtime)
+- No secrets handling in normal operation
+- No dynamic code execution (`eval`-style behavior)
+- Input sanitization before processing
