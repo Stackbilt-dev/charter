@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo '[pre-commit] Running TypeScript check (pnpm exec tsc --noEmit)...'
+pnpm exec tsc --noEmit
