@@ -1,0 +1,59 @@
+# Charter Governance Check
+#
+# Drop this workflow into any repo with a .charter/ directory.
+# It runs governance checks on every PR and posts results as annotations.
+#
+# Prerequisites:
+#   1. Run `npx @charter/cli init` in your repo to create .charter/
+#   2. Copy this file to .github/workflows/governance.yml
+#
+# Configuration:
+#   Edit .charter/config.json to adjust thresholds and behavior.
+
+name: Governance Check
+
+on:
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  governance:
+    name: Charter
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for commit analysis
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Charter CLI
+        run: npm install -g @charter/cli
+
+      - name: Validate Commits
+        run: charter validate --ci --format text
+
+      - name: Drift Scan
+        run: charter drift --ci --format text
+        if: hashFiles('.charter/patterns/*.json') != ''
+
+      - name: Audit Report
+        run: charter audit --format json > /tmp/audit.json
+        if: always()
+
+      - name: Post Summary
+        if: always()
+        run: |
+          echo "## Charter Governance Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f /tmp/audit.json ]; then
+            SCORE=$(cat /tmp/audit.json | jq -r '.score.overall')
+            echo "**Governance Score:** ${SCORE}/100" >> $GITHUB_STEP_SUMMARY
+          fi

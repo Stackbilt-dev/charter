@@ -1,0 +1,18 @@
+{
+  "name": "charter",
+  "private": true,
+  "description": "Charter Governance Kit — repo-adoptable governance checks for any project",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc --build packages/*/tsconfig.json",
+    "clean": "rm -rf packages/*/dist",
+    "typecheck": "tsc --build --noEmit packages/*/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "typescript": "~5.8.2",
+    "zod": "^3.24.1"
+  }
+}

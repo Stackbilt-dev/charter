@@ -1,0 +1,106 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.2.3
+        version: 25.2.3
+      typescript:
+        specifier: ~5.8.2
+        version: 5.8.3
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
+  packages/ci:
+    dependencies:
+      '@charter/types':
+        specifier: workspace:*
+        version: link:../types
+
+  packages/classify:
+    dependencies:
+      '@charter/types':
+        specifier: workspace:*
+        version: link:../types
+
+  packages/cli:
+    dependencies:
+      '@charter/classify':
+        specifier: workspace:*
+        version: link:../classify
+      '@charter/core':
+        specifier: workspace:*
+        version: link:../core
+      '@charter/drift':
+        specifier: workspace:*
+        version: link:../drift
+      '@charter/git':
+        specifier: workspace:*
+        version: link:../git
+      '@charter/types':
+        specifier: workspace:*
+        version: link:../types
+      '@charter/validate':
+        specifier: workspace:*
+        version: link:../validate
+
+  packages/core:
+    dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
+  packages/drift:
+    dependencies:
+      '@charter/types':
+        specifier: workspace:*
+        version: link:../types
+
+  packages/git:
+    dependencies:
+      '@charter/types':
+        specifier: workspace:*
+        version: link:../types
+
+  packages/types: {}
+
+  packages/validate:
+    dependencies:
+      '@charter/types':
+        specifier: workspace:*
+        version: link:../types
+
+packages:
+
+  '@types/node@25.2.3':
+    resolution: {integrity: sha512-m0jEgYlYz+mDJZ2+F4v8D1AyQb+QzsNqRuI7xg1VQX/KlKS0qT9r1Mo16yo5F/MtifXFgaofIFsdFMox2SxIbQ==}
+
+  typescript@5.8.3:
+    resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@7.16.0:
+    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
+snapshots:
+
+  '@types/node@25.2.3':
+    dependencies:
+      undici-types: 7.16.0
+
+  typescript@5.8.3: {}
+
+  undici-types@7.16.0: {}
+
+  zod@3.25.76: {}

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "references": [
+    { "path": "../types" },
+    { "path": "../core" },
+    { "path": "../git" },
+    { "path": "../classify" },
+    { "path": "../validate" },
+    { "path": "../drift" }
+  ],
+  "include": ["src/**/*.ts"]
+}

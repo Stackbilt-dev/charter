@@ -1,0 +1,14 @@
+{
+  "name": "@charter/drift",
+  "version": "0.1.0",
+  "description": "Drift scanner — detects codebase divergence from governance patterns",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@charter/types": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}
