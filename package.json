@@ -8,12 +8,16 @@
   "scripts": {
     "build": "pnpm exec tsc --build packages/types/tsconfig.json packages/core/tsconfig.json packages/git/tsconfig.json packages/classify/tsconfig.json packages/validate/tsconfig.json packages/drift/tsconfig.json packages/ci/tsconfig.json packages/cli/tsconfig.json",
     "clean": "node -e \"const fs=require('fs');const path=require('path');for(const e of fs.readdirSync('packages',{withFileTypes:true}).filter(x=>x.isDirectory())){const dir=path.join('packages',e.name);fs.rmSync(path.join(dir,'dist'),{recursive:true,force:true});fs.rmSync(path.join(dir,'tsconfig.tsbuildinfo'),{force:true});}\"",
-    "typecheck": "pnpm exec tsc --build --noEmit packages/types/tsconfig.json packages/core/tsconfig.json packages/git/tsconfig.json packages/classify/tsconfig.json packages/validate/tsconfig.json packages/drift/tsconfig.json packages/ci/tsconfig.json packages/cli/tsconfig.json"
+    "typecheck": "pnpm exec tsc --build --noEmit packages/types/tsconfig.json packages/core/tsconfig.json packages/git/tsconfig.json packages/classify/tsconfig.json packages/validate/tsconfig.json packages/drift/tsconfig.json packages/ci/tsconfig.json packages/cli/tsconfig.json",
+    "test": "pnpm exec vitest run",
+    "test:watch": "pnpm exec vitest",
+    "test:coverage": "pnpm exec vitest run --coverage"
   },
   "packageManager": "pnpm@9.15.9",
   "devDependencies": {
     "@types/node": "^25.2.3",
     "typescript": "~5.8.2",
+    "vitest": "^4.0.18",
     "zod": "^3.24.1"
   }
 }
