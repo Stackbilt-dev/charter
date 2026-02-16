@@ -1,6 +1,6 @@
 {
   "name": "@charter/validate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Citation validation, message classification, and governance checks",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,7 +20,7 @@
   "bugs": { "url": "https://github.com/Stackbilt-dev/charter/issues" },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@charter/types": "workspace:*"
+    "@charter/types": "0.1.1"
   },
   "license": "Apache-2.0"
 }
