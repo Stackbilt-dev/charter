@@ -4,8 +4,8 @@
 # It runs governance checks on every PR and posts results as annotations.
 #
 # Prerequisites:
-#   1. Run `npx @charter/cli init` in your repo to create .charter/
-#   2. Copy this file to .github/workflows/governance.yml
+#   1. Run `npx @charter/cli setup --ci github` in your repo
+#   2. Or copy this file to .github/workflows/governance.yml
 #
 # Configuration:
 #   Edit .charter/config.json to adjust thresholds and behavior.
