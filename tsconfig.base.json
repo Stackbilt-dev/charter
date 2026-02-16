@@ -1,8 +1,19 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@charter/types": ["packages/types"],
+      "@charter/core": ["packages/core"],
+      "@charter/git": ["packages/git"],
+      "@charter/classify": ["packages/classify"],
+      "@charter/validate": ["packages/validate"],
+      "@charter/drift": ["packages/drift"],
+      "@charter/ci": ["packages/ci"],
+      "@charter/cli": ["packages/cli"]
+    },
     "lib": ["ES2022"],
     "types": ["node"],
     "declaration": true,
