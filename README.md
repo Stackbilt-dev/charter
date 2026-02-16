@@ -1,14 +1,63 @@
 # Charter Kit
 
-Repo-adoptable governance checks for any project. Charter runs locally and in CI with no cloud dependency, and supports both human and LM-agent workflows.
+Charter is a local-first governance toolkit for software repos. It works in both terminal-first human workflows and deterministic CI/agent workflows.
 
-## What It Does
+## Why Charter
 
-- Validates governance trailers (`Governed-By`, `Resolves-Request`) on commits
-- Scores commit risk and flags unlinked high-risk changes
-- Scans for drift against blessed stack patterns
-- Classifies change scope as `SURFACE`, `LOCAL`, or `CROSS_CUTTING`
-- Emits deterministic JSON for automation and agent integration
+- Validate governance trailers like `Governed-By` and `Resolves-Request`
+- Score commit risk and flag high-risk ungoverned changes
+- Detect stack drift against blessed patterns
+- Classify change scope as `SURFACE`, `LOCAL`, or `CROSS_CUTTING`
+- Produce stable JSON output for automation
+
+## Choose Your Path
+
+### Human Path (Local Text Output)
+
+```bash
+pnpm install
+pnpm run build
+node packages/cli/dist/bin.js setup --yes
+node packages/cli/dist/bin.js doctor
+node packages/cli/dist/bin.js validate
+node packages/cli/dist/bin.js drift
+node packages/cli/dist/bin.js audit
+```
+
+### CI/Agent Path (Deterministic JSON)
+
+```bash
+pnpm install
+pnpm run build
+node packages/cli/dist/bin.js setup --ci github --yes
+node packages/cli/dist/bin.js doctor --format json --ci
+node packages/cli/dist/bin.js validate --format json --ci
+node packages/cli/dist/bin.js drift --format json --ci
+node packages/cli/dist/bin.js audit --format json --ci
+```
+
+## Command Reference
+
+- `charter setup [--ci github]`: scaffold `.charter/` and optional workflow
+- `charter init`: scaffold `.charter/` templates only
+- `charter doctor`: validate environment/config state
+- `charter validate [--ci]`: validate commit governance and citations
+- `charter drift [--path <dir>] [--ci]`: run drift scan
+- `charter audit [--ci]`: produce governance audit summary
+- `charter classify <subject>`: classify change scope heuristically
+
+Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
+
+## Exit Code Contract
+
+- `0`: success/pass
+- `1`: policy violation in CI mode
+- `2`: runtime/config/usage error
+
+## CI Integration
+
+- Reusable template in this repo: `.github/workflows/governance.yml`
+- Generated in target repos by `charter setup --ci github`: `.github/workflows/charter-governance.yml`
 
 ## Workspace Layout
 
@@ -17,74 +66,26 @@ packages/
   types/      Shared contracts
   core/       Schemas, sanitization, errors
   git/        Trailer parsing and risk scoring
-  classify/   Heuristic change classification
-  validate/   Citation and governance validation
+  classify/   Heuristic classification
+  validate/   Governance validation
   drift/      Pattern drift scanning
   cli/        `charter` command
   ci/         GitHub Actions integration helpers
 ```
 
-## Quickstart (Local)
-
-```bash
-pnpm install
-pnpm run build
-node packages/cli/dist/bin.js setup --ci github
-```
-
-Then run checks:
-
-```bash
-node packages/cli/dist/bin.js doctor --format json
-node packages/cli/dist/bin.js validate --format text
-node packages/cli/dist/bin.js drift --format text
-node packages/cli/dist/bin.js audit --format json
-```
-
-## CLI Commands
-
-- `charter setup [--ci github]`: bootstrap `.charter/` and optional GitHub workflow
-- `charter init`: scaffold `.charter/` templates only
-- `charter doctor`: environment/config health check
-- `charter validate [--ci]`: validate commit governance
-- `charter drift [--path <dir>] [--ci]`: run drift scan
-- `charter audit [--ci]`: generate governance audit
-- `charter classify <subject>`: classify change scope
-
-Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
-
-## Human Mode vs Agent Mode
-
-- Human mode: default text output with remediation hints.
-- Agent mode: use `--format json --ci` for stable structured output + deterministic exit codes.
-
-Exit codes:
-- `0`: pass/success
-- `1`: policy violation in CI mode (`WARN`/`FAIL` threshold reached)
-- `2`: runtime/config/usage error
-
 ## Development
 
-- `pnpm run build`: build all packages
-- `pnpm run typecheck`: strict type-check across workspace
-- `pnpm run clean`: remove build outputs and TypeScript build state
+- `pnpm run clean`
+- `pnpm run typecheck`
+- `pnpm run build`
+- `pnpm run test`
 
-## CI Integration
+## Release Docs
 
-- Template workflow in this repo: `.github/workflows/governance.yml`
-- Auto-generated per-target-repo workflow: `.github/workflows/charter-governance.yml` via `charter setup --ci github`
-
-## Contributing and Security
-
-See `CONTRIBUTING.md` for contribution standards and commit format. Report vulnerabilities via `SECURITY.md`.
-
-## Additional Docs
-
-- `AGENTS.md`: contributor/agent repository guidelines
-- `TESTPLAN.md`: pre-release and regression test matrix
-- `PUBLISHING.md`: npm release process and rollback steps
-- `CHANGELOG.md`: release history and user-visible changes
-- `HANDOFF_LM.md`: implementation handoff for collaborating LM teams
+- `PUBLISHING.md`: first release/publish workflow
+- `CHANGELOG.md`: user-visible change history
+- `CONTRIBUTING.md`: contribution conventions
+- `SECURITY.md`: vulnerability reporting
 
 ## License
 

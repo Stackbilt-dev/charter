@@ -1,6 +1,6 @@
 # Publishing Guide
 
-This document defines the release process for Charter Kit packages.
+This is the operator runbook for publishing Charter packages to npm.
 
 ## Scope
 
@@ -16,31 +16,58 @@ Publishable packages:
 
 Repository root package (`charter`) is private and must not be published.
 
-## Release Prerequisites
+## Phase 1: Preflight (You Run This)
 
-1. Clean working tree (`git status` has no unintended changes).
-2. Authenticated npm session (`npm whoami`).
-3. All docs updated for behavior changes.
-4. Validation commands pass:
+1. Ensure clean working tree:
+
+```bash
+git status
+```
+
+2. Ensure npm auth:
+
+```bash
+npm whoami
+```
+
+3. Ensure release gates pass:
 
 ```bash
 pnpm install
 pnpm run clean
 pnpm run typecheck
 pnpm run build
+pnpm run test
 ```
 
-## Versioning Strategy
+## Phase 2: Version and Dependency Prep
 
-Use synchronized versions for all `@charter/*` packages until independent versioning is intentionally introduced.
+Use one synchronized version for all `@charter/*` packages until multi-version strategy is introduced.
 
-1. Bump versions in `packages/*/package.json`.
-2. Replace `workspace:*` with matching semver versions for publish.
-3. Verify dependency graph consistency (especially `@charter/cli` internal deps).
+1. Set new version in each `packages/*/package.json`.
+2. Replace internal `workspace:*` dependencies with the same concrete version.
+3. Confirm no `workspace:*` remains:
 
-## Pre-Publish Verification
+```bash
+rg -n "workspace:\\*" packages -g "package.json"
+```
 
-Run from repo root:
+## Phase 3: Artifact Validation (Required)
+
+1. Dry-run packed contents per package:
+
+```bash
+pnpm --filter @charter/types pack --dry-run
+pnpm --filter @charter/core pack --dry-run
+pnpm --filter @charter/git pack --dry-run
+pnpm --filter @charter/classify pack --dry-run
+pnpm --filter @charter/validate pack --dry-run
+pnpm --filter @charter/drift pack --dry-run
+pnpm --filter @charter/ci pack --dry-run
+pnpm --filter @charter/cli pack --dry-run
+```
+
+2. Verify CLI behavior before publish:
 
 ```bash
 node packages/cli/dist/bin.js --help
@@ -51,20 +78,13 @@ node packages/cli/dist/bin.js drift --format json
 node packages/cli/dist/bin.js audit --format json
 ```
 
-Expected:
-- Commands run without runtime errors.
-- JSON output is valid and stable.
-- Exit codes follow contract (`0`, `1`, `2`).
+## Phase 4: Publish (Dependency Order)
 
-## Publish Steps
-
-Publish packages in dependency order:
+Publish in this order:
 
 1. `@charter/types`
 2. `@charter/core`, `@charter/git`, `@charter/classify`, `@charter/validate`, `@charter/drift`, `@charter/ci`
 3. `@charter/cli`
-
-Example (per package):
 
 ```bash
 pnpm --filter @charter/types publish --access public
@@ -77,7 +97,7 @@ pnpm --filter @charter/ci publish --access public
 pnpm --filter @charter/cli publish --access public
 ```
 
-## Post-Publish Validation
+## Phase 5: Post-Publish Verification
 
 In a clean external repo:
 
@@ -88,25 +108,25 @@ npx @charter/cli@latest validate --format json --ci
 ```
 
 Confirm:
-- `.charter/` scaffold exists
-- workflow file is generated when requested
-- CLI behavior matches docs
+- `.charter/` scaffold exists.
+- workflow file is generated when requested.
+- behavior matches docs and exit-code contract.
 
 ## Release Artifacts
 
-After publish:
+After successful publish:
 1. Create git tag (for example `v0.1.1`).
-2. Add release notes summarizing user-visible changes.
-3. Include migration notes for any breaking behavior.
+2. Publish release notes summarizing user-visible changes.
+3. Update `CHANGELOG.md`.
 
-## Rollback Strategy
+## Rollback
 
-If a bad version is published:
+If a bad version ships:
 1. Publish a patch fix immediately.
-2. Deprecate broken package version(s):
+2. Deprecate broken version(s):
 
 ```bash
 npm deprecate @charter/cli@<bad_version> "Broken release: use <fixed_version>"
 ```
 
-3. Update release notes with the corrective version.
+3. Call out corrective version in release notes.

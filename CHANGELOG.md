@@ -7,13 +7,15 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- Placeholder for unreleased features.
+- First-release publishing runbook with phased preflight, artifact validation, publish order, and rollback guidance.
 
 ### Changed
-- Placeholder for unreleased behavior changes.
+- README reorganized around two onboarding paths: human terminal flow and CI/agent JSON flow.
+- Root scripts now execute through `bash -lc "pnpm exec ..."` for more reliable local execution in this environment.
+- Vitest config moved to `vitest.config.mts` for ESM-safe test startup.
 
 ### Fixed
-- Placeholder for unreleased bug fixes.
+- Removed stale references to private/local-only planning docs from public-facing README.
 
 ### Security
 - Placeholder for unreleased security updates.
