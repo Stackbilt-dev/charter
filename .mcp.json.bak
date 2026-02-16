@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "edge-stack-architect": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "mcp-remote",
+        "https://edge-stack-architect-prod.kurt-5be.workers.dev/mcp?token=67C53C0B5715C54C115F435E571182BF"
+      ]
+    },
+    "digital-csa": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "mcp-remote",
+        "https://digital-csa.kurt-5be.workers.dev/mcp?token=e37b69efe7954bbf5eafab29fbde62f7808e2811c7c17fa539ba409a6d3b55be"
+      ]
+    },
+    "img-forge": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://img-forge-mcp.kurt-543.workers.dev/mcp",
+        "--header",
+        "Authorization: Bearer 32c0995c3f56641f298900f5dabba03e57b5dc4e265d9a4af517269454e2fd10"
+      ]
+    }
+  }
+}
