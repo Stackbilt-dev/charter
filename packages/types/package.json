@@ -1,6 +1,6 @@
 {
   "name": "@charter/types",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared type definitions for the Charter Kit",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
