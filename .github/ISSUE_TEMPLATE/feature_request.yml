@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a new capability or improvement
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem first, then the proposed solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user workflow is blocked or inefficient?
+      placeholder: As a maintainer/user/agent, I need...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should change?
+      placeholder: Add/modify command(s), output schema, docs, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: Other approaches and why they are less suitable.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and risks
+      description: Note effects on CLI compatibility, CI behavior, or agent contracts.
+      placeholder: Potential breaking changes, migration notes, rollout plan.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checklist
+      options:
+        - label: This request fits Charter Kit (offline, heuristic, local/CI governance logic).
+          required: true
+        - label: This request does not require CSA Cloud-only features.
+          required: true
