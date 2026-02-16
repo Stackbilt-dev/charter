@@ -2,11 +2,23 @@
   "name": "@charter/validate",
   "version": "0.1.0",
   "description": "Citation validation, message classification, and governance checks",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=18.0.0" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Stackbilt-dev/charter.git",
+    "directory": "packages/validate"
+  },
+  "bugs": { "url": "https://github.com/Stackbilt-dev/charter/issues" },
+  "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
     "@charter/types": "workspace:*"
   },
