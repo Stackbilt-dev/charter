@@ -8,6 +8,7 @@
 import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import type { CLIOptions } from '../index';
+import { EXIT_CODE } from '../index';
 import { loadConfig, loadPatterns } from '../config';
 import { parseAllTrailers } from '@charter/git';
 import { assessCommitRisk } from '@charter/git';
@@ -43,7 +44,7 @@ interface AuditReport {
   };
 }
 
-export async function auditCommand(options: CLIOptions): Promise<void> {
+export async function auditCommand(options: CLIOptions): Promise<number> {
   const config = loadConfig(options.configPath);
   const patterns = loadPatterns(options.configPath);
 
@@ -56,8 +57,10 @@ export async function auditCommand(options: CLIOptions): Promise<void> {
   }
 
   if (options.ciMode && report.score.overall < 50) {
-    process.exit(1);
+    return EXIT_CODE.POLICY_VIOLATION;
   }
+
+  return EXIT_CODE.SUCCESS;
 }
 
 function generateAuditReport(
@@ -65,13 +68,12 @@ function generateAuditReport(
   configPath: string,
   patterns: Array<{ name: string; category: string; status: string }>
 ): AuditReport {
-  // Git analysis (last 50 commits)
   const commits = getRecentCommits(50);
   const parsed = parseAllTrailers(commits);
 
   const linkedCommits = new Set<string>();
-  parsed.governedBy.forEach(t => linkedCommits.add(t.commitSha));
-  parsed.resolvesRequest.forEach(t => linkedCommits.add(t.commitSha));
+  parsed.governedBy.forEach((t) => linkedCommits.add(t.commitSha));
+  parsed.resolvesRequest.forEach((t) => linkedCommits.add(t.commitSha));
 
   let highRiskUnlinked = 0;
   for (const commit of commits) {
@@ -85,23 +87,20 @@ function generateAuditReport(
     ? Math.round((linkedCommits.size / commits.length) * 100)
     : 0;
 
-  // Pattern analysis
-  const activePatterns = patterns.filter(p => p.status === 'ACTIVE');
+  const activePatterns = patterns.filter((p) => p.status === 'ACTIVE');
   const categories: Record<string, number> = {};
   for (const p of activePatterns) {
     categories[p.category] = (categories[p.category] || 0) + 1;
   }
 
-  // Policy files
   const policiesDir = `${configPath}/policies`;
   const policyFiles = fs.existsSync(policiesDir)
-    ? fs.readdirSync(policiesDir).filter(f => f.endsWith('.md'))
+    ? fs.readdirSync(policiesDir).filter((f) => f.endsWith('.md'))
     : [];
 
-  // Score calculation
-  const trailerScore = Math.min(100, coveragePercent * 1.5); // Weight trailer coverage
-  const patternScore = Math.min(100, activePatterns.length * 20); // 5+ patterns = 100
-  const policyScore = Math.min(100, policyFiles.length * 33); // 3+ policies = 100
+  const trailerScore = Math.min(100, coveragePercent * 1.5);
+  const patternScore = Math.min(100, activePatterns.length * 20);
+  const policyScore = Math.min(100, policyFiles.length * 33);
 
   const overall = Math.round((trailerScore * 0.5) + (patternScore * 0.3) + (policyScore * 0.2));
 
@@ -114,8 +113,8 @@ function generateAuditReport(
       commitsWithTrailers: linkedCommits.size,
       coveragePercent,
       highRiskUnlinked,
-      governedByRefs: parsed.governedBy.map(t => t.reference),
-      resolvesRequestRefs: parsed.resolvesRequest.map(t => t.reference),
+      governedByRefs: parsed.governedBy.map((t) => t.reference),
+      resolvesRequestRefs: parsed.resolvesRequest.map((t) => t.reference),
     },
     patterns: {
       total: patterns.length,
@@ -137,45 +136,36 @@ function generateAuditReport(
 }
 
 function printReport(report: AuditReport): void {
-  const scoreIcon = report.score.overall >= 70 ? '✅'
-    : report.score.overall >= 40 ? '⚠️'
-    : '❌';
+  const scoreIcon = report.score.overall >= 70 ? '[ok]'
+    : report.score.overall >= 40 ? '[warn]'
+    : '[fail]';
 
-  console.log(`
-  ╔═══════════════════════════════════════════╗
-  ║       Charter Governance Audit        ║
-  ╠═══════════════════════════════════════════╣
-  ║  Project: ${report.project.padEnd(32)}║
-  ║  Score:   ${scoreIcon} ${String(report.score.overall).padEnd(29)}║
-  ╚═══════════════════════════════════════════╝
-
-  Git Governance Coverage
-  ─────────────────────────
-    Commits analyzed:     ${report.git.totalCommits}
-    With trailers:        ${report.git.commitsWithTrailers} (${report.git.coveragePercent}%)
-    High-risk unlinked:   ${report.git.highRiskUnlinked}
-    Governed-By refs:     ${report.git.governedByRefs.length}
-    Resolves-Request:     ${report.git.resolvesRequestRefs.length}
-
-  Blessed Stack Patterns
-  ─────────────────────────
-    Total defined:        ${report.patterns.total}
-    Active:               ${report.patterns.active}
-    Categories:           ${Object.entries(report.patterns.categories).map(([k, v]) => `${k}(${v})`).join(', ') || 'none'}
-
-  Policy Documentation
-  ─────────────────────────
-    Policy files:         ${report.policies.files.length}
-    ${report.policies.files.map(f => `  - ${f}`).join('\n    ') || '    (none)'}
-
-  Score Breakdown
-  ─────────────────────────
-    Trailer coverage:     ${report.score.breakdown.trailerCoverage}/100  (50% weight)
-    Pattern definitions:  ${report.score.breakdown.patternDefinitions}/100  (30% weight)
-    Policy documentation: ${report.score.breakdown.policyDocumentation}/100  (20% weight)
-    ──────────────────
-    Overall:              ${report.score.overall}/100
-`);
+  console.log('');
+  console.log('  Charter Governance Audit');
+  console.log(`  Project: ${report.project}`);
+  console.log(`  Score:   ${scoreIcon} ${report.score.overall}/100`);
+  console.log('');
+  console.log('  Git Governance Coverage');
+  console.log(`    Commits analyzed:   ${report.git.totalCommits}`);
+  console.log(`    With trailers:      ${report.git.commitsWithTrailers} (${report.git.coveragePercent}%)`);
+  console.log(`    High-risk unlinked: ${report.git.highRiskUnlinked}`);
+  console.log('');
+  console.log('  Blessed Stack Patterns');
+  console.log(`    Total defined:      ${report.patterns.total}`);
+  console.log(`    Active:             ${report.patterns.active}`);
+  console.log(`    Categories:         ${Object.entries(report.patterns.categories).map(([k, v]) => `${k}(${v})`).join(', ') || 'none'}`);
+  console.log('');
+  console.log('  Policy Documentation');
+  console.log(`    Policy files:       ${report.policies.files.length}`);
+  for (const file of report.policies.files) {
+    console.log(`    - ${file}`);
+  }
+  console.log('');
+  console.log('  Score Breakdown');
+  console.log(`    Trailer coverage:     ${report.score.breakdown.trailerCoverage}/100 (50% weight)`);
+  console.log(`    Pattern definitions:  ${report.score.breakdown.patternDefinitions}/100 (30% weight)`);
+  console.log(`    Policy documentation: ${report.score.breakdown.policyDocumentation}/100 (20% weight)`);
+  console.log('');
 }
 
 function getRecentCommits(count: number): GitCommit[] {
@@ -189,7 +179,7 @@ function getRecentCommits(count: number): GitCommit[] {
     const entries = log.split('---END---');
 
     for (const entry of entries) {
-      const lines = entry.trim().split('\n').filter(l => l.trim());
+      const lines = entry.trim().split('\n').filter((l) => l.trim());
       if (lines.length === 0) continue;
 
       const firstLine = lines[0];

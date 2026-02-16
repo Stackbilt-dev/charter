@@ -7,6 +7,7 @@
 
 import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
+import { EXIT_CODE } from '../index';
 import type { GitCommit } from '@charter/types';
 import { loadConfig } from '../config';
 import { parseAllTrailers } from '@charter/git';
@@ -21,16 +22,19 @@ interface LocalValidationResult {
   suggestions: string[];
 }
 
-export async function validateCommand(options: CLIOptions, args: string[]): Promise<void> {
+export async function validateCommand(options: CLIOptions, args: string[]): Promise<number> {
   const config = loadConfig(options.configPath);
 
-  // Get commit range
   const range = getCommitRange(args);
   const commits = getGitCommits(range);
 
   if (commits.length === 0) {
-    console.log('  No commits to validate.');
-    return;
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ status: 'PASS', summary: 'No commits to validate.' }, null, 2));
+    } else {
+      console.log('  No commits to validate.');
+    }
+    return EXIT_CODE.SUCCESS;
   }
 
   const result = validateCommits(commits, config.git.trailerThreshold);
@@ -42,8 +46,10 @@ export async function validateCommand(options: CLIOptions, args: string[]): Prom
   }
 
   if (options.ciMode && (result.status === 'FAIL' || (config.ci.failOnWarn && result.status === 'WARN'))) {
-    process.exit(1);
+    return EXIT_CODE.POLICY_VIOLATION;
   }
+
+  return EXIT_CODE.SUCCESS;
 }
 
 function validateCommits(
@@ -52,12 +58,10 @@ function validateCommits(
 ): LocalValidationResult {
   const parsed = parseAllTrailers(commits);
 
-  // Track which commits have trailers
   const linkedCommits = new Set<string>();
-  parsed.governedBy.forEach(t => linkedCommits.add(t.commitSha));
-  parsed.resolvesRequest.forEach(t => linkedCommits.add(t.commitSha));
+  parsed.governedBy.forEach((t) => linkedCommits.add(t.commitSha));
+  parsed.resolvesRequest.forEach((t) => linkedCommits.add(t.commitSha));
 
-  // Find unlinked commits and assess risk
   const unlinked: Array<{ sha: string; message: string; risk: string }> = [];
   let highRiskUnlinked = 0;
 
@@ -76,16 +80,15 @@ function validateCommits(
     }
   }
 
-  // Build suggestions using the kit's generateSuggestions
   const trailers = {
-    governed_by: parsed.governedBy.map(t => ({
+    governed_by: parsed.governedBy.map((t) => ({
       commit_sha: t.commitSha,
       reference: t.reference,
-      valid: true, // Can't validate without DB — mark as valid locally
+      valid: true,
       resolved_id: null,
       ledger_entry_id: null,
     })),
-    resolves_request: parsed.resolvesRequest.map(t => ({
+    resolves_request: parsed.resolvesRequest.map((t) => ({
       commit_sha: t.commitSha,
       reference: t.reference,
       valid: true,
@@ -94,7 +97,7 @@ function validateCommits(
     })),
   };
 
-  const unlinkedForSuggestions = unlinked.map(u => ({
+  const unlinkedForSuggestions = unlinked.map((u) => ({
     sha: u.sha,
     short_sha: u.sha.slice(0, 7),
     message_first_line: u.message.slice(0, 72),
@@ -106,7 +109,6 @@ function validateCommits(
 
   const suggestions = generateSuggestions(trailers, unlinkedForSuggestions, commits.length);
 
-  // Determine status
   let status: 'PASS' | 'WARN' | 'FAIL';
   if (highRiskUnlinked > 0) {
     status = 'FAIL';
@@ -131,7 +133,7 @@ function validateCommits(
 }
 
 function printResult(result: LocalValidationResult): void {
-  const icon = result.status === 'PASS' ? '✅' : result.status === 'WARN' ? '⚠️' : '❌';
+  const icon = result.status === 'PASS' ? '[ok]' : result.status === 'WARN' ? '[warn]' : '[fail]';
 
   console.log(`\n  ${icon} ${result.status}: ${result.summary}`);
   console.log(`     Commits: ${result.commits} | Trailers found: ${result.trailersFound}`);
@@ -148,13 +150,11 @@ function printResult(result: LocalValidationResult): void {
 }
 
 function getCommitRange(args: string[]): string {
-  // Check for explicit range
   const rangeIdx = args.indexOf('--range');
   if (rangeIdx !== -1 && rangeIdx + 1 < args.length) {
     return args[rangeIdx + 1];
   }
 
-  // Default: commits on current branch not on main/master
   try {
     const mainBranch = execSync('git rev-parse --verify main 2>/dev/null || git rev-parse --verify master 2>/dev/null', {
       encoding: 'utf-8',
@@ -162,13 +162,11 @@ function getCommitRange(args: string[]): string {
     const currentBranch = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
 
     if (mainBranch === currentBranch) {
-      // On main — validate last 5 commits
       return 'HEAD~5..HEAD';
     }
 
     return `${mainBranch}..HEAD`;
   } catch {
-    // Fallback: last 5 commits
     return 'HEAD~5..HEAD';
   }
 }
@@ -185,7 +183,6 @@ function getGitCommits(range: string): GitCommit[] {
 
     for (const line of log.split('\n')) {
       if (line.includes('|') && line.length > 40) {
-        // New commit line: sha|author|timestamp|subject
         if (current) commits.push(current);
         const [sha, author, timestamp, ...msgParts] = line.split('|');
         current = {
@@ -196,7 +193,6 @@ function getGitCommits(range: string): GitCommit[] {
           files_changed: [],
         };
       } else if (line.trim() && current) {
-        // File changed line
         current.files_changed!.push(line.trim());
       }
     }

@@ -1,41 +1,47 @@
 /**
  * charter drift
  *
- * Scans files for governance drift — codebase patterns that violate
+ * Scans files for governance drift - codebase patterns that violate
  * the blessed stack defined in .charter/patterns/.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
+import { EXIT_CODE } from '../index';
 import { loadConfig, loadPatterns } from '../config';
 import { scanForDrift } from '@charter/drift';
 import type { DriftReport } from '@charter/types';
 
-export async function driftCommand(options: CLIOptions, args: string[]): Promise<void> {
+export async function driftCommand(options: CLIOptions, args: string[]): Promise<number> {
   const config = loadConfig(options.configPath);
 
   if (!config.drift.enabled) {
     console.log('  Drift scanning is disabled in config.');
-    return;
+    return EXIT_CODE.SUCCESS;
   }
 
   const patterns = loadPatterns(options.configPath);
   if (patterns.length === 0) {
-    console.log('  No patterns defined in .charter/patterns/');
-    console.log('  Run: charter init  to create example patterns.');
-    return;
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ status: 'WARN', summary: 'No patterns defined.' }, null, 2));
+    } else {
+      console.log('  No patterns defined in .charter/patterns/');
+      console.log('  Run: charter init to create example patterns.');
+    }
+    return options.ciMode ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
   }
 
-  // Determine scan path
   const scanPath = getFlag(args, '--path') || '.';
-
-  // Collect files to scan
   const files = collectFiles(scanPath, config.drift.include, config.drift.exclude);
 
   if (Object.keys(files).length === 0) {
-    console.log('  No files matched the scan criteria.');
-    return;
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ status: 'WARN', summary: 'No files matched the scan criteria.' }, null, 2));
+    } else {
+      console.log('  No files matched the scan criteria.');
+    }
+    return options.ciMode ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
   }
 
   const report = scanForDrift(files, patterns);
@@ -47,12 +53,14 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
   }
 
   if (options.ciMode && report.score < config.drift.minScore) {
-    process.exit(1);
+    return EXIT_CODE.POLICY_VIOLATION;
   }
+
+  return EXIT_CODE.SUCCESS;
 }
 
 function printReport(report: DriftReport, minScore: number): void {
-  const icon = report.score >= minScore ? '✅' : '❌';
+  const icon = report.score >= minScore ? '[ok]' : '[fail]';
   const pct = Math.round(report.score * 100);
 
   console.log(`\n  ${icon} Drift Score: ${pct}% (threshold: ${Math.round(minScore * 100)}%)`);
@@ -61,7 +69,6 @@ function printReport(report: DriftReport, minScore: number): void {
   if (report.violations.length > 0) {
     console.log(`\n  Violations (${report.violations.length}):`);
 
-    // Group by pattern
     const grouped = new Map<string, typeof report.violations>();
     for (const v of report.violations) {
       const existing = grouped.get(v.patternName) || [];
@@ -72,7 +79,7 @@ function printReport(report: DriftReport, minScore: number): void {
     for (const [pattern, violations] of grouped) {
       console.log(`\n    Pattern: ${pattern}`);
       for (const v of violations.slice(0, 5)) {
-        console.log(`      ${v.file}:${v.line} — ${v.snippet}`);
+        console.log(`      ${v.file}:${v.line} - ${v.snippet}`);
       }
       if (violations.length > 5) {
         console.log(`      ... and ${violations.length - 5} more`);
@@ -85,10 +92,6 @@ function printReport(report: DriftReport, minScore: number): void {
   console.log('');
 }
 
-/**
- * Collect files to scan from the filesystem.
- * Simple implementation — matches by extension from include patterns.
- */
 function collectFiles(
   rootPath: string,
   include: string[],
@@ -121,7 +124,7 @@ function collectFiles(
             const content = fs.readFileSync(fullPath, 'utf-8');
             files[relPath] = content;
           } catch {
-            // Skip unreadable files
+            // Skip unreadable files.
           }
         }
       }

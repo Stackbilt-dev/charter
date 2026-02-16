@@ -7,56 +7,92 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
+import { EXIT_CODE } from '../index';
 import { getDefaultConfigJSON } from '../config';
 
 const EXAMPLE_PATTERNS = [
   {
-    name: "Cloudflare Workers",
-    category: "COMPUTE",
-    blessed_solution: "Cloudflare Workers for serverless compute",
-    rationale: "Edge-first architecture for global low-latency",
-    anti_patterns: "Avoid `express`, `fastify` for new services — use Workers native fetch handler",
-    status: "ACTIVE"
+    name: 'Cloudflare Workers',
+    category: 'COMPUTE',
+    blessed_solution: 'Cloudflare Workers for serverless compute',
+    rationale: 'Edge-first architecture for global low-latency',
+    anti_patterns: 'Avoid express/fastify for new services - use Workers native fetch handler',
+    status: 'ACTIVE',
   },
   {
-    name: "D1 Database",
-    category: "DATA",
-    blessed_solution: "Cloudflare D1 (SQLite at the edge)",
-    rationale: "Co-located with Workers, zero network hop for reads",
-    anti_patterns: "Avoid `pg`, `mysql2`, `mongoose` — use D1 bindings",
-    status: "ACTIVE"
-  }
+    name: 'D1 Database',
+    category: 'DATA',
+    blessed_solution: 'Cloudflare D1 (SQLite at the edge)',
+    rationale: 'Co-located with Workers, zero network hop for reads',
+    anti_patterns: 'Avoid pg/mysql2/mongoose - use D1 bindings',
+    status: 'ACTIVE',
+  },
 ];
 
 const GITIGNORE_CONTENT = `# Charter local state
 .cache/
 `;
 
-export async function initCommand(options: CLIOptions): Promise<void> {
-  const configDir = options.configPath;
+interface InitResult {
+  created: boolean;
+  configPath: string;
+  files: string[];
+}
 
-  if (fs.existsSync(path.join(configDir, 'config.json'))) {
-    console.log(`  .charter/ already exists at ${configDir}`);
-    console.log('  Use --config <path> to specify a different location.');
-    return;
+export async function initCommand(options: CLIOptions, args: string[] = []): Promise<number> {
+  const force = options.yes || args.includes('--force');
+  const result = initializeCharter(options.configPath, force);
+
+  if (options.format === 'json') {
+    console.log(JSON.stringify(result, null, 2));
+    return EXIT_CODE.SUCCESS;
   }
 
-  // Create directory structure
+  if (!result.created) {
+    console.log(`  .charter/ already exists at ${result.configPath}`);
+    console.log('  Use --config <path> for a different location, or --force to overwrite templates.');
+    return EXIT_CODE.SUCCESS;
+  }
+
+  console.log(`  Initialized .charter/ at ${result.configPath}/`);
+  console.log('');
+  console.log('  Created:');
+  for (const file of result.files) {
+    console.log(`    ${file}`);
+  }
+  console.log('');
+  console.log('  Next steps:');
+  console.log('    1. Edit config.json with your project name and thresholds');
+  console.log('    2. Define your blessed stack in patterns/*.json');
+  console.log('    3. Run: charter validate');
+
+  return EXIT_CODE.SUCCESS;
+}
+
+export function initializeCharter(configDir: string, force: boolean): InitResult {
+  const configFile = path.join(configDir, 'config.json');
+  const exists = fs.existsSync(configFile);
+
+  if (exists && !force) {
+    return {
+      created: false,
+      configPath: configDir,
+      files: [],
+    };
+  }
+
   const dirs = [configDir, path.join(configDir, 'patterns'), path.join(configDir, 'policies')];
   for (const dir of dirs) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Write config.json
-  fs.writeFileSync(path.join(configDir, 'config.json'), getDefaultConfigJSON() + '\n');
+  fs.writeFileSync(configFile, getDefaultConfigJSON() + '\n');
 
-  // Write example patterns
   fs.writeFileSync(
     path.join(configDir, 'patterns', 'blessed-stack.json'),
     JSON.stringify(EXAMPLE_PATTERNS, null, 2) + '\n'
   );
 
-  // Write example policy
   fs.writeFileSync(
     path.join(configDir, 'policies', 'governance.md'),
     `# Governance Policy
@@ -73,7 +109,7 @@ Resolves-Request: <governance request ID>
 ## Change Classification
 
 Changes are classified as:
-- **SURFACE**: Docs, comments, naming — no code logic
+- **SURFACE**: Docs, comments, naming - no code logic
 - **LOCAL**: Single service, contained impact
 - **CROSS_CUTTING**: Multiple services, data model, API contracts
 
@@ -81,18 +117,16 @@ Cross-cutting changes require architectural review before merge.
 `
   );
 
-  // Write .gitignore for the config dir
   fs.writeFileSync(path.join(configDir, '.gitignore'), GITIGNORE_CONTENT);
 
-  console.log(`  Initialized .charter/ at ${configDir}/`);
-  console.log('');
-  console.log('  Created:');
-  console.log('    config.json              Project governance config');
-  console.log('    patterns/blessed-stack.json  Example blessed stack patterns');
-  console.log('    policies/governance.md   Example governance policy');
-  console.log('');
-  console.log('  Next steps:');
-  console.log('    1. Edit config.json with your project name and thresholds');
-  console.log('    2. Define your blessed stack in patterns/*.json');
-  console.log('    3. Run: charter validate');
+  return {
+    created: true,
+    configPath: configDir,
+    files: [
+      'config.json',
+      'patterns/blessed-stack.json',
+      'policies/governance.md',
+      '.gitignore',
+    ],
+  };
 }

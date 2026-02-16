@@ -2,80 +2,103 @@
  * Charter CLI
  *
  * Config-driven governance checks that run locally and in CI.
- * Zero cloud dependency — works fully offline.
+ * Zero cloud dependency - works fully offline.
  */
 
 import { initCommand } from './commands/init';
+import { setupCommand } from './commands/setup';
+import { doctorCommand } from './commands/doctor';
 import { validateCommand } from './commands/validate';
 import { auditCommand } from './commands/audit';
 import { driftCommand } from './commands/drift';
 import { classifyCommand } from './commands/classify';
 
 const HELP = `
-charter — repo-level governance toolkit
+charter - repo-level governance toolkit
 
 Usage:
-  charter init                  Scaffold .charter/ config directory
-  charter validate              Validate git commits for governance trailers
-  charter audit                 Generate governance audit report
-  charter drift [--path <dir>]  Scan files for pattern drift
-  charter classify <subject>    Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
-  charter --help                Show this help
-  charter --version             Show version
+  charter setup [--ci github]     Bootstrap .charter/ and optional CI workflow
+  charter init                     Scaffold .charter/ config directory
+  charter validate                 Validate git commits for governance trailers
+  charter audit                    Generate governance audit report
+  charter drift [--path <dir>]     Scan files for pattern drift
+  charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
+  charter doctor                   Check CLI + config health
+  charter --help                   Show this help
+  charter --version                Show version
 
 Options:
   --config <path>    Path to .charter/ directory (default: .charter/)
   --format <type>    Output format: text, json (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
+  --yes              Auto-accept safe setup overwrites
 `;
+
+export const EXIT_CODE = {
+  SUCCESS: 0,
+  POLICY_VIOLATION: 1,
+  RUNTIME_ERROR: 2,
+} as const;
+
+export class CLIError extends Error {
+  constructor(
+    message: string,
+    public readonly exitCode: number = EXIT_CODE.RUNTIME_ERROR
+  ) {
+    super(message);
+    this.name = 'CLIError';
+  }
+}
 
 export interface CLIOptions {
   configPath: string;
   format: 'text' | 'json';
   ciMode: boolean;
+  yes: boolean;
 }
 
-export async function run(args: string[]): Promise<void> {
+export async function run(args: string[]): Promise<number> {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log(HELP);
-    return;
+    return EXIT_CODE.SUCCESS;
   }
 
   if (args.includes('--version') || args.includes('-v')) {
     console.log('charter v0.1.0');
-    return;
+    return EXIT_CODE.SUCCESS;
   }
 
   const command = args[0];
   const restArgs = args.slice(1);
+  const format = getFlag(restArgs, '--format') || 'text';
+  if (format !== 'text' && format !== 'json') {
+    throw new CLIError(`Invalid --format value: ${format}. Use text or json.`);
+  }
 
-  // Parse global options
   const options: CLIOptions = {
     configPath: getFlag(restArgs, '--config') || '.charter',
-    format: (getFlag(restArgs, '--format') || 'text') as 'text' | 'json',
+    format,
     ciMode: restArgs.includes('--ci'),
+    yes: restArgs.includes('--yes'),
   };
 
   switch (command) {
+    case 'setup':
+      return setupCommand(options, restArgs);
     case 'init':
-      await initCommand(options);
-      break;
+      return initCommand(options, restArgs);
     case 'validate':
-      await validateCommand(options, restArgs);
-      break;
+      return validateCommand(options, restArgs);
     case 'audit':
-      await auditCommand(options);
-      break;
+      return auditCommand(options);
     case 'drift':
-      await driftCommand(options, restArgs);
-      break;
+      return driftCommand(options, restArgs);
     case 'classify':
-      await classifyCommand(options, restArgs);
-      break;
+      return classifyCommand(options, restArgs);
+    case 'doctor':
+      return doctorCommand(options);
     default:
-      console.error(`Unknown command: ${command}`);
-      console.log(HELP);
-      process.exit(1);
+      throw new CLIError(`Unknown command: ${command}\n${HELP}`);
   }
 }
 

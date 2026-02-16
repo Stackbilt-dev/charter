@@ -2,18 +2,22 @@
 
 /**
  * charter CLI entrypoint
- *
- * Usage:
- *   npx charter init          # Scaffold .charter/ directory
- *   npx charter validate      # Run governance checks on staged/changed files
- *   npx charter audit         # Generate governance audit report
- *   npx charter drift         # Scan codebase for pattern drift
- *   npx charter classify <subject>  # Classify a change
  */
 
-import { run } from './index';
+import { CLIError, EXIT_CODE, run } from './index';
 
-run(process.argv.slice(2)).catch((err) => {
-  console.error('charter:', err.message || err);
-  process.exit(1);
-});
+run(process.argv.slice(2))
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((err: unknown) => {
+    if (err instanceof CLIError) {
+      console.error(`charter: ${err.message}`);
+      process.exitCode = err.exitCode;
+      return;
+    }
+
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`charter: ${msg}`);
+    process.exitCode = EXIT_CODE.RUNTIME_ERROR;
+  });
