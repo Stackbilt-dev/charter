@@ -4,6 +4,12 @@ Shared type definitions for [Charter Kit](https://github.com/Stackbilt-dev/chart
 
 This package contains all TypeScript type aliases, enums, and interfaces used across the Charter Kit monorepo. It exports only types; there is no runtime code.
 
+> **Want the full toolkit?** Just install the CLI — it includes everything:
+> ```bash
+> npm install -g @stackbilt/cli
+> ```
+> Only install this package directly if you need the type definitions without the CLI.
+
 ## Install
 
 ```bash
