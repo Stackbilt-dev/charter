@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
-import { loadConfig, loadPatterns, type CharterConfig } from '../config';
+import { loadConfig, loadPatterns, getPatternCustomizationStatus, type CharterConfig } from '../config';
 import { parseAllTrailers } from '@stackbilt/git';
 import { assessCommitRisk } from '@stackbilt/git';
 import type { GitCommit } from '@stackbilt/types';
@@ -32,6 +32,7 @@ interface AuditReport {
     total: number;
     active: number;
     categories: Record<string, number>;
+    patternsCustomized: boolean | null;
   };
   policies: {
     files: string[];
@@ -128,6 +129,7 @@ function generateAuditReport(
     : 0;
 
   const activePatterns = patterns.filter((p) => p.status === 'ACTIVE');
+  const patternsCustomized = getPatternCustomizationStatus(configPath);
   const categories: Record<string, number> = {};
   for (const p of activePatterns) {
     categories[p.category] = (categories[p.category] || 0) + 1;
@@ -147,6 +149,7 @@ function generateAuditReport(
   const scoreInputs = {
     coveragePercent,
     activePatterns: activePatterns.length,
+    patternsCustomized,
     missingSections: policyCoverage.missingSections,
   };
 
@@ -167,6 +170,7 @@ function generateAuditReport(
       total: patterns.length,
       active: activePatterns.length,
       categories,
+      patternsCustomized,
     },
     policies: {
       files: policyFiles,
@@ -210,6 +214,9 @@ function printReport(report: AuditReport): void {
   console.log('  Blessed Stack Patterns');
   console.log(`    Total defined:      ${report.patterns.total}`);
   console.log(`    Active:             ${report.patterns.active}`);
+  if (report.patterns.patternsCustomized !== null) {
+    console.log(`    Customized:         ${report.patterns.patternsCustomized ? 'yes' : 'no'}`);
+  }
   console.log(`    Categories:         ${Object.entries(report.patterns.categories).map(([k, v]) => `${k}(${v})`).join(', ') || 'none'}`);
   console.log('');
   console.log('  Policy Documentation');
@@ -239,28 +246,13 @@ function printReport(report: AuditReport): void {
 
 function getCommits(range: string): CommitLoadResult {
   try {
-    const log = runGit(['log', range, '--format=%H|%an|%aI|%s', '--name-only']);
-
-    const commits: GitCommit[] = [];
-    let current: GitCommit | null = null;
-
-    for (const line of log.split('\n')) {
-      if (line.includes('|') && line.length > 40) {
-        if (current) commits.push(current);
-        const [sha, author, timestamp, ...msgParts] = line.split('|');
-        current = {
-          sha,
-          author,
-          timestamp,
-          message: msgParts.join('|'),
-          files_changed: [],
-        };
-      } else if (line.trim() && current) {
-        current.files_changed!.push(line.trim());
-      }
-    }
-
-    if (current) commits.push(current);
+    const metadataLog = runGit(['log', range, '--format=%H%x1f%an%x1f%aI%x1f%B%x1e']);
+    const filesLog = runGit(['log', range, '--name-only', '--format=%H']);
+    const filesBySha = parseChangedFilesByCommit(filesLog);
+    const commits = parseCommitMetadata(metadataLog).map((commit) => ({
+      ...commit,
+      files_changed: filesBySha.get(commit.sha) || [],
+    }));
     return { commits };
   } catch (error) {
     return {
@@ -268,6 +260,52 @@ function getCommits(range: string): CommitLoadResult {
       error: getGitErrorMessage(error),
     };
   }
+}
+
+function parseCommitMetadata(logOutput: string): Array<Omit<GitCommit, 'files_changed'>> {
+  const commits: Array<Omit<GitCommit, 'files_changed'>> = [];
+
+  for (const rawRecord of logOutput.split('\x1e')) {
+    const record = rawRecord.trim();
+    if (!record) continue;
+
+    const [sha = '', author = '', timestamp = '', ...messageParts] = record.split('\x1f');
+    if (!sha) continue;
+
+    commits.push({
+      sha: sha.trim(),
+      author: author.trim(),
+      timestamp: timestamp.trim(),
+      message: messageParts.join('\x1f').replace(/\r\n/g, '\n').replace(/\n+$/, ''),
+    });
+  }
+
+  return commits;
+}
+
+function parseChangedFilesByCommit(logOutput: string): Map<string, string[]> {
+  const filesBySha = new Map<string, string[]>();
+  let currentSha = '';
+
+  for (const rawLine of logOutput.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (/^[a-f0-9]{40}$/i.test(line)) {
+      currentSha = line;
+      if (!filesBySha.has(currentSha)) {
+        filesBySha.set(currentSha, []);
+      }
+      continue;
+    }
+
+    if (!currentSha) continue;
+    const files = filesBySha.get(currentSha);
+    if (!files || files.includes(line)) continue;
+    files.push(line);
+  }
+
+  return filesBySha;
 }
 
 function getCommitRange(args: string[]): string {
@@ -340,6 +378,7 @@ function getGitErrorMessage(error: unknown): string {
 function getRecommendations(inputs: {
   coveragePercent: number;
   activePatterns: number;
+  patternsCustomized: boolean | null;
   missingSections: string[];
 }): string[] {
   const recommendations: string[] = [];
@@ -360,6 +399,10 @@ function getRecommendations(inputs: {
     );
   } else {
     recommendations.push('Pattern definitions are at full-score threshold.');
+  }
+
+  if (inputs.patternsCustomized === false) {
+    recommendations.push('Preset patterns are not customized yet; update blessed-stack patterns before treating drift scores as strong signal.');
   }
 
   if (inputs.missingSections.length > 0) {

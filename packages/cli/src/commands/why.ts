@@ -143,38 +143,71 @@ function isGitRepo(): boolean {
 
 function getRecentCommits(count: number): GitCommit[] {
   try {
-    const log = execFileSync('git', ['log', `-${count}`, '--format=%H|%s', '--name-only'], {
+    const metadataLog = execFileSync('git', ['log', `-${count}`, '--format=%H%x1f%an%x1f%aI%x1f%B%x1e'], {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const filesLog = execFileSync('git', ['log', `-${count}`, '--name-only', '--format=%H'], {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
 
-    const commits: GitCommit[] = [];
-    let current: GitCommit | null = null;
-
-    for (const line of log.split('\n')) {
-      if (line.includes('|') && line.length > 40) {
-        if (current) commits.push(current);
-        const [sha, ...message] = line.split('|');
-        current = {
-          sha,
-          author: '',
-          timestamp: '',
-          message: message.join('|'),
-          files_changed: [],
-        };
-      } else if (line.trim() && current) {
-        if (current.files_changed) {
-          current.files_changed.push(line.trim());
-        }
-      }
-    }
-
-    if (current) commits.push(current);
-    return commits;
+    const filesBySha = parseChangedFilesByCommit(filesLog);
+    return parseCommitMetadata(metadataLog).map((commit) => ({
+      ...commit,
+      files_changed: filesBySha.get(commit.sha) || [],
+    }));
   } catch {
     return [];
   }
+}
+
+function parseCommitMetadata(logOutput: string): Array<Omit<GitCommit, 'files_changed'>> {
+  const commits: Array<Omit<GitCommit, 'files_changed'>> = [];
+
+  for (const rawRecord of logOutput.split('\x1e')) {
+    const record = rawRecord.trim();
+    if (!record) continue;
+
+    const [sha = '', author = '', timestamp = '', ...messageParts] = record.split('\x1f');
+    if (!sha) continue;
+
+    commits.push({
+      sha: sha.trim(),
+      author: author.trim(),
+      timestamp: timestamp.trim(),
+      message: messageParts.join('\x1f').replace(/\r\n/g, '\n').replace(/\n+$/, ''),
+    });
+  }
+
+  return commits;
+}
+
+function parseChangedFilesByCommit(logOutput: string): Map<string, string[]> {
+  const filesBySha = new Map<string, string[]>();
+  let currentSha = '';
+
+  for (const rawLine of logOutput.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (/^[a-f0-9]{40}$/i.test(line)) {
+      currentSha = line;
+      if (!filesBySha.has(currentSha)) {
+        filesBySha.set(currentSha, []);
+      }
+      continue;
+    }
+
+    if (!currentSha) continue;
+    const files = filesBySha.get(currentSha);
+    if (!files || files.includes(line)) continue;
+    files.push(line);
+  }
+
+  return filesBySha;
 }
 
 function hasCommits(): boolean {

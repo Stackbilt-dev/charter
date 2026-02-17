@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
-import { loadConfig, loadPatterns } from '../config';
+import { loadConfig, loadPatterns, getPatternCustomizationStatus } from '../config';
 import { scanForDrift } from '@stackbilt/drift';
 import type { DriftReport } from '@stackbilt/types';
 
@@ -68,18 +68,20 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
 
   const report = scanForDrift(files, patterns);
   const status: 'PASS' | 'FAIL' = report.score >= config.drift.minScore ? 'PASS' : 'FAIL';
+  const patternsCustomized = getPatternCustomizationStatus(options.configPath);
   const output = {
     status,
     minScore: config.drift.minScore,
     thresholdPercent: Math.round(config.drift.minScore * 100),
     configPath: options.configPath,
+    patternsCustomized,
     ...report,
   };
 
   if (options.format === 'json') {
     console.log(JSON.stringify(output, null, 2));
   } else {
-    printReport(report, config.drift.minScore);
+    printReport(report, config.drift.minScore, patternsCustomized);
   }
 
   if (options.ciMode && report.score < config.drift.minScore) {
@@ -89,12 +91,15 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
   return EXIT_CODE.SUCCESS;
 }
 
-function printReport(report: DriftReport, minScore: number): void {
+function printReport(report: DriftReport, minScore: number, patternsCustomized: boolean | null): void {
   const icon = report.score >= minScore ? '[ok]' : '[fail]';
   const pct = Math.round(report.score * 100);
 
   console.log(`\n  ${icon} Drift Score: ${pct}% (threshold: ${Math.round(minScore * 100)}%)`);
   console.log(`     Scanned: ${report.scannedFiles} files against ${report.scannedPatterns} patterns`);
+  if (patternsCustomized !== null) {
+    console.log(`     Patterns customized: ${patternsCustomized ? 'yes' : 'no'}`);
+  }
 
   if (report.violations.length > 0) {
     console.log(`\n  Violations (${report.violations.length}):`);

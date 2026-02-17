@@ -28,10 +28,20 @@ interface LocalValidationResult {
     reason: string;
   };
   suggestions: string[];
+  trailerParsingWarnings: TrailerParsingWarning[];
   evidence: {
     policyOffenders: OffenderCommit[];
     riskOffenders: OffenderCommit[];
   };
+}
+
+interface TrailerParsingWarning {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  governanceLinesDetected: number;
+  governanceTrailersParsed: number;
+  warning: string;
 }
 
 interface OffenderCommit {
@@ -178,6 +188,12 @@ function validateCommits(
   }));
 
   const suggestions = generateSuggestions(trailers, unlinkedForSuggestions, commits.length);
+  const trailerParsingWarnings = detectTrailerParsingWarnings(commits, parsed);
+  if (trailerParsingWarnings.length > 0) {
+    suggestions.push(
+      'Governance trailer-like lines were found in commit bodies but not parsed as git trailers; keep trailers as one contiguous block at the end of the commit message.'
+    );
+  }
   const totalTrailers = parsed.governedBy.length + parsed.resolvesRequest.length;
 
   let status: 'PASS' | 'WARN' | 'FAIL';
@@ -216,6 +232,7 @@ function validateCommits(
         : 'strict trailer mode not triggered',
     },
     suggestions,
+    trailerParsingWarnings,
     evidence: {
       policyOffenders: buildPolicyOffenders(
         commits,
@@ -369,6 +386,15 @@ function printResult(result: LocalValidationResult): void {
     }
   }
 
+  if (result.trailerParsingWarnings.length > 0) {
+    console.log('');
+    console.log('  Trailer parsing warnings:');
+    for (const warning of result.trailerParsingWarnings.slice(0, 10)) {
+      console.log(`    - ${warning.shortSha} ${warning.subject}`);
+      console.log(`      ${warning.warning}`);
+    }
+  }
+
   if (result.evidence.policyOffenders.length > 0) {
     console.log('');
     console.log('  Policy offenders (strict trailer mode):');
@@ -431,28 +457,13 @@ function getCommitRangeInfo(args: string[]): { range: string; source: 'explicit'
 
 function getGitCommits(range: string): GitCommitLoadResult {
   try {
-    const log = runGit(['log', range, '--format=%H|%an|%aI|%s', '--name-only']);
-
-    const commits: GitCommit[] = [];
-    let current: GitCommit | null = null;
-
-    for (const line of log.split('\n')) {
-      if (line.includes('|') && line.length > 40) {
-        if (current) commits.push(current);
-        const [sha, author, timestamp, ...msgParts] = line.split('|');
-        current = {
-          sha,
-          author,
-          timestamp,
-          message: msgParts.join('|'),
-          files_changed: [],
-        };
-      } else if (line.trim() && current) {
-        current.files_changed!.push(line.trim());
-      }
-    }
-
-    if (current) commits.push(current);
+    const metadataLog = runGit(['log', range, '--format=%H%x1f%an%x1f%aI%x1f%B%x1e']);
+    const filesLog = runGit(['log', range, '--name-only', '--format=%H']);
+    const filesBySha = parseChangedFilesByCommit(filesLog);
+    const commits = parseCommitMetadata(metadataLog).map((commit) => ({
+      ...commit,
+      files_changed: filesBySha.get(commit.sha) || [],
+    }));
     return { commits };
   } catch (error) {
     return {
@@ -460,6 +471,89 @@ function getGitCommits(range: string): GitCommitLoadResult {
       error: getGitErrorMessage(error),
     };
   }
+}
+
+function detectTrailerParsingWarnings(
+  commits: GitCommit[],
+  parsed: ReturnType<typeof parseAllTrailers>
+): TrailerParsingWarning[] {
+  const parsedCountByCommit = new Map<string, number>();
+
+  for (const trailer of parsed.governedBy) {
+    parsedCountByCommit.set(trailer.commitSha, (parsedCountByCommit.get(trailer.commitSha) || 0) + 1);
+  }
+  for (const trailer of parsed.resolvesRequest) {
+    parsedCountByCommit.set(trailer.commitSha, (parsedCountByCommit.get(trailer.commitSha) || 0) + 1);
+  }
+
+  const warnings: TrailerParsingWarning[] = [];
+  const governanceLinePattern = /^(Governed-By|Resolves-Request):\s*(.+)$/i;
+
+  for (const commit of commits) {
+    const messageLines = commit.message.split(/\r?\n/);
+    const governanceLinesDetected = messageLines.filter((line) => governanceLinePattern.test(line.trim())).length;
+    if (governanceLinesDetected === 0) continue;
+
+    const governanceTrailersParsed = parsedCountByCommit.get(commit.sha) || 0;
+    if (governanceTrailersParsed >= governanceLinesDetected) continue;
+
+    warnings.push({
+      sha: commit.sha,
+      shortSha: commit.sha.slice(0, 7),
+      subject: commit.message.split('\n')[0].slice(0, 200),
+      governanceLinesDetected,
+      governanceTrailersParsed,
+      warning: `Detected ${governanceLinesDetected} governance trailer-like line(s), but parsed ${governanceTrailersParsed} as git trailers. Check for blank lines splitting the terminal trailer block.`,
+    });
+  }
+
+  return warnings;
+}
+
+function parseCommitMetadata(logOutput: string): Array<Omit<GitCommit, 'files_changed'>> {
+  const commits: Array<Omit<GitCommit, 'files_changed'>> = [];
+
+  for (const rawRecord of logOutput.split('\x1e')) {
+    const record = rawRecord.trim();
+    if (!record) continue;
+
+    const [sha = '', author = '', timestamp = '', ...messageParts] = record.split('\x1f');
+    if (!sha) continue;
+
+    commits.push({
+      sha: sha.trim(),
+      author: author.trim(),
+      timestamp: timestamp.trim(),
+      message: messageParts.join('\x1f').replace(/\r\n/g, '\n').replace(/\n+$/, ''),
+    });
+  }
+
+  return commits;
+}
+
+function parseChangedFilesByCommit(logOutput: string): Map<string, string[]> {
+  const filesBySha = new Map<string, string[]>();
+  let currentSha = '';
+
+  for (const rawLine of logOutput.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (/^[a-f0-9]{40}$/i.test(line)) {
+      currentSha = line;
+      if (!filesBySha.has(currentSha)) {
+        filesBySha.set(currentSha, []);
+      }
+      continue;
+    }
+
+    if (!currentSha) continue;
+    const files = filesBySha.get(currentSha);
+    if (!files || files.includes(line)) continue;
+    files.push(line);
+  }
+
+  return filesBySha;
 }
 
 function hasCommits(): boolean {

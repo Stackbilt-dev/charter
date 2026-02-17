@@ -13,6 +13,7 @@ import { auditCommand } from './commands/audit';
 import { driftCommand } from './commands/drift';
 import { classifyCommand } from './commands/classify';
 import { quickstartCommand, whyCommand } from './commands/why';
+import { hookCommand } from './commands/hook';
 import packageJson from '../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -32,6 +33,8 @@ Usage:
                                    Generate governance audit report
   charter drift [--path <dir>]     Scan files for pattern drift
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
+  charter hook install --commit-msg
+                                   Install git commit-msg hook for trailer normalization
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor                   Check CLI + config health
   charter --help                   Show this help
@@ -118,6 +121,8 @@ export async function run(args: string[]): Promise<number> {
       return whyCommand(options);
     case 'doctor':
       return doctorCommand(options);
+    case 'hook':
+      return hookCommand(options, restArgs);
     default:
       throw new CLIError(`Unknown command: ${command}\n${HELP}`);
   }

@@ -170,6 +170,9 @@ Governed-By: <ADR-ID or ledger entry reference>
 Resolves-Request: <governance request ID>
 \`\`\`
 
+Keep governance trailers in one contiguous block at the end of the commit message.
+Do not insert a blank line between governance trailers and other trailers like Co-Authored-By.
+
 ## Change Classification
 
 Changes are classified as:
@@ -186,6 +189,11 @@ Capture waiver reason, approver, and expiration.
 
 Cross-cutting changes require architectural review before merge.
 Escalate ambiguous or high-risk decisions for explicit approval.
+
+## Agent Standards Compatibility
+
+If repository-level agent standards exist (for example \`AGENTS.md\`, \`CLAUDE.md\`, \`GEMINI.md\`), Charter policy is complementary and does not override those files.
+Keep governance workflows aligned across all active agent instruction standards.
 `;
 
 const GITIGNORE_CONTENT = `# Charter local state
@@ -307,11 +315,22 @@ function getFlag(args: string[], flag: string): string | undefined {
 function buildPatternTemplate(
   preset: StackPreset,
   features: InitializeOptions['features']
-): unknown[] {
+): {
+  customized: boolean;
+  preset: StackPreset;
+  generatedAt: string;
+  patterns: unknown[];
+} {
   const base = JSON.parse(JSON.stringify(PATTERN_TEMPLATES[preset])) as Array<Record<string, string>>;
+  const finalize = (items: Array<Record<string, string>>) => ({
+    customized: false,
+    preset,
+    generatedAt: new Date().toISOString(),
+    patterns: items,
+  });
 
   if (!features) {
-    return base;
+    return finalize(base);
   }
 
   if (features.cloudflare) {
@@ -351,5 +370,5 @@ function buildPatternTemplate(
   for (const pattern of base) {
     dedup.set(pattern.name, pattern);
   }
-  return [...dedup.values()];
+  return finalize([...dedup.values()]);
 }

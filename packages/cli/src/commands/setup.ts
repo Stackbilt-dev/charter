@@ -15,7 +15,31 @@ import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
 
-function getGithubWorkflow(): string {
+function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
+  const installStep = packageManager === 'pnpm'
+    ? `      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile`
+    : `      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi`;
+
   return `name: Governance Check
 
 on:
@@ -36,17 +60,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+${installStep}
 
       - name: Validate Commits
         run: npx charter validate --ci --format text
@@ -123,6 +137,8 @@ interface DetectionResult {
   frameworks: string[];
   state: string[];
   sources: string[];
+  agentStandards: string[];
+  monorepo: boolean;
   signals: {
     hasFrontend: boolean;
     hasBackend: boolean;
@@ -131,6 +147,7 @@ interface DetectionResult {
     hasHono: boolean;
     hasReact: boolean;
     hasVite: boolean;
+    hasPnpm: boolean;
   };
   mixedStack: boolean;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -142,7 +159,8 @@ interface PackageContext {
   source: string;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
-  engines?: { node?: string };
+  engines?: { node?: string; pnpm?: string };
+  packageManager?: string;
   name?: string;
 }
 
@@ -164,6 +182,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
 
   const contexts = loadPackageContexts();
   const detection = detectStack(contexts);
+  const packageManager = detectPackageManager(contexts);
   const selectedPreset: StackPreset = isValidPreset(presetFlag) ? presetFlag : detection.suggestedPreset;
   const inferenceMode = presetFlag
     ? 'preset-override'
@@ -185,6 +204,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       console.log(`  Frameworks: ${detection.frameworks.join(', ') || 'none detected'}`);
       console.log(`  State: ${detection.state.join(', ') || 'none detected'}`);
       console.log(`  Sources: ${detection.sources.join(', ') || 'none'}`);
+      console.log(`  Agent standards: ${detection.agentStandards.join(', ') || 'none detected'}`);
+      console.log(`  Monorepo: ${detection.monorepo ? 'yes' : 'no'}`);
       console.log(`  Confidence: ${detection.confidence}`);
       console.log(`  Selected preset: ${selectedPreset} (${inferenceMode})`);
       if (detection.mixedStack) {
@@ -204,7 +225,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const baselinePlan = planBaselineMutation(baselinePath, explicitForce);
   const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
   const workflowPlan = ciMode === 'github'
-    ? planManagedFile(workflowPath, getGithubWorkflow())
+    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager))
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
@@ -289,7 +310,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (ciMode === 'github') {
     const workflowWrite = applyManagedFile(
       workflowPath,
-      getGithubWorkflow(),
+      getGithubWorkflow(packageManager),
       force
     );
 
@@ -357,9 +378,15 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   console.log('    - Audit-ready governance evidence from repo history');
   console.log('');
   console.log('  Run now:');
-  console.log('    1. charter validate --format text');
-  console.log('    2. charter drift --format text');
-  console.log('    3. charter audit --format text');
+  console.log('    1. charter classify "<planned change summary>"');
+  console.log('    2. charter hook install --commit-msg');
+  console.log('    3. charter validate --format text');
+  console.log('    4. charter drift --format text');
+  console.log('    5. charter audit --format text');
+  console.log('');
+  console.log('  Adoption ramp option:');
+  console.log('    - Set "validation.citationStrictness": "WARN" in .charter/config.json for an initial non-blocking trailer policy.');
+  console.log('    - Keep "git.trailerThreshold" at HIGH initially, then tighten based on team maturity.');
 
   return EXIT_CODE.SUCCESS;
 }
@@ -371,6 +398,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       frameworks: [],
       state: [],
       sources: [],
+      agentStandards: [],
+      monorepo: false,
       signals: {
         hasFrontend: false,
         hasBackend: false,
@@ -379,6 +408,7 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
         hasHono: false,
         hasReact: false,
         hasVite: false,
+        hasPnpm: false,
       },
       mixedStack: false,
       confidence: 'LOW',
@@ -403,6 +433,12 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
   const hasHono = hasAny(depNames, ['hono']);
   const hasReact = hasAny(depNames, ['react']);
   const hasVite = hasAny(depNames, ['vite']);
+  const hasPnpm = contexts.some((ctx) => !!ctx.engines?.pnpm)
+    || contexts.some((ctx) => typeof ctx.packageManager === 'string' && ctx.packageManager.toLowerCase().startsWith('pnpm@'))
+    || fs.existsSync(path.resolve('pnpm-lock.yaml'));
+  const monorepo = contexts.length > 1 || fs.existsSync(path.resolve('pnpm-workspace.yaml'));
+  const agentStandards = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+    .filter((filename) => fs.existsSync(path.resolve(filename)));
 
   const frameworks: string[] = [];
   const runtime: string[] = [];
@@ -433,11 +469,15 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
     hasHono,
     hasReact,
     hasVite,
+    hasPnpm,
   };
   const warnings: string[] = [];
 
   if (dedupRuntime.length > 1 && !(hasFrontend && (hasBackend || hasWorker))) {
     warnings.push('Multiple runtime families detected without clear frontend/backend split; verify preset selection.');
+  }
+  if (agentStandards.length > 0) {
+    warnings.push(`Agent standards detected (${agentStandards.join(', ')}); align Charter policy with existing agent instructions.`);
   }
 
   if (mixedStack) {
@@ -447,6 +487,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
       signals,
       mixedStack: true,
       confidence: isClassicMixed ? 'HIGH' : 'MEDIUM',
@@ -460,6 +502,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
       signals,
       mixedStack: false,
       confidence: 'HIGH',
@@ -473,6 +517,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
       signals,
       mixedStack: false,
       confidence: warnings.length > 0 ? 'MEDIUM' : 'HIGH',
@@ -486,6 +532,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
       signals,
       mixedStack: false,
       confidence: warnings.length > 0 ? 'MEDIUM' : 'HIGH',
@@ -499,6 +547,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
       signals,
       mixedStack: false,
       confidence: 'MEDIUM',
@@ -511,6 +561,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
     frameworks: dedup(frameworks),
     state: dedup(state),
     sources: contexts.map((c) => c.source),
+    agentStandards,
+    monorepo,
     signals,
     mixedStack: false,
     confidence: 'LOW',
@@ -535,6 +587,17 @@ function loadPackageContexts(): PackageContext[] {
       }
     }
   }
+  const packagesDir = path.resolve('packages');
+  if (fs.existsSync(packagesDir)) {
+    for (const entry of fs.readdirSync(packagesDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        candidates.add(path.join('packages', entry.name, 'package.json'));
+      }
+    }
+  }
+  for (const workspaceManifest of resolvePnpmWorkspacePackageJsons()) {
+    candidates.add(workspaceManifest);
+  }
 
   const contexts: PackageContext[] = [];
   for (const relativePath of candidates) {
@@ -547,6 +610,7 @@ function loadPackageContexts(): PackageContext[] {
         dependencies: parsed.dependencies,
         devDependencies: parsed.devDependencies,
         engines: parsed.engines,
+        packageManager: parsed.packageManager,
         name: parsed.name,
       });
     } catch {
@@ -555,6 +619,130 @@ function loadPackageContexts(): PackageContext[] {
   }
 
   return contexts;
+}
+
+function detectPackageManager(contexts: PackageContext[]): 'npm' | 'pnpm' {
+  const root = contexts.find((ctx) => ctx.source === 'package.json');
+  if (root?.engines?.pnpm || fs.existsSync(path.resolve('pnpm-lock.yaml'))) {
+    return 'pnpm';
+  }
+  if (typeof root?.packageManager === 'string' && root.packageManager.toLowerCase().startsWith('pnpm@')) {
+    return 'pnpm';
+  }
+  return 'npm';
+}
+
+function resolvePnpmWorkspacePackageJsons(): string[] {
+  const workspaceFile = path.resolve('pnpm-workspace.yaml');
+  if (!fs.existsSync(workspaceFile)) return [];
+
+  let content = '';
+  try {
+    content = fs.readFileSync(workspaceFile, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  const globs = parsePnpmWorkspaceGlobs(content);
+  const resolved = new Set<string>();
+  for (const glob of globs) {
+    for (const match of expandWorkspacePackageJsonGlob(glob)) {
+      resolved.add(match);
+    }
+  }
+  return [...resolved];
+}
+
+function parsePnpmWorkspaceGlobs(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  const globs: string[] = [];
+  let inPackagesBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!inPackagesBlock) {
+      if (trimmed === 'packages:') {
+        inPackagesBlock = true;
+      }
+      continue;
+    }
+
+    if (trimmed.length > 0 && !line.startsWith(' ') && !line.startsWith('\t') && !line.trimStart().startsWith('-')) {
+      break;
+    }
+
+    const match = line.match(/^\s*-\s*['"]?([^'"]+)['"]?\s*$/);
+    if (match) {
+      globs.push(match[1].trim());
+    }
+  }
+
+  return globs;
+}
+
+function expandWorkspacePackageJsonGlob(globPattern: string): string[] {
+  const normalized = globPattern.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (normalized.length === 0) return [];
+
+  if (!normalized.includes('*')) {
+    return maybePackageJsonPathsForDir(path.resolve(normalized), normalized);
+  }
+
+  if (normalized.endsWith('/*')) {
+    const root = normalized.slice(0, -2);
+    const rootAbsolute = path.resolve(root);
+    if (!fs.existsSync(rootAbsolute) || !fs.statSync(rootAbsolute).isDirectory()) {
+      return [];
+    }
+    const results: string[] = [];
+    for (const entry of fs.readdirSync(rootAbsolute, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const relative = path.posix.join(root, entry.name);
+      results.push(...maybePackageJsonPathsForDir(path.resolve(relative), relative));
+    }
+    return results;
+  }
+
+  if (normalized.includes('/**')) {
+    const root = normalized.split('/**')[0];
+    const rootAbsolute = path.resolve(root);
+    if (!fs.existsSync(rootAbsolute) || !fs.statSync(rootAbsolute).isDirectory()) {
+      return [];
+    }
+    return collectPackageJsonsRecursive(rootAbsolute)
+      .map((absolute) => path.relative(process.cwd(), absolute).replace(/\\/g, '/'));
+  }
+
+  return [];
+}
+
+function maybePackageJsonPathsForDir(absoluteDir: string, relativeDir: string): string[] {
+  const manifest = path.join(absoluteDir, 'package.json');
+  if (!fs.existsSync(manifest)) return [];
+  return [path.posix.join(relativeDir, 'package.json')];
+}
+
+function collectPackageJsonsRecursive(rootDir: string): string[] {
+  const results: string[] = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    const manifest = path.join(current, 'package.json');
+    if (fs.existsSync(manifest)) {
+      results.push(manifest);
+    }
+
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      stack.push(path.join(current, entry.name));
+    }
+  }
+
+  return results;
 }
 
 function inferProjectName(contexts: PackageContext[]): string {

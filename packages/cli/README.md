@@ -10,6 +10,12 @@ CLI entry point for Charter Kit -- a local-first governance toolkit for software
 npm install --save-dev @stackbilt/cli
 ```
 
+If using a pnpm workspace root:
+
+```bash
+pnpm add -Dw @stackbilt/cli
+```
+
 Use with `npx` in each repository:
 
 ```bash
@@ -55,6 +61,7 @@ charter validate       # validate commit governance trailers
 charter drift          # scan for blessed-stack drift
 charter audit          # generate governance audit report
 charter classify "migrate auth provider"
+charter hook install --commit-msg
 ```
 
 ## Human Onboarding (Copy/Paste)
@@ -65,6 +72,7 @@ Run this in the target repository:
 npm install -g @stackbilt/cli
 charter
 charter setup --ci github
+charter classify "describe the planned change"
 charter doctor --format json
 charter validate --format text
 charter drift --format text
@@ -113,6 +121,7 @@ npm install --save-dev @stackbilt/cli@latest
 # setup
 npx charter setup --detect-only --format json
 npx charter setup --ci github --yes --format json
+npx charter classify "describe the planned change" --format json
 
 # enforce on PR/build
 npx charter validate --ci --format json
@@ -180,6 +189,31 @@ charter validate --range HEAD~10..HEAD --format json
 
 When `--range` is omitted, JSON includes `effectiveRangeSource` and `defaultCommitRange` so automation can trace default selection behavior.
 
+Trailer formatting requirement:
+- Governance trailers must be in one contiguous trailer block at the end of the commit message.
+- A blank line inside the trailer section can make governance trailers unparsable by git trailer rules.
+
+Valid:
+
+```text
+feat: ship governance checks
+
+Governed-By: ADR-012
+Resolves-Request: REQ-078
+Co-Authored-By: Dev <dev@example.com>
+```
+
+Invalid (blank line splits the trailer block):
+
+```text
+feat: ship governance checks
+
+Governed-By: ADR-012
+Resolves-Request: REQ-078
+
+Co-Authored-By: Dev <dev@example.com>
+```
+
 ### `charter drift`
 
 Scan files against blessed-stack patterns in `.charter/patterns/*.json`.
@@ -188,12 +222,15 @@ Scan files against blessed-stack patterns in `.charter/patterns/*.json`.
 charter drift --path ./src --ci
 ```
 
+JSON output includes `patternsCustomized` when pattern files declare customization metadata.
+
 ### `charter audit`
 
 Generate a governance audit report covering trailers, risk, drift, and policy-section coverage quality.
 Use `--range <revset>` to audit the same commit window used by validation in reviews.
 
 If score is held down by trailer coverage, enforce `validate --ci` in PR checks and add commit-template guidance for required trailers.
+Audit output includes whether preset pattern files are still uncustomized when metadata is present.
 
 ### `charter classify`
 
@@ -202,6 +239,16 @@ Classify a change as `SURFACE`, `LOCAL`, or `CROSS_CUTTING`.
 ```bash
 charter classify "update button color"
 ```
+
+### `charter hook`
+
+Install git hooks for commit-time trailer ergonomics.
+
+```bash
+charter hook install --commit-msg
+```
+
+`--force` (or global `--yes`) allows overwrite when a non-Charter `commit-msg` hook already exists.
 
 ## Global Options
 

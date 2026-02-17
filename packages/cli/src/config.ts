@@ -173,9 +173,15 @@ export function loadPatterns(configPath: string): Pattern[] {
     try {
       const raw = fs.readFileSync(path.join(patternsDir, file), 'utf-8');
       const parsed = JSON.parse(raw);
+      const normalized = !Array.isArray(parsed)
+        && parsed
+        && typeof parsed === 'object'
+        && Array.isArray((parsed as { patterns?: unknown[] }).patterns)
+        ? (parsed as { patterns: unknown[] }).patterns
+        : parsed;
 
       // Support both single pattern and array of patterns
-      const items = Array.isArray(parsed) ? parsed : [parsed];
+      const items = Array.isArray(normalized) ? normalized : [normalized];
       for (const item of items) {
         patterns.push({
           id: item.id || `local-${file}-${patterns.length}`,
@@ -197,6 +203,29 @@ export function loadPatterns(configPath: string): Pattern[] {
   }
 
   return patterns;
+}
+
+export function getPatternCustomizationStatus(configPath: string): boolean | null {
+  const patternsDir = path.join(configPath, 'patterns');
+  if (!fs.existsSync(patternsDir)) return null;
+
+  const files = fs.readdirSync(patternsDir).filter(f => f.endsWith('.json'));
+  const flaggedValues: boolean[] = [];
+
+  for (const file of files) {
+    try {
+      const raw = fs.readFileSync(path.join(patternsDir, file), 'utf-8');
+      const parsed = JSON.parse(raw) as { customized?: unknown };
+      if (typeof parsed?.customized === 'boolean') {
+        flaggedValues.push(parsed.customized);
+      }
+    } catch {
+      // ignore malformed pattern file metadata
+    }
+  }
+
+  if (flaggedValues.length === 0) return null;
+  return flaggedValues.every(Boolean);
 }
 
 /**
