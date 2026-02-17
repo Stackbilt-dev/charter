@@ -34,18 +34,23 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Charter CLI (pinned)
-        run: npm install -g @stackbilt/cli@0.1.15
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Validate Commits
-        run: charter validate --ci --format text
+        run: npx charter validate --ci --format text
 
       - name: Drift Scan
-        run: charter drift --ci --format text
+        run: npx charter drift --ci --format text
         if: hashFiles('.charter/patterns/*.json') != ''
 
       - name: Audit Report
-        run: charter audit --format json > /tmp/audit.json
+        run: npx charter audit --format json > /tmp/audit.json
         if: always()
 
       - name: Post Summary
