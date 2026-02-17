@@ -2,15 +2,17 @@
 
 CLI entry point for Charter Kit -- a local-first governance toolkit for software repositories. Orchestrates all other `@stackbilt/*` packages to parse commit trailers, score risk, detect blessed-stack drift, and classify change scope. No LLM calls at runtime.
 
-## Install
+> **This is the only package most users need.** One install gives you the full Charter Kit toolkit.
 
-Global (recommended for developer machines):
+## Install
 
 ```bash
 npm install -g @stackbilt/cli
 ```
 
-Local (recommended for CI):
+This pulls in all Charter Kit packages automatically. You get the `charter` command globally.
+
+For CI pipelines, install as a dev dependency instead:
 
 ```bash
 npm install --save-dev @stackbilt/cli
