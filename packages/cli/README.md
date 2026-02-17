@@ -33,7 +33,7 @@ Upgrade existing repos with:
 
 ```bash
 npm install --save-dev @stackbilt/cli@latest
-npx charter --version
+npx --no-install charter --version
 ```
 
 For CI pipelines, install as a dev dependency:
@@ -102,6 +102,7 @@ Agent decision rules:
 - `validate` and `audit` both report commit range explicitly so coverage numbers are comparable.
 - Use `validate.evidence.policyOffenders` for strict-trailer failures and `validate.evidence.riskOffenders` for threshold-based risk failures.
 - `policyOffenders` are policy-context entries (not risk-rule findings); risk metadata is attached to `riskOffenders`.
+- `validate.effectiveRangeSource` and `validate.defaultCommitRange` make implicit range behavior explicit for agents.
 
 ## LM Agent Ops Flow
 
@@ -176,6 +177,8 @@ Validate git commits for `Governed-By` and `Resolves-Request` trailers.
 charter validate --ci --format json
 charter validate --range HEAD~10..HEAD --format json
 ```
+
+When `--range` is omitted, JSON includes `effectiveRangeSource` and `defaultCommitRange` so automation can trace default selection behavior.
 
 ### `charter drift`
 

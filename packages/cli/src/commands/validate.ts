@@ -17,6 +17,8 @@ interface LocalValidationResult {
   status: 'PASS' | 'WARN' | 'FAIL';
   summary: string;
   commitRange: string;
+  effectiveRangeSource: 'explicit' | 'branch-base' | 'recent-fallback';
+  defaultCommitRange?: string;
   commits: number;
   trailersFound: number;
   highRiskUnlinked: number;
@@ -42,6 +44,7 @@ interface OffenderCommit {
   riskRuleId?: string;
   matchedSignals?: string[];
   thresholdSource?: string;
+  policyReason?: string;
   riskReason: string;
   missingTrailers: string[];
   filesChangedCount: number;
@@ -64,7 +67,8 @@ export async function validateCommand(options: CLIOptions, args: string[]): Prom
     return EXIT_CODE.SUCCESS;
   }
 
-  const range = getCommitRange(args);
+  const rangeInfo = getCommitRangeInfo(args);
+  const range = rangeInfo.range;
   const commitLoad = getGitCommits(range);
 
   if (commitLoad.error) {
@@ -92,7 +96,7 @@ export async function validateCommand(options: CLIOptions, args: string[]): Prom
     return EXIT_CODE.SUCCESS;
   }
 
-  const result = validateCommits(commits, range, config.git.trailerThreshold, {
+  const result = validateCommits(commits, rangeInfo, config.git.trailerThreshold, {
     requireTrailers: config.git.requireTrailers,
     citationStrictness: config.validation.citationStrictness,
   });
@@ -112,7 +116,10 @@ export async function validateCommand(options: CLIOptions, args: string[]): Prom
 
 function validateCommits(
   commits: GitCommit[],
-  commitRange: string,
+  rangeInfo: {
+    range: string;
+    source: 'explicit' | 'branch-base' | 'recent-fallback';
+  },
   threshold: 'LOW' | 'MEDIUM' | 'HIGH',
   policy: {
     requireTrailers: boolean;
@@ -193,7 +200,9 @@ function validateCommits(
   return {
     status,
     summary,
-    commitRange,
+    commitRange: rangeInfo.range,
+    effectiveRangeSource: rangeInfo.source,
+    defaultCommitRange: rangeInfo.source === 'explicit' ? undefined : rangeInfo.range,
     commits: commits.length,
     trailersFound: totalTrailers,
     highRiskUnlinked,
@@ -235,6 +244,7 @@ function buildPolicyOffenders(
       sha: commit.sha,
       shortSha: commit.sha.slice(0, 7),
       subject,
+      policyReason: 'Missing required governance trailers under strict trailer mode.',
       riskReason: 'Missing required governance trailers under strict trailer mode.',
       missingTrailers: ['Governed-By', 'Resolves-Request'],
       filesChangedCount: filesChanged.length,
@@ -348,6 +358,7 @@ function printResult(result: LocalValidationResult): void {
 
   console.log(`\n  ${icon} ${result.status}: ${result.summary}`);
   console.log(`     Commit range: ${result.commitRange}`);
+  console.log(`     Range source: ${result.effectiveRangeSource}`);
   console.log(`     Commits: ${result.commits} | Trailers found: ${result.trailersFound}`);
 
   if (result.suggestions.length > 0) {
@@ -363,7 +374,7 @@ function printResult(result: LocalValidationResult): void {
     console.log('  Policy offenders (strict trailer mode):');
     for (const commit of result.evidence.policyOffenders.slice(0, 10)) {
       console.log(`    - ${commit.shortSha} ${commit.subject}`);
-      console.log(`      Reason: ${commit.riskReason}`);
+      console.log(`      Reason: ${commit.policyReason || commit.riskReason}`);
     }
   }
 
@@ -379,10 +390,13 @@ function printResult(result: LocalValidationResult): void {
   console.log('');
 }
 
-function getCommitRange(args: string[]): string {
+function getCommitRangeInfo(args: string[]): { range: string; source: 'explicit' | 'branch-base' | 'recent-fallback' } {
   const rangeIdx = args.indexOf('--range');
   if (rangeIdx !== -1 && rangeIdx + 1 < args.length) {
-    return args[rangeIdx + 1];
+    return {
+      range: args[rangeIdx + 1],
+      source: 'explicit',
+    };
   }
 
   const recentRange = getRecentCommitRange();
@@ -397,12 +411,21 @@ function getCommitRange(args: string[]): string {
     }
 
     if (!baseBranch || baseBranch === currentBranch) {
-      return recentRange;
+      return {
+        range: recentRange,
+        source: 'recent-fallback',
+      };
     }
 
-    return `${baseBranch}..HEAD`;
+    return {
+      range: `${baseBranch}..HEAD`,
+      source: 'branch-base',
+    };
   } catch {
-    return recentRange;
+    return {
+      range: recentRange,
+      source: 'recent-fallback',
+    };
   }
 }
 
