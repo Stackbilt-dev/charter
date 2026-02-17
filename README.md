@@ -9,8 +9,12 @@ Recommended for most repos (local install):
 ```bash
 npm install --save-dev @stackbilt/cli
 npx charter
-npx charter setup --ci github
+npx charter setup --detect-only --format json
+npx charter setup --ci github --yes
 npx charter doctor --format json
+npx charter validate --ci --format json
+npx charter drift --ci --format json
+npx charter audit --format json
 ```
 
 Global install is optional if you want `charter` on your PATH:
@@ -18,16 +22,24 @@ Global install is optional if you want `charter` on your PATH:
 ```bash
 npm install -g @stackbilt/cli
 charter
-charter setup --ci github
+charter setup --detect-only --format json
+charter setup --ci github --yes
 ```
 
 `setup` is what applies the governance baseline into the current repo (`.charter/*` and optional workflow).
-Use `charter setup --detect-only` to preview detected stack and selected preset without writing files.
+Use `charter setup --detect-only` to preview detected stack and selected preset without writing files, including `detected.sources` so users and agents can verify what was scanned.
 For mixed repos (frontend + backend/worker), run detect-only first, then choose preset intentionally:
 
 ```bash
 charter setup --detect-only
 charter setup --preset fullstack --ci github --yes
+```
+
+Upgrade path in existing repos:
+
+```bash
+npm install --save-dev @stackbilt/cli@latest
+npx charter --version
 ```
 
 ## Why Charter
@@ -127,6 +139,18 @@ npx charter audit --format json
 npx charter doctor --format json
 npx charter audit --format json
 ```
+
+Decision rules for agents:
+- If `setup --detect-only` reports `mixedStack: true`, apply `--preset fullstack`.
+- If detection looks incomplete, inspect `detected.sources` before setup.
+- Treat `validate` and `drift` with `--ci` as merge gates.
+
+## Trailer Adoption Ramp
+
+Teams often score lower early due to missing governance trailers. Use this ramp:
+- Stage 1: run `charter validate --ci --format json` in PR CI and fail on policy violations.
+- Stage 2: add a commit template in the repo that includes `Governed-By` and `Resolves-Request`.
+- Stage 3: track audit trend; trailer coverage should rise naturally as PR gating normalizes behavior.
 
 ## Command Reference
 

@@ -74,12 +74,17 @@ node packages/cli/dist/bin.js --version
 node packages/cli/dist/bin.js
 node packages/cli/dist/bin.js why
 node packages/cli/dist/bin.js --help
+node packages/cli/dist/bin.js setup --detect-only --format json
 node packages/cli/dist/bin.js setup --format json --yes
 node packages/cli/dist/bin.js doctor --format json
-node packages/cli/dist/bin.js validate --format json
-node packages/cli/dist/bin.js drift --format json
+node packages/cli/dist/bin.js validate --format json --ci
+node packages/cli/dist/bin.js drift --format json --ci
 node packages/cli/dist/bin.js audit --format json
 ```
+
+When reviewing detect output, confirm:
+- `suggestedPreset` and `selectedPreset` are sensible for the repo layout.
+- `detected.sources` includes expected manifests (root and nested where applicable).
 
 ## Phase 4: Publish (Dependency Order)
 
@@ -108,15 +113,19 @@ In a clean external repo:
 npx @stackbilt/cli@latest --version
 npx @stackbilt/cli@latest
 npx @stackbilt/cli@latest why
+npx @stackbilt/cli@latest setup --detect-only --format json
 npx @stackbilt/cli@latest setup --ci github
 npx @stackbilt/cli@latest doctor --format json
 npx @stackbilt/cli@latest validate --format json --ci
+npx @stackbilt/cli@latest drift --format json --ci
+npx @stackbilt/cli@latest audit --format json
 ```
 
 Confirm:
 - `.charter/` scaffold exists.
 - workflow file is generated when requested.
 - behavior matches docs and exit-code contract.
+- mixed-stack repos are detected correctly, or can be corrected with explicit `--preset fullstack`.
 
 ## Release Artifacts
 

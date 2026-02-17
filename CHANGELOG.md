@@ -7,10 +7,11 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- Placeholder for unreleased additions.
+- Documentation runbook updates for mixed-stack setup decision flow and LM-agent decision rules.
 
 ### Changed
-- Placeholder for unreleased changes.
+- Root and CLI README now lead with detect-first setup (`setup --detect-only`) and explicit CI gating commands (`validate/drift --ci`).
+- Publishing guide now verifies `detected.sources` in setup detection output and includes drift/audit checks in post-publish validation.
 
 ### Fixed
 - Placeholder for unreleased fixes.

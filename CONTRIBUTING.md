@@ -52,6 +52,7 @@ PR checklist:
 3. Link related issue(s)
 4. Include command output/screenshots for behavior changes
 5. Confirm `pnpm run build` passes
+6. If CLI UX or setup behavior changes, update `README.md`, `packages/cli/README.md`, and `CHANGELOG.md` in the same PR
 
 ## Code Standards
 
