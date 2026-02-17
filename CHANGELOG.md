@@ -7,13 +7,15 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- Placeholder for unreleased additions.
+- `validate` JSON output now includes an evidence block with offending commit details (`sha`, `riskLevel`, `riskReason`, `missingTrailers`).
+- `setup --detect-only` now surfaces runtime ambiguity warnings when multiple runtime families are detected without a clear stack split.
 
 ### Changed
-- Placeholder for unreleased changes.
+- `setup` now synchronizes `package.json` onboarding scripts to the selected preset (`charter:setup`) instead of only adding missing entries.
 
 ### Fixed
-- Placeholder for unreleased fixes.
+- `audit --range` now fails with a runtime error on invalid git revspecs (matching `validate` semantics) instead of silently returning zero commits.
+- `validate` text output now includes offending short SHAs for faster remediation loops.
 
 ### Security
 - Placeholder for unreleased security updates.
