@@ -83,6 +83,7 @@ Use JSON output and explicit CI semantics:
 ```bash
 charter --format json
 charter setup --ci github --yes --format json
+charter setup --ci github --yes --no-dependency-sync --format json
 charter doctor --format json
 charter validate --format json --ci
 charter drift --format json --ci
@@ -99,6 +100,7 @@ Agent decision rules:
 - If framework signals look wrong, inspect `detected.sources` and rerun setup with an explicit `--preset`.
 - Treat `validate --ci` and `drift --ci` as blocking checks.
 - `validate` and `audit` both report commit range explicitly so coverage numbers are comparable.
+- Use `validate.evidence.policyOffenders` for strict-trailer failures and `validate.evidence.riskOffenders` for threshold-based risk failures.
 
 ## LM Agent Ops Flow
 
@@ -154,6 +156,7 @@ charter setup --preset fullstack --ci github --yes
 
 Detection output includes `detected.sources` in JSON mode so agents can verify which manifests were scanned before applying a baseline.
 Setup also adds optional root scripts when missing: `charter:detect` and `charter:setup`.
+Setup JSON now includes `mutationPlan` and `appliedMutations` so side effects are explicit before/after apply.
 
 ### `charter init`
 
@@ -207,6 +210,7 @@ charter classify "update button color"
 Setup-only options:
 - `--preset <worker|frontend|backend|fullstack>`: override auto-detected preset
 - `--detect-only`: print stack detection result and selected preset without writing files
+- `--no-dependency-sync`: skip rewriting `devDependencies["@stackbilt/cli"]` during setup
 
 ## Exit Codes
 

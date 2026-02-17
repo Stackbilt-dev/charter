@@ -22,7 +22,7 @@ charter - repo-level governance toolkit
 
 Usage:
   charter                          Show immediate governance value + risk snapshot
-  charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only]
+  charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
   charter init [--preset <worker|frontend|backend|fullstack>]
                                    Scaffold .charter/ config directory
@@ -44,6 +44,8 @@ Options:
   --yes              Auto-accept safe setup overwrites
   --preset <name>    Stack preset: worker, frontend, backend, fullstack
   --detect-only      Setup only: print detected stack/preset and exit
+  --no-dependency-sync
+                     Setup only: do not rewrite devDependencies["@stackbilt/cli"]
 `;
 
 export const EXIT_CODE = {

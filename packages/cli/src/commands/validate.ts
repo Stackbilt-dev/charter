@@ -20,21 +20,28 @@ interface LocalValidationResult {
   commits: number;
   trailersFound: number;
   highRiskUnlinked: number;
+  strictTrailerMode: {
+    active: boolean;
+    reason: string;
+  };
   suggestions: string[];
   evidence: {
-    offendingCommits: Array<{
-      sha: string;
-      shortSha: string;
-      subject: string;
-      riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-      riskRuleId: string;
-      matchedSignals: string[];
-      thresholdSource: string;
-      riskReason: string;
-      missingTrailers: string[];
-      filesChangedCount: number;
-    }>;
+    policyOffenders: OffenderCommit[];
+    riskOffenders: OffenderCommit[];
   };
+}
+
+interface OffenderCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  riskRuleId: string;
+  matchedSignals: string[];
+  thresholdSource: string;
+  riskReason: string;
+  missingTrailers: string[];
+  filesChangedCount: number;
 }
 
 interface GitCommitLoadResult {
@@ -187,11 +194,21 @@ function validateCommits(
     commits: commits.length,
     trailersFound: totalTrailers,
     highRiskUnlinked,
+    strictTrailerMode: {
+      active: policy.requireTrailers && totalTrailers === 0,
+      reason: policy.requireTrailers && totalTrailers === 0
+        ? `requireTrailers=true and no trailers found in range (${policy.citationStrictness}).`
+        : 'strict trailer mode not triggered',
+    },
     suggestions,
     evidence: {
-      offendingCommits: buildOffendingCommits(
+      policyOffenders: buildPolicyOffenders(
         commits,
-        totalTrailers === 0,
+        policy.requireTrailers && totalTrailers === 0,
+        threshold
+      ),
+      riskOffenders: buildRiskOffenders(
+        commits,
         unlinked,
         threshold
       ),
@@ -199,20 +216,42 @@ function validateCommits(
   };
 }
 
-function buildOffendingCommits(
+function buildPolicyOffenders(
   commits: GitCommit[],
-  noTrailersFound: boolean,
+  strictModeActive: boolean,
+  threshold: 'LOW' | 'MEDIUM' | 'HIGH'
+): OffenderCommit[] {
+  if (!strictModeActive) return [];
+  return commits.map((commit) => {
+    const filesChanged = commit.files_changed || [];
+    const subject = commit.message.split('\n')[0].slice(0, 200);
+    const riskMeta = getRiskMeta(filesChanged, subject);
+    return {
+      sha: commit.sha,
+      shortSha: commit.sha.slice(0, 7),
+      subject,
+      riskLevel: assessCommitRisk(filesChanged, subject),
+      riskRuleId: riskMeta.ruleId,
+      matchedSignals: riskMeta.signals,
+      thresholdSource: `config.git.trailerThreshold=${threshold}`,
+      riskReason: 'Missing required governance trailers under strict trailer mode.',
+      missingTrailers: ['Governed-By', 'Resolves-Request'],
+      filesChangedCount: filesChanged.length,
+    };
+  });
+}
+
+function buildRiskOffenders(
+  commits: GitCommit[],
   thresholdUnlinked: Array<{ sha: string; message: string; risk: string }>,
   threshold: 'LOW' | 'MEDIUM' | 'HIGH'
-): LocalValidationResult['evidence']['offendingCommits'] {
+): OffenderCommit[] {
   const thresholdMap = new Map<string, { message: string; risk: string }>();
   for (const item of thresholdUnlinked) {
     thresholdMap.set(item.sha, item);
   }
 
-  const targetCommits = noTrailersFound
-    ? commits
-    : commits.filter((commit) => thresholdMap.has(commit.sha));
+  const targetCommits = commits.filter((commit) => thresholdMap.has(commit.sha));
 
   return targetCommits.map((commit) => {
     const thresholdHit = thresholdMap.get(commit.sha);
@@ -317,10 +356,19 @@ function printResult(result: LocalValidationResult): void {
     }
   }
 
-  if (result.evidence.offendingCommits.length > 0) {
+  if (result.evidence.policyOffenders.length > 0) {
     console.log('');
-    console.log('  Offending commits:');
-    for (const commit of result.evidence.offendingCommits.slice(0, 10)) {
+    console.log('  Policy offenders (strict trailer mode):');
+    for (const commit of result.evidence.policyOffenders.slice(0, 10)) {
+      console.log(`    - ${commit.shortSha} [${commit.riskLevel}] ${commit.subject}`);
+      console.log(`      Reason: ${commit.riskReason}`);
+    }
+  }
+
+  if (result.evidence.riskOffenders.length > 0) {
+    console.log('');
+    console.log('  Risk offenders (threshold-driven):');
+    for (const commit of result.evidence.riskOffenders.slice(0, 10)) {
       console.log(`    - ${commit.shortSha} [${commit.riskLevel}] ${commit.subject}`);
       console.log(`      Reason: ${commit.riskReason}`);
     }

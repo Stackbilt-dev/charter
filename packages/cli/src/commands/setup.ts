@@ -82,6 +82,35 @@ interface SetupResult {
     updated: boolean;
     added: string[];
     updatedEntries: string[];
+    skipped?: boolean;
+    reason?: string;
+  };
+  mutationPlan: SetupMutationReport;
+  appliedMutations: SetupMutationReport;
+}
+
+interface SetupMutationReport {
+  baseline: {
+    action: 'create' | 'update' | 'noop';
+    path: string;
+  };
+  workflow: {
+    action: 'create' | 'update' | 'noop' | 'skip';
+    path?: string;
+  };
+  scripts: {
+    action: 'create' | 'update' | 'noop' | 'skip';
+    path?: string;
+    add: string[];
+    update: string[];
+  };
+  dependencies: {
+    action: 'create' | 'update' | 'noop' | 'skip';
+    path?: string;
+    add: string[];
+    update: string[];
+    skipped: boolean;
+    reason?: string;
   };
 }
 
@@ -117,6 +146,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const ciMode = getFlag(args, '--ci');
   const presetFlag = getFlag(args, '--preset');
   const detectOnly = args.includes('--detect-only');
+  const force = options.yes || args.includes('--force');
+  const noDependencySync = args.includes('--no-dependency-sync');
 
   if (ciMode && ciMode !== 'github') {
     throw new CLIError(`Unsupported CI target: ${ciMode}. Supported: github`);
@@ -163,7 +194,15 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     return EXIT_CODE.SUCCESS;
   }
 
-  const initResult = initializeCharter(options.configPath, options.yes || args.includes('--force'), {
+  const baselinePath = path.join(options.configPath, 'config.json');
+  const baselinePlan = planBaselineMutation(baselinePath, force);
+  const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
+  const workflowPlan = ciMode === 'github'
+    ? planManagedFile(workflowPath, getGithubWorkflow())
+    : { action: 'skip' as const };
+  const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
+
+  const initResult = initializeCharter(options.configPath, force, {
     preset: selectedPreset,
     projectName: inferProjectName(contexts),
     features: {
@@ -193,14 +232,46 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       added: [],
       updatedEntries: [],
     },
+    mutationPlan: {
+      baseline: {
+        action: baselinePlan.action,
+        path: baselinePath.replace(/\\/g, '/'),
+      },
+      workflow: {
+        action: workflowPlan.action,
+        path: ciMode === 'github' ? workflowPath.replace(/\\/g, '/') : undefined,
+      },
+      scripts: manifestPlan.report.scripts,
+      dependencies: manifestPlan.report.dependencies,
+    },
+    appliedMutations: {
+      baseline: {
+        action: baselinePlan.action,
+        path: baselinePath.replace(/\\/g, '/'),
+      },
+      workflow: {
+        action: 'skip',
+      },
+      scripts: {
+        action: 'skip',
+        add: [],
+        update: [],
+      },
+      dependencies: {
+        action: 'skip',
+        add: [],
+        update: [],
+        skipped: noDependencySync,
+        reason: noDependencySync ? '--no-dependency-sync' : undefined,
+      },
+    },
   };
 
   if (ciMode === 'github') {
-    const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
-    const workflowWrite = writeManagedFile(
+    const workflowWrite = applyManagedFile(
       workflowPath,
       getGithubWorkflow(),
-      options.yes || args.includes('--force')
+      force
     );
 
     result.workflow = {
@@ -209,11 +280,17 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       created: workflowWrite.created,
       updated: workflowWrite.updated,
     };
+    result.appliedMutations.workflow = {
+      action: workflowWrite.created ? 'create' : workflowWrite.updated ? 'update' : 'noop',
+      path: workflowPath.replace(/\\/g, '/'),
+    };
   }
 
-  const manifest = upsertPackageManifest(selectedPreset);
-  result.scripts = manifest.scripts;
-  result.dependencies = manifest.dependencies;
+  const manifestApplied = syncPackageManifest(selectedPreset, !noDependencySync, true);
+  result.scripts = manifestApplied.legacy.scripts;
+  result.dependencies = manifestApplied.legacy.dependencies;
+  result.appliedMutations.scripts = manifestApplied.report.scripts;
+  result.appliedMutations.dependencies = manifestApplied.report.dependencies;
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -483,7 +560,33 @@ function pick(set: Set<string>, candidates: string[]): string[] {
   return candidates.filter((c) => set.has(c));
 }
 
-function writeManagedFile(targetPath: string, content: string, force: boolean): { created: boolean; updated: boolean } {
+function planBaselineMutation(configFilePath: string, force: boolean): { action: 'create' | 'update' | 'noop' } {
+  const exists = fs.existsSync(path.resolve(configFilePath));
+  if (!exists) {
+    return { action: 'create' };
+  }
+  if (force) {
+    return { action: 'update' };
+  }
+  return { action: 'noop' };
+}
+
+function planManagedFile(targetPath: string, content: string): { action: 'create' | 'update' | 'noop' } {
+  const absolute = path.resolve(targetPath);
+  const exists = fs.existsSync(absolute);
+
+  if (!exists) {
+    return { action: 'create' };
+  }
+
+  const current = fs.readFileSync(absolute, 'utf-8');
+  if (current === content) {
+    return { action: 'noop' };
+  }
+  return { action: 'update' };
+}
+
+function applyManagedFile(targetPath: string, content: string, force: boolean): { created: boolean; updated: boolean } {
   const absolute = path.resolve(targetPath);
   const exists = fs.existsSync(absolute);
 
@@ -517,12 +620,31 @@ function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
 }
 
-function upsertPackageManifest(selectedPreset: StackPreset): Pick<SetupResult, 'scripts' | 'dependencies'> {
+function syncPackageManifest(
+  selectedPreset: StackPreset,
+  syncDependencies: boolean,
+  apply: boolean
+): {
+  report: Pick<SetupMutationReport, 'scripts' | 'dependencies'>;
+  legacy: Pick<SetupResult, 'scripts' | 'dependencies'>;
+} {
   const packageJsonPath = path.resolve('package.json');
   if (!fs.existsSync(packageJsonPath)) {
     return {
-      scripts: { updated: false, added: [], updatedEntries: [] },
-      dependencies: { updated: false, added: [], updatedEntries: [] },
+      report: {
+        scripts: { action: 'skip', add: [], update: [] },
+        dependencies: {
+          action: 'skip',
+          add: [],
+          update: [],
+          skipped: !syncDependencies,
+          reason: !syncDependencies ? '--no-dependency-sync' : 'package.json not found',
+        },
+      },
+      legacy: {
+        scripts: { updated: false, added: [], updatedEntries: [] },
+        dependencies: { updated: false, added: [], updatedEntries: [], skipped: !syncDependencies, reason: !syncDependencies ? '--no-dependency-sync' : 'package.json not found' },
+      },
     };
   }
 
@@ -555,52 +677,77 @@ function upsertPackageManifest(selectedPreset: StackPreset): Pick<SetupResult, '
       updatedEntries.push('charter:setup');
     }
 
-    if (!devDependencies['@stackbilt/cli']) {
-      devDependencies['@stackbilt/cli'] = pinnedCliVersion;
-      depAdded.push('@stackbilt/cli');
-    } else if (devDependencies['@stackbilt/cli'] !== pinnedCliVersion) {
-      devDependencies['@stackbilt/cli'] = pinnedCliVersion;
-      depUpdated.push('@stackbilt/cli');
+    if (syncDependencies) {
+      if (!devDependencies['@stackbilt/cli']) {
+        devDependencies['@stackbilt/cli'] = pinnedCliVersion;
+        depAdded.push('@stackbilt/cli');
+      } else if (devDependencies['@stackbilt/cli'] !== pinnedCliVersion) {
+        devDependencies['@stackbilt/cli'] = pinnedCliVersion;
+        depUpdated.push('@stackbilt/cli');
+      }
     }
 
-    if (added.length === 0 && updatedEntries.length === 0 && depAdded.length === 0 && depUpdated.length === 0) {
-      return {
+    const scriptsChanged = added.length > 0 || updatedEntries.length > 0;
+    const depsChanged = depAdded.length > 0 || depUpdated.length > 0;
+
+    if (apply && (scriptsChanged || (syncDependencies && depsChanged))) {
+      parsed.scripts = scripts;
+      if (syncDependencies) {
+        parsed.devDependencies = devDependencies;
+      }
+      fs.writeFileSync(packageJsonPath, JSON.stringify(parsed, null, 2) + '\n');
+    }
+
+    return {
+      report: {
+        scripts: {
+          action: scriptsChanged ? (added.length > 0 ? 'create' : 'update') : 'noop',
+          path: 'package.json',
+          add: added,
+          update: updatedEntries,
+        },
+        dependencies: {
+          action: !syncDependencies ? 'skip' : depsChanged ? (depAdded.length > 0 ? 'create' : 'update') : 'noop',
+          path: 'package.json',
+          add: depAdded,
+          update: depUpdated,
+          skipped: !syncDependencies,
+          reason: !syncDependencies ? '--no-dependency-sync' : undefined,
+        },
+      },
+      legacy: {
         scripts: {
           packageJsonPath: 'package.json',
-          updated: false,
-          added: [],
-          updatedEntries: [],
+          updated: scriptsChanged,
+          added,
+          updatedEntries,
         },
         dependencies: {
           packageJsonPath: 'package.json',
-          updated: false,
-          added: [],
-          updatedEntries: [],
+          updated: syncDependencies ? depsChanged : false,
+          added: depAdded,
+          updatedEntries: depUpdated,
+          skipped: !syncDependencies,
+          reason: !syncDependencies ? '--no-dependency-sync' : undefined,
         },
-      };
-    }
-
-    parsed.scripts = scripts;
-    parsed.devDependencies = devDependencies;
-    fs.writeFileSync(packageJsonPath, JSON.stringify(parsed, null, 2) + '\n');
-    return {
-      scripts: {
-        packageJsonPath: 'package.json',
-        updated: added.length > 0 || updatedEntries.length > 0,
-        added,
-        updatedEntries,
-      },
-      dependencies: {
-        packageJsonPath: 'package.json',
-        updated: depAdded.length > 0 || depUpdated.length > 0,
-        added: depAdded,
-        updatedEntries: depUpdated,
       },
     };
   } catch {
     return {
-      scripts: { updated: false, added: [], updatedEntries: [] },
-      dependencies: { updated: false, added: [], updatedEntries: [] },
+      report: {
+        scripts: { action: 'skip', add: [], update: [] },
+        dependencies: {
+          action: 'skip',
+          add: [],
+          update: [],
+          skipped: !syncDependencies,
+          reason: 'package.json parse/write failed',
+        },
+      },
+      legacy: {
+        scripts: { updated: false, added: [], updatedEntries: [] },
+        dependencies: { updated: false, added: [], updatedEntries: [], skipped: !syncDependencies, reason: 'package.json parse/write failed' },
+      },
     };
   }
 }
