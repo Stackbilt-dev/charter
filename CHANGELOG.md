@@ -18,6 +18,19 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.17] - 2026-02-17
+
+### Added
+- `validate` JSON now includes `strictTrailerMode` and split evidence arrays: `evidence.policyOffenders` (strict-policy failures) and `evidence.riskOffenders` (threshold-driven risk failures).
+- `setup` JSON now includes explicit `mutationPlan` and `appliedMutations` blocks for baseline/workflow/scripts/dependencies.
+
+### Changed
+- `setup` now supports `--no-dependency-sync` to skip rewriting `devDependencies["@stackbilt/cli"]`.
+- `validate` text output now prints separate policy-vs-risk offender sections to reduce explainability ambiguity.
+
+### Fixed
+- Clarified offender semantics so strict no-trailer failures no longer overload threshold-risk offender reporting.
+
 ## [0.1.16] - 2026-02-17
 
 ### Added
@@ -149,7 +162,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.16...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.17
 [0.1.16]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.16
 [0.1.15]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.15
 [0.1.14]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.14

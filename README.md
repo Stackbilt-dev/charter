@@ -38,6 +38,8 @@ charter setup --preset fullstack --ci github --yes
 `setup` also adds optional root `package.json` scripts when missing:
 - `charter:detect`
 - `charter:setup`
+Setup JSON includes `mutationPlan` and `appliedMutations` so agents can see planned/applied deltas.
+Use `--no-dependency-sync` if you want setup to avoid rewriting `devDependencies["@stackbilt/cli"]`.
 
 Upgrade path in existing repos:
 
@@ -148,6 +150,7 @@ Decision rules for agents:
 - If `setup --detect-only` reports `mixedStack: true`, apply `--preset fullstack`.
 - If detection looks incomplete, inspect `detected.sources` before setup.
 - Treat `validate` and `drift` with `--ci` as merge gates.
+- In `validate` JSON, use `evidence.policyOffenders` for strict trailer policy failures and `evidence.riskOffenders` for threshold-risk failures.
 
 ## Trailer Adoption Ramp
 
@@ -159,7 +162,7 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 ## Command Reference
 
 - `charter`: show repo risk/value snapshot and recommended next action
-- `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only]`: detect stack and scaffold `.charter/` baseline
+- `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]`: detect stack and scaffold `.charter/` baseline
 - `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
 - `charter doctor`: validate environment/config state
 - `charter validate [--ci] [--range <revset>]`: validate commit governance and citations
