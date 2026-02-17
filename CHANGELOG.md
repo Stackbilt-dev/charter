@@ -7,18 +7,43 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- First-release publishing runbook with phased preflight, artifact validation, publish order, and rollback guidance.
+- Human and LM-agent onboarding guides with copy-paste command flows in root and CLI READMEs.
 
 ### Changed
-- README reorganized around two onboarding paths: human terminal flow and CI/agent JSON flow.
-- Root scripts now execute through `bash -lc "pnpm exec ..."` for more reliable local execution in this environment.
-- Vitest config moved to `vitest.config.mts` for ESM-safe test startup.
+- Publishing runbook verification checklist now includes first-run UX checks (`charter`, `charter why`) and version checks.
 
 ### Fixed
-- Removed stale references to private/local-only planning docs from public-facing README.
+- Clarified install-vs-adopt guidance so users understand `npm install -g @stackbilt/cli` installs the tool and `charter setup` applies governance baseline to each repo.
 
 ### Security
 - Placeholder for unreleased security updates.
+
+## [0.1.8] - 2026-02-17
+
+### Added
+- New first-run UX: `charter` now prints a governance value/risk snapshot with a single recommended next action.
+- New `charter why` command to explain adoption rationale and expected operational payoff.
+
+### Changed
+- `setup` command output rewritten to focus on concrete outcomes (guardrails active, CI policy gate, immediate follow-up commands).
+- CLI and root docs updated for human and agent onboarding paths.
+
+## [0.1.6] - 2026-02-17
+
+### Fixed
+- Cross-platform git invocation in `validate` and `audit` (removed shell-specific quoting/redirection issues on Windows).
+- `charter validate` and `charter audit` no longer emit `%an`/shell noise on Windows.
+
+## [0.1.5] - 2026-02-17
+
+### Fixed
+- `charter --version` now reports package version dynamically instead of a hardcoded value.
+
+## [0.1.4] - 2026-02-17
+
+### Fixed
+- Replaced published internal dependency references from `workspace:*` to semver ranges so npm consumers can install successfully.
+- Published patched internal package dependency chain used by CLI.
 
 ## [0.1.0] - 2026-02-16
 
@@ -35,5 +60,9 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.8
+[0.1.6]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.6
+[0.1.5]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.5
+[0.1.4]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.4
 [0.1.0]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.0

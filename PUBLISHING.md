@@ -70,6 +70,9 @@ pnpm --filter @stackbilt/cli pack --dry-run
 2. Verify CLI behavior before publish:
 
 ```bash
+node packages/cli/dist/bin.js --version
+node packages/cli/dist/bin.js
+node packages/cli/dist/bin.js why
 node packages/cli/dist/bin.js --help
 node packages/cli/dist/bin.js setup --format json --yes
 node packages/cli/dist/bin.js doctor --format json
@@ -102,6 +105,9 @@ pnpm --filter @stackbilt/cli publish --access public
 In a clean external repo:
 
 ```bash
+npx @stackbilt/cli@latest --version
+npx @stackbilt/cli@latest
+npx @stackbilt/cli@latest why
 npx @stackbilt/cli@latest setup --ci github
 npx @stackbilt/cli@latest doctor --format json
 npx @stackbilt/cli@latest validate --format json --ci
