@@ -7,6 +7,20 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- Placeholder for unreleased additions.
+
+### Changed
+- Placeholder for unreleased changes.
+
+### Fixed
+- Placeholder for unreleased fixes.
+
+### Security
+- Placeholder for unreleased security updates.
+
+## [0.1.15] - 2026-02-17
+
+### Added
 - `validate` JSON output now includes an evidence block with offending commit details (`sha`, `riskLevel`, `riskReason`, `missingTrailers`).
 - `setup --detect-only` now surfaces runtime ambiguity warnings when multiple runtime families are detected without a clear stack split.
 
@@ -16,9 +30,6 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Fixed
 - `audit --range` now fails with a runtime error on invalid git revspecs (matching `validate` semantics) instead of silently returning zero commits.
 - `validate` text output now includes offending short SHAs for faster remediation loops.
-
-### Security
-- Placeholder for unreleased security updates.
 
 ## [0.1.14] - 2026-02-17
 
@@ -123,7 +134,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.15
 [0.1.14]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.14
 [0.1.13]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.13
 [0.1.12]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.12
