@@ -66,6 +66,16 @@ interface DetectionResult {
   runtime: string[];
   frameworks: string[];
   state: string[];
+  signals: {
+    hasFrontend: boolean;
+    hasBackend: boolean;
+    hasWorker: boolean;
+    hasCloudflare: boolean;
+    hasHono: boolean;
+    hasReact: boolean;
+    hasVite: boolean;
+  };
+  mixedStack: boolean;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   suggestedPreset: StackPreset;
 }
@@ -106,6 +116,10 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       console.log(`  State: ${detection.state.join(', ') || 'none detected'}`);
       console.log(`  Confidence: ${detection.confidence}`);
       console.log(`  Selected preset: ${selectedPreset} (${inferenceMode})`);
+      if (detection.mixedStack) {
+        console.log('  Mixed stack detected (frontend + backend/worker). Recommended preset: fullstack');
+        console.log('  Example: charter setup --preset fullstack --ci github --yes');
+      }
       console.log('');
     }
     return EXIT_CODE.SUCCESS;
@@ -114,6 +128,12 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const initResult = initializeCharter(options.configPath, options.yes || args.includes('--force'), {
     preset: selectedPreset,
     projectName: inferProjectName(),
+    features: {
+      cloudflare: detection.signals.hasCloudflare,
+      hono: detection.signals.hasHono,
+      react: detection.signals.hasReact,
+      vite: detection.signals.hasVite,
+    },
   });
 
   const result: SetupResult = {
@@ -148,6 +168,10 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   console.log(`  Baseline created: ${result.initialized ? 'yes' : 'already present'}`);
   console.log(`  Stack preset: ${result.selectedPreset} (${result.inferenceMode})`);
   console.log(`  Detection confidence: ${result.detected.confidence}`);
+  if (result.detected.mixedStack) {
+    console.log('  Mixed stack detected (frontend + backend/worker).');
+    console.log('  Recommendation: use --preset fullstack when frontend exists under client/ or apps/web.');
+  }
 
   if (result.workflow.mode === 'github') {
     console.log(`  CI policy gate: ${result.workflow.created ? 'enabled' : 'already present'} (${result.workflow.path})`);
@@ -174,6 +198,16 @@ function detectStack(): DetectionResult {
       runtime: [],
       frameworks: [],
       state: [],
+      signals: {
+        hasFrontend: false,
+        hasBackend: false,
+        hasWorker: false,
+        hasCloudflare: false,
+        hasHono: false,
+        hasReact: false,
+        hasVite: false,
+      },
+      mixedStack: false,
       confidence: 'LOW',
       suggestedPreset: 'fullstack',
     };
@@ -184,17 +218,30 @@ function detectStack(): DetectionResult {
     ...Object.keys(pkg.devDependencies || {}),
   ]);
 
+  const hasFrontendDep = hasAny(depNames, ['next', 'react', 'vite', 'vue', '@angular/core', 'svelte']);
+  const hasFrontendPathSignals = hasAnyPath(['client', 'frontend', 'apps/web', 'web']);
+  const hasFrontend = hasFrontendDep || hasFrontendPathSignals;
+  const hasBackend = hasAny(depNames, ['express', 'fastify', 'nestjs', '@nestjs/core', 'koa', 'hono']);
+  const hasWorker = hasAny(depNames, ['wrangler', '@cloudflare/workers-types']);
+
+  const hasCloudflare = hasAny(depNames, ['wrangler', '@cloudflare/workers-types']);
+  const hasHono = hasAny(depNames, ['hono']);
+  const hasReact = hasAny(depNames, ['react']);
+  const hasVite = hasAny(depNames, ['vite']);
+
+  const mixedStack = hasFrontend && (hasBackend || hasWorker);
+
   const frameworks: string[] = [];
   const runtime: string[] = [];
   const state: string[] = [];
 
-  if (hasAny(depNames, ['next', 'react', 'vite', 'vue', '@angular/core', 'svelte'])) {
+  if (hasFrontendDep) {
     frameworks.push(...pick(depNames, ['next', 'react', 'vite', 'vue', '@angular/core', 'svelte']));
   }
-  if (hasAny(depNames, ['express', 'fastify', 'nestjs', '@nestjs/core', 'koa', 'hono'])) {
+  if (hasBackend) {
     frameworks.push(...pick(depNames, ['express', 'fastify', 'nestjs', '@nestjs/core', 'koa', 'hono']));
   }
-  if (hasAny(depNames, ['wrangler', '@cloudflare/workers-types'])) {
+  if (hasWorker) {
     runtime.push('edge-worker');
   }
   if (pkg.engines?.node || hasAny(depNames, ['typescript', 'ts-node', 'express', 'fastify', 'next'])) {
@@ -204,26 +251,32 @@ function detectStack(): DetectionResult {
     state.push(...pick(depNames, ['zustand', 'redux', '@reduxjs/toolkit', 'mobx', 'xstate']));
   }
 
-  const hasFrontend = hasAny(depNames, ['next', 'react', 'vite', 'vue', '@angular/core', 'svelte']);
-  const hasBackend = hasAny(depNames, ['express', 'fastify', 'nestjs', '@nestjs/core', 'koa', 'hono']);
-  const hasWorker = hasAny(depNames, ['wrangler', '@cloudflare/workers-types']);
+  const signals = {
+    hasFrontend,
+    hasBackend,
+    hasWorker,
+    hasCloudflare,
+    hasHono,
+    hasReact,
+    hasVite,
+  };
 
-  if (hasWorker && !hasFrontend && !hasBackend) {
-    return { runtime, frameworks, state, confidence: 'HIGH', suggestedPreset: 'worker' };
+  if (mixedStack) {
+    return { runtime, frameworks, state, signals, mixedStack: true, confidence: 'HIGH', suggestedPreset: 'fullstack' };
   }
-  if (hasFrontend && hasBackend) {
-    return { runtime, frameworks, state, confidence: 'HIGH', suggestedPreset: 'fullstack' };
+  if (hasWorker && !hasFrontend && !hasBackend) {
+    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'HIGH', suggestedPreset: 'worker' };
   }
   if (hasFrontend) {
-    return { runtime, frameworks, state, confidence: 'HIGH', suggestedPreset: 'frontend' };
+    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'HIGH', suggestedPreset: 'frontend' };
   }
   if (hasBackend) {
-    return { runtime, frameworks, state, confidence: 'HIGH', suggestedPreset: 'backend' };
+    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'HIGH', suggestedPreset: 'backend' };
   }
   if (runtime.length > 0 || state.length > 0) {
-    return { runtime, frameworks, state, confidence: 'MEDIUM', suggestedPreset: 'fullstack' };
+    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'MEDIUM', suggestedPreset: 'fullstack' };
   }
-  return { runtime, frameworks, state, confidence: 'LOW', suggestedPreset: 'fullstack' };
+  return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'LOW', suggestedPreset: 'fullstack' };
 }
 
 function loadPackageJson(): {
@@ -251,6 +304,10 @@ function inferProjectName(): string {
 
 function hasAny(set: Set<string>, candidates: string[]): boolean {
   return candidates.some((c) => set.has(c));
+}
+
+function hasAnyPath(paths: string[]): boolean {
+  return paths.some((p) => fs.existsSync(path.resolve(p)));
 }
 
 function pick(set: Set<string>, candidates: string[]): string[] {

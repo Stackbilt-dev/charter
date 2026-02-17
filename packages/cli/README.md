@@ -108,6 +108,13 @@ charter setup --detect-only
 charter setup --preset frontend
 ```
 
+For mixed repos (for example Worker backend + React frontend under `client/`), prefer:
+
+```bash
+charter setup --detect-only
+charter setup --preset fullstack --ci github --yes
+```
+
 ### `charter init`
 
 Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|backend|fullstack`.

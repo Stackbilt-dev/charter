@@ -201,6 +201,12 @@ interface InitResult {
 interface InitializeOptions {
   projectName?: string;
   preset?: StackPreset;
+  features?: {
+    cloudflare?: boolean;
+    hono?: boolean;
+    react?: boolean;
+    vite?: boolean;
+  };
 }
 
 export async function initCommand(options: CLIOptions, args: string[] = []): Promise<number> {
@@ -253,11 +259,12 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
   }
 
   const selectedPreset = initOptions.preset || 'fullstack';
+  const patterns = buildPatternTemplate(selectedPreset, initOptions.features);
   fs.writeFileSync(configFile, getDefaultConfigJSON(initOptions.projectName) + '\n');
 
   fs.writeFileSync(
     path.join(configDir, 'patterns', 'blessed-stack.json'),
-    JSON.stringify(PATTERN_TEMPLATES[selectedPreset], null, 2) + '\n'
+    JSON.stringify(patterns, null, 2) + '\n'
   );
 
   fs.writeFileSync(path.join(configDir, 'policies', 'governance.md'), DEFAULT_POLICY_CONTENT);
@@ -285,4 +292,54 @@ function getFlag(args: string[], flag: string): string | undefined {
     return args[idx + 1];
   }
   return undefined;
+}
+
+function buildPatternTemplate(
+  preset: StackPreset,
+  features: InitializeOptions['features']
+): unknown[] {
+  const base = JSON.parse(JSON.stringify(PATTERN_TEMPLATES[preset])) as Array<Record<string, string>>;
+
+  if (!features) {
+    return base;
+  }
+
+  if (features.cloudflare) {
+    base.unshift({
+      name: 'Cloudflare Worker Runtime',
+      category: 'COMPUTE',
+      blessed_solution: 'Cloudflare Workers + Wrangler deployment workflow',
+      rationale: 'Cloudflare-native edge execution for APIs and middleware',
+      anti_patterns: 'Avoid mixing non-edge runtime assumptions into worker handlers',
+      status: 'ACTIVE',
+    });
+  }
+
+  if (features.hono) {
+    base.unshift({
+      name: 'Hono API Layer',
+      category: 'INTEGRATION',
+      blessed_solution: 'Hono route composition for worker/backend APIs',
+      rationale: 'Typed lightweight router aligned to edge/server runtimes',
+      anti_patterns: 'Avoid ad-hoc route registration patterns per handler file',
+      status: 'ACTIVE',
+    });
+  }
+
+  if (features.react || features.vite) {
+    base.unshift({
+      name: 'React/Vite Frontend Baseline',
+      category: 'COMPUTE',
+      blessed_solution: 'React + Vite build/runtime conventions',
+      rationale: 'Fast dev feedback and predictable frontend artifact generation',
+      anti_patterns: 'Avoid mixed frontend build toolchains in the same app',
+      status: 'ACTIVE',
+    });
+  }
+
+  const dedup = new Map<string, Record<string, string>>();
+  for (const pattern of base) {
+    dedup.set(pattern.name, pattern);
+  }
+  return [...dedup.values()];
 }
