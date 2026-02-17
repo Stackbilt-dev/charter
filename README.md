@@ -17,6 +17,12 @@ npx charter drift --ci --format json
 npx charter audit --format json
 ```
 
+If you are installing at a pnpm workspace root, use:
+
+```bash
+pnpm add -Dw @stackbilt/cli
+```
+
 Global install is optional if you want `charter` on your PATH:
 
 ```bash
@@ -95,6 +101,7 @@ For someone new to governance tooling, use this exact sequence inside the target
 npm install -g @stackbilt/cli
 charter
 charter setup --ci github
+charter classify "describe the planned change"
 charter doctor --format json
 charter validate --format text
 charter drift --format text
@@ -136,6 +143,7 @@ npm install --save-dev @stackbilt/cli@latest
 # detect + apply baseline
 npx charter setup --detect-only --format json
 npx charter setup --ci github --yes --format json
+npx charter classify "describe the planned change" --format json
 
 # pre-merge / CI gates
 npx charter validate --ci --format json
@@ -172,6 +180,7 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter drift [--path <dir>] [--ci]`: run drift scan
 - `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
+- `charter hook install --commit-msg`: install commit-msg trailer normalization hook
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
