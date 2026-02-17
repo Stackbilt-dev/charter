@@ -7,6 +7,20 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
+- Placeholder for unreleased additions.
+
+### Changed
+- Placeholder for unreleased changes.
+
+### Fixed
+- Placeholder for unreleased fixes.
+
+### Security
+- Placeholder for unreleased security updates.
+
+## [0.1.14] - 2026-02-17
+
+### Added
 - Documentation runbook updates for mixed-stack setup decision flow and LM-agent decision rules.
 - `setup` now adds optional onboarding scripts to root `package.json` when missing: `charter:detect` and `charter:setup`.
 - `validate` and `audit` now include explicit commit range in output for easier score interpretation.
@@ -16,12 +30,6 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 - Publishing guide now verifies `detected.sources` in setup detection output and includes drift/audit checks in post-publish validation.
 - Generated GitHub workflow from `setup --ci github` now installs a pinned CLI version for reproducible CI behavior.
 - Default baseline config now enforces stricter trailer policy (`validation.citationStrictness: "FAIL"`).
-
-### Fixed
-- Placeholder for unreleased fixes.
-
-### Security
-- Placeholder for unreleased security updates.
 
 ## [0.1.13] - 2026-02-17
 
@@ -113,7 +121,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.14
 [0.1.13]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.13
 [0.1.12]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.12
 [0.1.11]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.11
