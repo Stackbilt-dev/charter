@@ -4,17 +4,24 @@ Charter is a local-first governance toolkit for software repos. It works in both
 
 ## Install And Adopt (Start Here)
 
-`npm install -g @stackbilt/cli` installs the CLI binary.  
-`charter setup --ci github` applies the governance baseline into the current repo (`.charter/*` and optional workflow).
+Recommended for most repos (local install):
 
-Fast path for most users:
+```bash
+npm install --save-dev @stackbilt/cli
+npx charter
+npx charter setup --ci github
+npx charter doctor --format json
+```
+
+Global install is optional if you want `charter` on your PATH:
 
 ```bash
 npm install -g @stackbilt/cli
 charter
 charter setup --ci github
-charter doctor --format json
 ```
+
+`setup` is what applies the governance baseline into the current repo (`.charter/*` and optional workflow).
 
 ## Why Charter
 

@@ -7,16 +7,31 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- Human and LM-agent onboarding guides with copy-paste command flows in root and CLI READMEs.
+- Placeholder for unreleased additions.
 
 ### Changed
-- Publishing runbook verification checklist now includes first-run UX checks (`charter`, `charter why`) and version checks.
+- Placeholder for unreleased changes.
 
 ### Fixed
-- Clarified install-vs-adopt guidance so users understand `npm install -g @stackbilt/cli` installs the tool and `charter setup` applies governance baseline to each repo.
+- Placeholder for unreleased fixes.
 
 ### Security
 - Placeholder for unreleased security updates.
+
+## [0.1.10] - 2026-02-17
+
+### Changed
+- Root and CLI README install guidance now leads with local repo install (`npm i -D @stackbilt/cli` + `npx charter`) and keeps global install as optional.
+- Audit output now includes explicit scoring formulas and actionable remediation steps for trailer coverage, pattern definitions, and policy docs.
+
+### Fixed
+- `charter validate` now returns runtime error (`exit 2`) when git commit loading fails (for example invalid revision/range), instead of incorrectly returning PASS.
+- Validation output now distinguishes true "no commits" from internal git failures.
+
+## [0.1.9] - 2026-02-17
+
+### Changed
+- Synchronized all published `@stackbilt/*` packages to version `0.1.9` with aligned internal dependency ranges.
 
 ## [0.1.8] - 2026-02-17
 
@@ -60,7 +75,9 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.10
+[0.1.9]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.9
 [0.1.8]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.8
 [0.1.6]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.6
 [0.1.5]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.5
