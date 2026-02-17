@@ -12,17 +12,23 @@ import { validateCommand } from './commands/validate';
 import { auditCommand } from './commands/audit';
 import { driftCommand } from './commands/drift';
 import { classifyCommand } from './commands/classify';
+import { quickstartCommand, whyCommand } from './commands/why';
+import packageJson from '../package.json';
+
+const CLI_VERSION = packageJson.version;
 
 const HELP = `
 charter - repo-level governance toolkit
 
 Usage:
+  charter                          Show immediate governance value + risk snapshot
   charter setup [--ci github]     Bootstrap .charter/ and optional CI workflow
   charter init                     Scaffold .charter/ config directory
   charter validate                 Validate git commits for governance trailers
   charter audit                    Generate governance audit report
   charter drift [--path <dir>]     Scan files for pattern drift
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
+  charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor                   Check CLI + config health
   charter --help                   Show this help
   charter --version                Show version
@@ -58,29 +64,34 @@ export interface CLIOptions {
 }
 
 export async function run(args: string[]): Promise<number> {
-  if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+  if (args.includes('--help') || args.includes('-h')) {
     console.log(HELP);
     return EXIT_CODE.SUCCESS;
   }
 
   if (args.includes('--version') || args.includes('-v')) {
-    console.log('charter v0.1.0');
+    console.log(`charter v${CLI_VERSION}`);
     return EXIT_CODE.SUCCESS;
   }
 
-  const command = args[0];
-  const restArgs = args.slice(1);
-  const format = getFlag(restArgs, '--format') || 'text';
+  const format = getFlag(args, '--format') || 'text';
   if (format !== 'text' && format !== 'json') {
     throw new CLIError(`Invalid --format value: ${format}. Use text or json.`);
   }
 
   const options: CLIOptions = {
-    configPath: getFlag(restArgs, '--config') || '.charter',
+    configPath: getFlag(args, '--config') || '.charter',
     format,
-    ciMode: restArgs.includes('--ci'),
-    yes: restArgs.includes('--yes'),
+    ciMode: args.includes('--ci'),
+    yes: args.includes('--yes'),
   };
+
+  if (args.length === 0 || args[0].startsWith('-')) {
+    return quickstartCommand(options);
+  }
+
+  const command = args[0];
+  const restArgs = args.slice(1);
 
   switch (command) {
     case 'setup':
@@ -95,6 +106,8 @@ export async function run(args: string[]): Promise<number> {
       return driftCommand(options, restArgs);
     case 'classify':
       return classifyCommand(options, restArgs);
+    case 'why':
+      return whyCommand(options);
     case 'doctor':
       return doctorCommand(options);
     default:

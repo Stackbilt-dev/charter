@@ -91,19 +91,24 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     return EXIT_CODE.SUCCESS;
   }
 
-  console.log('  Charter setup complete.');
-  console.log(`  Config path: ${result.configPath}`);
-  console.log(`  .charter initialized: ${result.initialized ? 'yes' : 'already present'}`);
+  console.log('  Governance guardrails are now active for this repo.');
+  console.log(`  Baseline path: ${result.configPath}`);
+  console.log(`  Baseline created: ${result.initialized ? 'yes' : 'already present'}`);
 
   if (result.workflow.mode === 'github') {
-    console.log(`  GitHub workflow: ${result.workflow.created ? 'created' : 'already present'} (${result.workflow.path})`);
+    console.log(`  CI policy gate: ${result.workflow.created ? 'enabled' : 'already present'} (${result.workflow.path})`);
   }
 
   console.log('');
-  console.log('  Next steps:');
-  console.log('    1. Run: charter validate --format text');
-  console.log('    2. Run: charter drift --format text');
-  console.log('    3. Tune .charter/config.json and patterns/*.json');
+  console.log('  What this gives you immediately:');
+  console.log('    - Merge-time checks for risky changes without governance links');
+  console.log('    - Drift detection against your blessed stack');
+  console.log('    - Audit-ready governance evidence from repo history');
+  console.log('');
+  console.log('  Run now:');
+  console.log('    1. charter validate --format text');
+  console.log('    2. charter drift --format text');
+  console.log('    3. charter audit --format text');
 
   return EXIT_CODE.SUCCESS;
 }

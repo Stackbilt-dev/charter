@@ -5,7 +5,7 @@
  * Checks that high-risk commits reference ADRs or governance requests.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import type { GitCommit } from '@stackbilt/types';
@@ -156,16 +156,20 @@ function getCommitRange(args: string[]): string {
   }
 
   try {
-    const mainBranch = execSync('git rev-parse --verify main 2>/dev/null || git rev-parse --verify master 2>/dev/null', {
-      encoding: 'utf-8',
-    }).trim();
-    const currentBranch = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+    const currentBranch = runGit(['rev-parse', 'HEAD']).trim();
 
-    if (mainBranch === currentBranch) {
+    let baseBranch = '';
+    try {
+      baseBranch = runGit(['rev-parse', '--verify', 'main']).trim();
+    } catch {
+      baseBranch = runGit(['rev-parse', '--verify', 'master']).trim();
+    }
+
+    if (!baseBranch || baseBranch === currentBranch) {
       return 'HEAD~5..HEAD';
     }
 
-    return `${mainBranch}..HEAD`;
+    return `${baseBranch}..HEAD`;
   } catch {
     return 'HEAD~5..HEAD';
   }
@@ -173,10 +177,7 @@ function getCommitRange(args: string[]): string {
 
 function getGitCommits(range: string): GitCommit[] {
   try {
-    const log = execSync(
-      `git log ${range} --format='%H|%an|%aI|%s' --name-only`,
-      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
-    );
+    const log = runGit(['log', range, '--format=%H|%an|%aI|%s', '--name-only']);
 
     const commits: GitCommit[] = [];
     let current: GitCommit | null = null;
@@ -186,7 +187,7 @@ function getGitCommits(range: string): GitCommit[] {
         if (current) commits.push(current);
         const [sha, author, timestamp, ...msgParts] = line.split('|');
         current = {
-          sha: sha.replace(/'/g, ''),
+          sha,
           author,
           timestamp,
           message: msgParts.join('|'),
@@ -202,4 +203,11 @@ function getGitCommits(range: string): GitCommit[] {
   } catch {
     return [];
   }
+}
+
+function runGit(args: string[]): string {
+  return execFileSync('git', args, {
+    encoding: 'utf-8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
 }

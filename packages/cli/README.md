@@ -11,6 +11,7 @@ npm install -g @stackbilt/cli
 ```
 
 This pulls in all Charter Kit packages automatically. You get the `charter` command globally.
+Use `charter setup` inside each repo to scaffold governance baseline files.
 
 For CI pipelines, install as a dev dependency instead:
 
@@ -23,7 +24,9 @@ Requires Node >= 18.
 ## Quick Start
 
 ```bash
-charter setup          # bootstrap .charter/ directory
+charter                # quick value/risk snapshot + next action
+charter why            # why teams adopt Charter and expected payoff
+charter setup          # bootstrap .charter/ directory + policy baseline
 charter doctor         # check CLI + config health
 charter validate       # validate commit governance trailers
 charter drift          # scan for blessed-stack drift
@@ -31,11 +34,61 @@ charter audit          # generate governance audit report
 charter classify "migrate auth provider"
 ```
 
+## Human Onboarding (Copy/Paste)
+
+Run this in the target repository:
+
+```bash
+npm install -g @stackbilt/cli
+charter
+charter setup --ci github
+charter doctor --format json
+charter validate --format text
+charter drift --format text
+charter audit --format text
+```
+
+This ensures people immediately see:
+- what Charter is doing in their repo
+- where baseline files were created (`.charter/*`)
+- how policy checks behave before merge
+
+## LM Agent Onboarding (Deterministic)
+
+Use JSON output and explicit CI semantics:
+
+```bash
+charter --format json
+charter setup --ci github --yes --format json
+charter doctor --format json
+charter validate --format json --ci
+charter drift --format json --ci
+charter audit --format json
+```
+
+Agent handling contract:
+- `exit 0`: pass
+- `exit 1`: policy violation (action required)
+- `exit 2`: runtime/usage failure
+
 ## Commands
+
+### `charter` (no args)
+
+Default first-run experience. Shows:
+- repository governance baseline status
+- commit governance coverage snapshot
+- high-risk unlinked commit count
+- one recommended next action
+
+### `charter why`
+
+Explains the adoption case in plain terms (problem, what Charter enforces, expected operational payoff).
 
 ### `charter setup`
 
 Bootstrap `.charter/` with config, patterns, and policies. Optionally generates a GitHub Actions workflow.
+This is the command that applies Charter governance into a repository.
 
 ```bash
 charter setup --ci github --yes

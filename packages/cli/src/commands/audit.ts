@@ -5,7 +5,7 @@
  * Summarizes governance coverage, pattern adoption, and policy compliance.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
@@ -170,10 +170,7 @@ function printReport(report: AuditReport): void {
 
 function getRecentCommits(count: number): GitCommit[] {
   try {
-    const log = execSync(
-      `git log -${count} --format='%H|%an|%aI|%B---END---' --name-only 2>/dev/null`,
-      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 }
-    );
+    const log = runGit(['log', `-${count}`, '--format=%H|%an|%aI|%B---END---', '--name-only']);
 
     const commits: GitCommit[] = [];
     const entries = log.split('---END---');
@@ -186,7 +183,7 @@ function getRecentCommits(count: number): GitCommit[] {
       if (!firstLine.includes('|')) continue;
 
       const pipeIdx = firstLine.indexOf('|');
-      const sha = firstLine.slice(0, pipeIdx).replace(/'/g, '');
+      const sha = firstLine.slice(0, pipeIdx);
       const rest = firstLine.slice(pipeIdx + 1);
       const [author, timestamp, ...msgParts] = rest.split('|');
 
@@ -211,4 +208,11 @@ function getRecentCommits(count: number): GitCommit[] {
   } catch {
     return [];
   }
+}
+
+function runGit(args: string[]): string {
+  return execFileSync('git', args, {
+    encoding: 'utf-8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
 }
