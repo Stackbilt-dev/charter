@@ -18,6 +18,21 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.16] - 2026-02-17
+
+### Added
+- `validate` now emits commit-level evidence even for zero-trailer failures, including `riskRuleId`, `matchedSignals`, and `thresholdSource`.
+- `drift --format json` now includes explicit decision metadata (`status`, `minScore`, `thresholdPercent`, `configPath`).
+
+### Changed
+- `setup` now treats multi-runtime detection as mixed stack (`mixedStack: true`) with consistent fullstack recommendation semantics.
+- Generated GitHub workflow now runs Charter via repo-local `npx` after dependency install instead of global CLI install.
+- `setup` now pins local `@stackbilt/cli` devDependency to the active CLI version for local/CI parity.
+- Setup workflow telemetry now distinguishes `created` vs `updated` for truthful idempotency reporting.
+
+### Fixed
+- Script synchronization no longer depends on setup path differences when preset inference converges on fullstack.
+
 ## [0.1.15] - 2026-02-17
 
 ### Added
@@ -134,7 +149,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.16...HEAD
+[0.1.16]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.16
 [0.1.15]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.15
 [0.1.14]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.14
 [0.1.13]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.13
