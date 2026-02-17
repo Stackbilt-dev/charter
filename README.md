@@ -2,6 +2,20 @@
 
 Charter is a local-first governance toolkit for software repos. It works in both terminal-first human workflows and deterministic CI/agent workflows.
 
+## Install And Adopt (Start Here)
+
+`npm install -g @stackbilt/cli` installs the CLI binary.  
+`charter setup --ci github` applies the governance baseline into the current repo (`.charter/*` and optional workflow).
+
+Fast path for most users:
+
+```bash
+npm install -g @stackbilt/cli
+charter
+charter setup --ci github
+charter doctor --format json
+```
+
 ## Why Charter
 
 - Validate governance trailers like `Governed-By` and `Resolves-Request`
@@ -38,19 +52,6 @@ node packages/cli/dist/bin.js doctor --format json --ci
 node packages/cli/dist/bin.js validate --format json --ci
 node packages/cli/dist/bin.js drift --format json --ci
 node packages/cli/dist/bin.js audit --format json --ci
-```
-
-## Install And Adopt In A Repo
-
-`npm install -g @stackbilt/cli` installs the CLI binary.  
-`charter setup --ci github` is what installs governance baseline files into a specific repository (`.charter/*` and optional workflow).
-
-Typical per-repo flow:
-
-```bash
-charter
-charter setup --ci github
-charter doctor --format json
 ```
 
 ## Human Onboarding (Copy/Paste)
