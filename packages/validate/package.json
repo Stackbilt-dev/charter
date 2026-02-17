@@ -1,6 +1,6 @@
 {
   "name": "@stackbilt/validate",
-  "version": "0.1.4",
+  "version": "0.1.9",
   "description": "Citation validation, message classification, and governance checks",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,7 +28,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@stackbilt/types": "^0.1.3"
+    "@stackbilt/types": "^0.1.9"
   },
   "license": "Apache-2.0"
 }
