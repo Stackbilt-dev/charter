@@ -1,6 +1,6 @@
 {
   "name": "@stackbilt/cli",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Charter CLI — repo-level governance checks",
   "bin": {
     "charter": "./dist/bin.js"
