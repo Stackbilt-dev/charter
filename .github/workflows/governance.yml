@@ -34,8 +34,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Charter CLI
-        run: npm install -g @stackbilt/cli
+      - name: Install Charter CLI (pinned)
+        run: npm install -g @stackbilt/cli@0.1.13
 
       - name: Validate Commits
         run: charter validate --ci --format text
