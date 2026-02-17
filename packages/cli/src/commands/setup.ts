@@ -69,6 +69,7 @@ interface SetupResult {
     packageJsonPath?: string;
     updated: boolean;
     added: string[];
+    updatedEntries: string[];
   };
 }
 
@@ -89,6 +90,7 @@ interface DetectionResult {
   mixedStack: boolean;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   suggestedPreset: StackPreset;
+  warnings: string[];
 }
 
 interface PackageContext {
@@ -141,6 +143,9 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
         console.log('  Mixed stack detected (frontend + backend/worker). Recommended preset: fullstack');
         console.log('  Example: charter setup --preset fullstack --ci github --yes');
       }
+      for (const warning of detection.warnings) {
+        console.log(`  Warning: ${warning}`);
+      }
       console.log('');
     }
     return EXIT_CODE.SUCCESS;
@@ -169,6 +174,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     scripts: {
       updated: false,
       added: [],
+      updatedEntries: [],
     },
   };
 
@@ -203,12 +209,17 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     console.log('  Mixed stack detected (frontend + backend/worker).');
     console.log('  Recommendation: use --preset fullstack when frontend exists under client/ or apps/web.');
   }
+  for (const warning of result.detected.warnings) {
+    console.log(`  Detection warning: ${warning}`);
+  }
 
   if (result.workflow.mode === 'github') {
     console.log(`  CI policy gate: ${result.workflow.created ? 'enabled' : 'already present'} (${result.workflow.path})`);
   }
   if (result.scripts.updated) {
-    console.log(`  Package scripts added: ${result.scripts.added.join(', ')} (${result.scripts.packageJsonPath})`);
+    const added = result.scripts.added.length > 0 ? `added [${result.scripts.added.join(', ')}]` : '';
+    const updated = result.scripts.updatedEntries.length > 0 ? `updated [${result.scripts.updatedEntries.join(', ')}]` : '';
+    console.log(`  Package scripts synced: ${[added, updated].filter(Boolean).join('; ')} (${result.scripts.packageJsonPath})`);
   }
 
   console.log('');
@@ -244,6 +255,7 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       mixedStack: false,
       confidence: 'LOW',
       suggestedPreset: 'fullstack',
+      warnings: [],
     };
   }
 
@@ -285,6 +297,7 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
   }
 
   const dedup = (values: string[]) => [...new Set(values)];
+  const dedupRuntime = dedup(runtime);
   const signals = {
     hasFrontend,
     hasBackend,
@@ -294,10 +307,15 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
     hasReact,
     hasVite,
   };
+  const warnings: string[] = [];
+
+  if (dedupRuntime.length > 1 && !mixedStack) {
+    warnings.push('Multiple runtime families detected without clear frontend/backend split; verify preset selection.');
+  }
 
   if (mixedStack) {
     return {
-      runtime: dedup(runtime),
+      runtime: dedupRuntime,
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
@@ -305,47 +323,52 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       mixedStack: true,
       confidence: 'HIGH',
       suggestedPreset: 'fullstack',
+      warnings,
     };
   }
   if (hasWorker && !hasFrontend && !hasBackend) {
+    const hasMultiRuntime = dedupRuntime.length > 1;
     return {
-      runtime: dedup(runtime),
+      runtime: dedupRuntime,
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
       signals,
       mixedStack: false,
-      confidence: 'HIGH',
-      suggestedPreset: 'worker',
+      confidence: hasMultiRuntime ? 'MEDIUM' : 'HIGH',
+      suggestedPreset: hasMultiRuntime ? 'fullstack' : 'worker',
+      warnings,
     };
   }
   if (hasFrontend) {
     return {
-      runtime: dedup(runtime),
+      runtime: dedupRuntime,
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
       signals,
       mixedStack: false,
-      confidence: 'HIGH',
+      confidence: warnings.length > 0 ? 'MEDIUM' : 'HIGH',
       suggestedPreset: 'frontend',
+      warnings,
     };
   }
   if (hasBackend) {
     return {
-      runtime: dedup(runtime),
+      runtime: dedupRuntime,
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
       signals,
       mixedStack: false,
-      confidence: 'HIGH',
+      confidence: warnings.length > 0 ? 'MEDIUM' : 'HIGH',
       suggestedPreset: 'backend',
+      warnings,
     };
   }
   if (runtime.length > 0 || state.length > 0) {
     return {
-      runtime: dedup(runtime),
+      runtime: dedupRuntime,
       frameworks: dedup(frameworks),
       state: dedup(state),
       sources: contexts.map((c) => c.source),
@@ -353,10 +376,11 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       mixedStack: false,
       confidence: 'MEDIUM',
       suggestedPreset: 'fullstack',
+      warnings,
     };
   }
   return {
-    runtime: dedup(runtime),
+    runtime: dedupRuntime,
     frameworks: dedup(frameworks),
     state: dedup(state),
     sources: contexts.map((c) => c.source),
@@ -364,6 +388,7 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
     mixedStack: false,
     confidence: 'LOW',
     suggestedPreset: 'fullstack',
+    warnings,
   };
 }
 
@@ -457,7 +482,7 @@ function isValidPreset(value: string | undefined): value is StackPreset {
 function upsertPackageScripts(selectedPreset: StackPreset): SetupResult['scripts'] {
   const packageJsonPath = path.resolve('package.json');
   if (!fs.existsSync(packageJsonPath)) {
-    return { updated: false, added: [] };
+    return { updated: false, added: [], updatedEntries: [] };
   }
 
   try {
@@ -465,21 +490,31 @@ function upsertPackageScripts(selectedPreset: StackPreset): SetupResult['scripts
     const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
     const scripts = parsed.scripts || {};
     const added: string[] = [];
+    const updatedEntries: string[] = [];
+    const detectCommand = 'charter setup --detect-only --format json';
+    const setupCommand = `charter setup --preset ${selectedPreset} --ci github --yes`;
 
     if (!scripts['charter:detect']) {
-      scripts['charter:detect'] = 'charter setup --detect-only --format json';
+      scripts['charter:detect'] = detectCommand;
       added.push('charter:detect');
+    } else if (scripts['charter:detect'] !== detectCommand) {
+      scripts['charter:detect'] = detectCommand;
+      updatedEntries.push('charter:detect');
     }
     if (!scripts['charter:setup']) {
-      scripts['charter:setup'] = `charter setup --preset ${selectedPreset} --ci github --yes`;
+      scripts['charter:setup'] = setupCommand;
       added.push('charter:setup');
+    } else if (scripts['charter:setup'] !== setupCommand) {
+      scripts['charter:setup'] = setupCommand;
+      updatedEntries.push('charter:setup');
     }
 
-    if (added.length === 0) {
+    if (added.length === 0 && updatedEntries.length === 0) {
       return {
         packageJsonPath: 'package.json',
         updated: false,
         added: [],
+        updatedEntries: [],
       };
     }
 
@@ -489,8 +524,9 @@ function upsertPackageScripts(selectedPreset: StackPreset): SetupResult['scripts
       packageJsonPath: 'package.json',
       updated: true,
       added,
+      updatedEntries,
     };
   } catch {
-    return { updated: false, added: [] };
+    return { updated: false, added: [], updatedEntries: [] };
   }
 }

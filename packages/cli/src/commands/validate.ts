@@ -21,6 +21,17 @@ interface LocalValidationResult {
   trailersFound: number;
   highRiskUnlinked: number;
   suggestions: string[];
+  evidence: {
+    offendingCommits: Array<{
+      sha: string;
+      shortSha: string;
+      subject: string;
+      riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+      riskReason: string;
+      missingTrailers: string[];
+      filesChangedCount: number;
+    }>;
+  };
 }
 
 interface GitCommitLoadResult {
@@ -174,6 +185,21 @@ function validateCommits(
     trailersFound: totalTrailers,
     highRiskUnlinked,
     suggestions,
+    evidence: {
+      offendingCommits: unlinked.map((entry) => {
+        const commit = commits.find((c) => c.sha === entry.sha);
+        const filesChanged = commit?.files_changed || [];
+        return {
+          sha: entry.sha,
+          shortSha: entry.sha.slice(0, 7),
+          subject: entry.message,
+          riskLevel: entry.risk as 'LOW' | 'MEDIUM' | 'HIGH',
+          riskReason: getRiskReason(filesChanged, entry.message),
+          missingTrailers: ['Governed-By', 'Resolves-Request'],
+          filesChangedCount: filesChanged.length,
+        };
+      }),
+    },
   };
 }
 
@@ -189,6 +215,15 @@ function printResult(result: LocalValidationResult): void {
     console.log('  Suggestions:');
     for (const s of result.suggestions) {
       console.log(`    - ${s}`);
+    }
+  }
+
+  if (result.evidence.offendingCommits.length > 0) {
+    console.log('');
+    console.log('  Offending commits:');
+    for (const commit of result.evidence.offendingCommits.slice(0, 10)) {
+      console.log(`    - ${commit.shortSha} [${commit.riskLevel}] ${commit.subject}`);
+      console.log(`      Reason: ${commit.riskReason}`);
     }
   }
 
@@ -302,4 +337,21 @@ function runGit(args: string[]): string {
     maxBuffer: 10 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function getRiskReason(filesChanged: string[], subject: string): string {
+  const lowered = `${subject}\n${filesChanged.join('\n')}`.toLowerCase();
+  if (lowered.includes('migration') || lowered.includes('/migrations/')) {
+    return 'Touches migration-related paths or message keywords.';
+  }
+  if (lowered.includes('schema') || lowered.includes('model')) {
+    return 'Touches schema/model related changes.';
+  }
+  if (lowered.includes('auth') || lowered.includes('security')) {
+    return 'Touches auth/security related code or message keywords.';
+  }
+  if (filesChanged.length >= 10) {
+    return 'Large change footprint by number of files changed.';
+  }
+  return 'Exceeded configured governance risk threshold based on commit content.';
 }

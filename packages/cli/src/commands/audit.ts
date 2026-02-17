@@ -61,12 +61,32 @@ interface PolicyCoverageResult {
   missingSections: string[];
 }
 
+interface CommitLoadResult {
+  commits: GitCommit[];
+  error?: string;
+}
+
 export async function auditCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const config = loadConfig(options.configPath);
   const patterns = loadPatterns(options.configPath);
   const range = getCommitRange(args);
+  const commitLoad = getCommits(range);
 
-  const report = generateAuditReport(config, config.project, options.configPath, patterns, range);
+  if (commitLoad.error) {
+    if (options.format === 'json') {
+      console.log(JSON.stringify({
+        status: 'ERROR',
+        summary: 'Failed to read git commits for audit.',
+        details: commitLoad.error,
+      }, null, 2));
+    } else {
+      console.log('  [fail] Failed to read git commits for audit.');
+      console.log(`  ${commitLoad.error}`);
+    }
+    return EXIT_CODE.RUNTIME_ERROR;
+  }
+
+  const report = generateAuditReport(config, config.project, options.configPath, patterns, range, commitLoad.commits);
 
   if (options.format === 'json') {
     console.log(JSON.stringify(report, null, 2));
@@ -86,9 +106,9 @@ function generateAuditReport(
   projectName: string,
   configPath: string,
   patterns: Array<{ name: string; category: string; status: string }>,
-  commitRange: string
+  commitRange: string,
+  commits: GitCommit[]
 ): AuditReport {
-  const commits = getCommits(commitRange);
   const parsed = parseAllTrailers(commits);
 
   const linkedCommits = new Set<string>();
@@ -217,7 +237,7 @@ function printReport(report: AuditReport): void {
   console.log('');
 }
 
-function getCommits(range: string): GitCommit[] {
+function getCommits(range: string): CommitLoadResult {
   try {
     const log = runGit(['log', range, '--format=%H|%an|%aI|%s', '--name-only']);
 
@@ -241,9 +261,12 @@ function getCommits(range: string): GitCommit[] {
     }
 
     if (current) commits.push(current);
-    return commits;
-  } catch {
-    return [];
+    return { commits };
+  } catch (error) {
+    return {
+      commits: [],
+      error: getGitErrorMessage(error),
+    };
   }
 }
 
@@ -293,6 +316,25 @@ function runGit(args: string[]): string {
     maxBuffer: 10 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function getGitErrorMessage(error: unknown): string {
+  const fallback = 'Unknown git error.';
+  if (!(error instanceof Error)) return fallback;
+  const execError = error as Error & { stderr?: Buffer | string };
+
+  if (execError.stderr) {
+    const stderr = execError.stderr.toString().trim();
+    if (stderr.length > 0) {
+      return stderr;
+    }
+  }
+
+  if (execError.message) {
+    return execError.message.trim();
+  }
+
+  return fallback;
 }
 
 function getRecommendations(inputs: {
