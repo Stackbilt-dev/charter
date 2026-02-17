@@ -36,7 +36,6 @@ This policy covers Charter Kit OSS packages:
 - `@stackbilt/cli`
 - `@stackbilt/ci`
 
-For CSA Cloud issues, contact **support@stackbilt.dev**.
 
 ## Security Design
 

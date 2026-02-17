@@ -22,6 +22,7 @@ charter setup --ci github
 ```
 
 `setup` is what applies the governance baseline into the current repo (`.charter/*` and optional workflow).
+Use `charter setup --detect-only` to preview detected stack and selected preset without writing files.
 
 ## Why Charter
 
@@ -102,8 +103,8 @@ Agent contract:
 ## Command Reference
 
 - `charter`: show repo risk/value snapshot and recommended next action
-- `charter setup [--ci github]`: scaffold `.charter/` and optional workflow
-- `charter init`: scaffold `.charter/` templates only
+- `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only]`: detect stack and scaffold `.charter/` baseline
+- `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
 - `charter doctor`: validate environment/config state
 - `charter validate [--ci]`: validate commit governance and citations
 - `charter drift [--path <dir>] [--ci]`: run drift scan
@@ -112,6 +113,9 @@ Agent contract:
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
+
+Audit policy scoring note:
+- Policy score now uses configurable section coverage (`config.audit.policyCoverage.requiredSections`) instead of raw markdown file count.
 
 ## Exit Code Contract
 

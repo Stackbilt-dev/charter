@@ -18,6 +18,20 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.11] - 2026-02-17
+
+### Added
+- `setup` stack auto-detection with preset selection (`worker|frontend|backend|fullstack`) and `--detect-only` preview mode.
+- Configurable policy coverage checklist in `.charter/config.json` under `audit.policyCoverage.requiredSections`.
+
+### Changed
+- `setup` now scaffolds richer preset-based baseline patterns and infers project name from local `package.json` (fallback: directory name).
+- `audit` policy score now uses required section coverage instead of markdown file count.
+- Root and CLI docs updated with preset and detection guidance.
+
+### Fixed
+- Policy scoring now rewards governance coverage quality over policy-file quantity.
+
 ## [0.1.10] - 2026-02-17
 
 ### Changed
@@ -75,7 +89,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.11
 [0.1.10]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.10
 [0.1.9]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.9
 [0.1.8]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.8
