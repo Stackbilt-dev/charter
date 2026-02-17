@@ -22,11 +22,41 @@ interface LocalValidationResult {
   suggestions: string[];
 }
 
+interface GitCommitLoadResult {
+  commits: GitCommit[];
+  error?: string;
+}
+
 export async function validateCommand(options: CLIOptions, args: string[]): Promise<number> {
   const config = loadConfig(options.configPath);
 
+  if (!hasCommits()) {
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ status: 'PASS', summary: 'No commits to validate.' }, null, 2));
+    } else {
+      console.log('  No commits to validate.');
+    }
+    return EXIT_CODE.SUCCESS;
+  }
+
   const range = getCommitRange(args);
-  const commits = getGitCommits(range);
+  const commitLoad = getGitCommits(range);
+
+  if (commitLoad.error) {
+    if (options.format === 'json') {
+      console.log(JSON.stringify({
+        status: 'ERROR',
+        summary: 'Failed to read git commits for validation.',
+        details: commitLoad.error,
+      }, null, 2));
+    } else {
+      console.log('  [fail] Failed to read git commits for validation.');
+      console.log(`  ${commitLoad.error}`);
+    }
+    return EXIT_CODE.RUNTIME_ERROR;
+  }
+
+  const commits = commitLoad.commits;
 
   if (commits.length === 0) {
     if (options.format === 'json') {
@@ -155,9 +185,10 @@ function getCommitRange(args: string[]): string {
     return args[rangeIdx + 1];
   }
 
+  const recentRange = getRecentCommitRange();
+
   try {
     const currentBranch = runGit(['rev-parse', 'HEAD']).trim();
-
     let baseBranch = '';
     try {
       baseBranch = runGit(['rev-parse', '--verify', 'main']).trim();
@@ -166,16 +197,16 @@ function getCommitRange(args: string[]): string {
     }
 
     if (!baseBranch || baseBranch === currentBranch) {
-      return 'HEAD~5..HEAD';
+      return recentRange;
     }
 
     return `${baseBranch}..HEAD`;
   } catch {
-    return 'HEAD~5..HEAD';
+    return recentRange;
   }
 }
 
-function getGitCommits(range: string): GitCommit[] {
+function getGitCommits(range: string): GitCommitLoadResult {
   try {
     const log = runGit(['log', range, '--format=%H|%an|%aI|%s', '--name-only']);
 
@@ -199,15 +230,60 @@ function getGitCommits(range: string): GitCommit[] {
     }
 
     if (current) commits.push(current);
-    return commits;
-  } catch {
-    return [];
+    return { commits };
+  } catch (error) {
+    return {
+      commits: [],
+      error: getGitErrorMessage(error),
+    };
   }
+}
+
+function hasCommits(): boolean {
+  try {
+    runGit(['rev-parse', '--verify', 'HEAD']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getRecentCommitRange(): string {
+  try {
+    const count = Number.parseInt(runGit(['rev-list', '--count', 'HEAD']).trim(), 10);
+    if (!Number.isFinite(count) || count <= 1) {
+      return 'HEAD';
+    }
+    const span = Math.min(5, count - 1);
+    return `HEAD~${span}..HEAD`;
+  } catch {
+    return 'HEAD';
+  }
+}
+
+function getGitErrorMessage(error: unknown): string {
+  const fallback = 'Unknown git error.';
+  if (!(error instanceof Error)) return fallback;
+  const execError = error as Error & { stderr?: Buffer | string };
+
+  if (execError.stderr) {
+    const stderr = execError.stderr.toString().trim();
+    if (stderr.length > 0) {
+      return stderr;
+    }
+  }
+
+  if (execError.message) {
+    return execError.message.trim();
+  }
+
+  return fallback;
 }
 
 function runGit(args: string[]): string {
   return execFileSync('git', args, {
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }

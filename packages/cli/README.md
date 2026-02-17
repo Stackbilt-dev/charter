@@ -4,16 +4,28 @@ CLI entry point for Charter Kit -- a local-first governance toolkit for software
 
 > **This is the only package most users need.** One install gives you the full Charter Kit toolkit.
 
-## Install
+## Install (Recommended)
+
+```bash
+npm install --save-dev @stackbilt/cli
+```
+
+Use with `npx` in each repository:
+
+```bash
+npx charter
+npx charter setup --ci github
+```
+
+Global install is optional if you want `charter` available system-wide:
 
 ```bash
 npm install -g @stackbilt/cli
 ```
 
-This pulls in all Charter Kit packages automatically. You get the `charter` command globally.
-Use `charter setup` inside each repo to scaffold governance baseline files.
+This pulls in all Charter Kit packages automatically. Use `charter setup` inside each repo to scaffold governance baseline files.
 
-For CI pipelines, install as a dev dependency instead:
+For CI pipelines, install as a dev dependency:
 
 ```bash
 npm install --save-dev @stackbilt/cli

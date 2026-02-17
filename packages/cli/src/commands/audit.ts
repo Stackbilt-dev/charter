@@ -41,6 +41,12 @@ interface AuditReport {
       patternDefinitions: number;
       policyDocumentation: number;
     };
+    criteria: {
+      trailerCoverage: string;
+      patternDefinitions: string;
+      policyDocumentation: string;
+    };
+    recommendations: string[];
   };
 }
 
@@ -103,6 +109,11 @@ function generateAuditReport(
   const policyScore = Math.min(100, policyFiles.length * 33);
 
   const overall = Math.round((trailerScore * 0.5) + (patternScore * 0.3) + (policyScore * 0.2));
+  const scoreInputs = {
+    coveragePercent,
+    activePatterns: activePatterns.length,
+    policyFiles: policyFiles.length,
+  };
 
   return {
     project: projectName,
@@ -131,6 +142,12 @@ function generateAuditReport(
         patternDefinitions: Math.round(patternScore),
         policyDocumentation: Math.round(policyScore),
       },
+      criteria: {
+        trailerCoverage: 'coverage_percent * 1.5 (max 100). 67%+ coverage earns full points.',
+        patternDefinitions: 'active_pattern_count * 20 (max 100). 5+ active patterns earns full points.',
+        policyDocumentation: 'policy_markdown_files * 33 (max 100). 3+ policy files earns full points.',
+      },
+      recommendations: getRecommendations(scoreInputs),
     },
   };
 }
@@ -165,6 +182,16 @@ function printReport(report: AuditReport): void {
   console.log(`    Trailer coverage:     ${report.score.breakdown.trailerCoverage}/100 (50% weight)`);
   console.log(`    Pattern definitions:  ${report.score.breakdown.patternDefinitions}/100 (30% weight)`);
   console.log(`    Policy documentation: ${report.score.breakdown.policyDocumentation}/100 (20% weight)`);
+  console.log('');
+  console.log('  Scoring Criteria');
+  console.log(`    - Trailer coverage: ${report.score.criteria.trailerCoverage}`);
+  console.log(`    - Pattern definitions: ${report.score.criteria.patternDefinitions}`);
+  console.log(`    - Policy documentation: ${report.score.criteria.policyDocumentation}`);
+  console.log('');
+  console.log('  Actionable Next Steps');
+  for (const rec of report.score.recommendations) {
+    console.log(`    - ${rec}`);
+  }
   console.log('');
 }
 
@@ -214,5 +241,43 @@ function runGit(args: string[]): string {
   return execFileSync('git', args, {
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function getRecommendations(inputs: {
+  coveragePercent: number;
+  activePatterns: number;
+  policyFiles: number;
+}): string[] {
+  const recommendations: string[] = [];
+
+  const missingCoverage = Math.max(0, 67 - inputs.coveragePercent);
+  if (missingCoverage > 0) {
+    recommendations.push(
+      `Increase governance trailer coverage by ${missingCoverage}% to reach full trailer score (add Governed-By/Resolves-Request trailers).`
+    );
+  } else {
+    recommendations.push('Trailer coverage is at full-score threshold.');
+  }
+
+  const missingPatterns = Math.max(0, 5 - inputs.activePatterns);
+  if (missingPatterns > 0) {
+    recommendations.push(
+      `Add ${missingPatterns} active pattern(s) in .charter/patterns/*.json to reach full pattern score (target: 5 active patterns).`
+    );
+  } else {
+    recommendations.push('Pattern definitions are at full-score threshold.');
+  }
+
+  const missingPolicies = Math.max(0, 3 - inputs.policyFiles);
+  if (missingPolicies > 0) {
+    recommendations.push(
+      `Add ${missingPolicies} policy markdown file(s) in .charter/policies/ to reach full policy score (target: 3 policy files).`
+    );
+  } else {
+    recommendations.push('Policy documentation is at full-score threshold.');
+  }
+
+  return recommendations;
 }
