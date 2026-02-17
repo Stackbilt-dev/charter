@@ -14,7 +14,12 @@ Use with `npx` in each repository:
 
 ```bash
 npx charter
-npx charter setup --ci github
+npx charter setup --detect-only --format json
+npx charter setup --ci github --yes
+npx charter doctor --format json
+npx charter validate --ci --format json
+npx charter drift --ci --format json
+npx charter audit --format json
 ```
 
 Global install is optional if you want `charter` available system-wide:
@@ -24,6 +29,12 @@ npm install -g @stackbilt/cli
 ```
 
 This pulls in all Charter Kit packages automatically. Use `charter setup` inside each repo to scaffold governance baseline files.
+Upgrade existing repos with:
+
+```bash
+npm install --save-dev @stackbilt/cli@latest
+npx charter --version
+```
 
 For CI pipelines, install as a dev dependency:
 
@@ -83,6 +94,11 @@ Agent handling contract:
 - `exit 1`: policy violation (action required)
 - `exit 2`: runtime/usage failure
 
+Agent decision rules:
+- If `mixedStack: true`, use `--preset fullstack`.
+- If framework signals look wrong, inspect `detected.sources` and rerun setup with an explicit `--preset`.
+- Treat `validate --ci` and `drift --ci` as blocking checks.
+
 ## LM Agent Ops Flow
 
 ```bash
@@ -135,6 +151,8 @@ charter setup --detect-only
 charter setup --preset fullstack --ci github --yes
 ```
 
+Detection output includes `detected.sources` in JSON mode so agents can verify which manifests were scanned before applying a baseline.
+
 ### `charter init`
 
 Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|backend|fullstack`.
@@ -162,6 +180,8 @@ charter drift --path ./src --ci
 ### `charter audit`
 
 Generate a governance audit report covering trailers, risk, drift, and policy-section coverage quality.
+
+If score is held down by trailer coverage, enforce `validate --ci` in PR checks and add commit-template guidance for required trailers.
 
 ### `charter classify`
 
