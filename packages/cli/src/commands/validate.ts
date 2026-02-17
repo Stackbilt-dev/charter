@@ -22,6 +22,7 @@ interface LocalValidationResult {
   highRiskUnlinked: number;
   strictTrailerMode: {
     active: boolean;
+    mode: 'STRICT_ONLY' | 'RISK_ONLY' | 'STRICT_AND_RISK' | 'NONE';
     reason: string;
   };
   suggestions: string[];
@@ -32,13 +33,15 @@ interface LocalValidationResult {
 }
 
 interface OffenderCommit {
+  classification: 'policy' | 'risk' | 'both';
+  policyContextOnly?: boolean;
   sha: string;
   shortSha: string;
   subject: string;
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-  riskRuleId: string;
-  matchedSignals: string[];
-  thresholdSource: string;
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+  riskRuleId?: string;
+  matchedSignals?: string[];
+  thresholdSource?: string;
   riskReason: string;
   missingTrailers: string[];
   filesChangedCount: number;
@@ -196,6 +199,9 @@ function validateCommits(
     highRiskUnlinked,
     strictTrailerMode: {
       active: policy.requireTrailers && totalTrailers === 0,
+      mode: policy.requireTrailers && totalTrailers === 0
+        ? (unlinked.length > 0 ? 'STRICT_AND_RISK' : 'STRICT_ONLY')
+        : (unlinked.length > 0 ? 'RISK_ONLY' : 'NONE'),
       reason: policy.requireTrailers && totalTrailers === 0
         ? `requireTrailers=true and no trailers found in range (${policy.citationStrictness}).`
         : 'strict trailer mode not triggered',
@@ -204,8 +210,7 @@ function validateCommits(
     evidence: {
       policyOffenders: buildPolicyOffenders(
         commits,
-        policy.requireTrailers && totalTrailers === 0,
-        threshold
+        policy.requireTrailers && totalTrailers === 0
       ),
       riskOffenders: buildRiskOffenders(
         commits,
@@ -218,22 +223,18 @@ function validateCommits(
 
 function buildPolicyOffenders(
   commits: GitCommit[],
-  strictModeActive: boolean,
-  threshold: 'LOW' | 'MEDIUM' | 'HIGH'
+  strictModeActive: boolean
 ): OffenderCommit[] {
   if (!strictModeActive) return [];
   return commits.map((commit) => {
     const filesChanged = commit.files_changed || [];
     const subject = commit.message.split('\n')[0].slice(0, 200);
-    const riskMeta = getRiskMeta(filesChanged, subject);
     return {
+      classification: 'policy',
+      policyContextOnly: true,
       sha: commit.sha,
       shortSha: commit.sha.slice(0, 7),
       subject,
-      riskLevel: assessCommitRisk(filesChanged, subject),
-      riskRuleId: riskMeta.ruleId,
-      matchedSignals: riskMeta.signals,
-      thresholdSource: `config.git.trailerThreshold=${threshold}`,
       riskReason: 'Missing required governance trailers under strict trailer mode.',
       missingTrailers: ['Governed-By', 'Resolves-Request'],
       filesChangedCount: filesChanged.length,
@@ -261,6 +262,7 @@ function buildRiskOffenders(
     const riskLevel = (thresholdHit?.risk as 'LOW' | 'MEDIUM' | 'HIGH') || assessCommitRisk(filesChanged, subject);
 
     return {
+      classification: 'risk',
       sha: commit.sha,
       shortSha: commit.sha.slice(0, 7),
       subject,
@@ -360,7 +362,7 @@ function printResult(result: LocalValidationResult): void {
     console.log('');
     console.log('  Policy offenders (strict trailer mode):');
     for (const commit of result.evidence.policyOffenders.slice(0, 10)) {
-      console.log(`    - ${commit.shortSha} [${commit.riskLevel}] ${commit.subject}`);
+      console.log(`    - ${commit.shortSha} ${commit.subject}`);
       console.log(`      Reason: ${commit.riskReason}`);
     }
   }
@@ -369,7 +371,7 @@ function printResult(result: LocalValidationResult): void {
     console.log('');
     console.log('  Risk offenders (threshold-driven):');
     for (const commit of result.evidence.riskOffenders.slice(0, 10)) {
-      console.log(`    - ${commit.shortSha} [${commit.riskLevel}] ${commit.subject}`);
+      console.log(`    - ${commit.shortSha} [${commit.riskLevel || 'N/A'}] ${commit.subject}`);
       console.log(`      Reason: ${commit.riskReason}`);
     }
   }

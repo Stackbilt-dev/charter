@@ -101,6 +101,7 @@ Agent decision rules:
 - Treat `validate --ci` and `drift --ci` as blocking checks.
 - `validate` and `audit` both report commit range explicitly so coverage numbers are comparable.
 - Use `validate.evidence.policyOffenders` for strict-trailer failures and `validate.evidence.riskOffenders` for threshold-based risk failures.
+- `policyOffenders` are policy-context entries (not risk-rule findings); risk metadata is attached to `riskOffenders`.
 
 ## LM Agent Ops Flow
 
@@ -157,6 +158,7 @@ charter setup --preset fullstack --ci github --yes
 Detection output includes `detected.sources` in JSON mode so agents can verify which manifests were scanned before applying a baseline.
 Setup also adds optional root scripts when missing: `charter:detect` and `charter:setup`.
 Setup JSON now includes `mutationPlan` and `appliedMutations` so side effects are explicit before/after apply.
+Setup baseline mutation metadata now includes `configHashBefore`, `configHashAfter`, and `writesPerformed`.
 
 ### `charter init`
 

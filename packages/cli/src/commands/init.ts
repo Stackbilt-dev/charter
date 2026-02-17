@@ -196,6 +196,7 @@ interface InitResult {
   created: boolean;
   configPath: string;
   files: string[];
+  writesPerformed: number;
 }
 
 interface InitializeOptions {
@@ -250,6 +251,7 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
       created: false,
       configPath: configDir,
       files: [],
+      writesPerformed: 0,
     };
   }
 
@@ -260,18 +262,14 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
 
   const selectedPreset = initOptions.preset || 'fullstack';
   const patterns = buildPatternTemplate(selectedPreset, initOptions.features);
-  fs.writeFileSync(configFile, getDefaultConfigJSON(initOptions.projectName) + '\n');
-
-  fs.writeFileSync(
-    path.join(configDir, 'patterns', 'blessed-stack.json'),
-    JSON.stringify(patterns, null, 2) + '\n'
-  );
-
-  fs.writeFileSync(path.join(configDir, 'policies', 'governance.md'), DEFAULT_POLICY_CONTENT);
-  fs.writeFileSync(path.join(configDir, '.gitignore'), GITIGNORE_CONTENT);
+  let writesPerformed = 0;
+  if (writeIfChanged(configFile, getDefaultConfigJSON(initOptions.projectName) + '\n')) writesPerformed++;
+  if (writeIfChanged(path.join(configDir, 'patterns', 'blessed-stack.json'), JSON.stringify(patterns, null, 2) + '\n')) writesPerformed++;
+  if (writeIfChanged(path.join(configDir, 'policies', 'governance.md'), DEFAULT_POLICY_CONTENT)) writesPerformed++;
+  if (writeIfChanged(path.join(configDir, '.gitignore'), GITIGNORE_CONTENT)) writesPerformed++;
 
   return {
-    created: true,
+    created: !exists,
     configPath: configDir,
     files: [
       'config.json',
@@ -279,7 +277,19 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
       'policies/governance.md',
       '.gitignore',
     ],
+    writesPerformed,
   };
+}
+
+function writeIfChanged(targetPath: string, content: string): boolean {
+  if (fs.existsSync(targetPath)) {
+    const existing = fs.readFileSync(targetPath, 'utf-8');
+    if (existing === content) {
+      return false;
+    }
+  }
+  fs.writeFileSync(targetPath, content);
+  return true;
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {

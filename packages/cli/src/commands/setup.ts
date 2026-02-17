@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import type { CLIOptions } from '../index';
 import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
@@ -93,6 +94,9 @@ interface SetupMutationReport {
   baseline: {
     action: 'create' | 'update' | 'noop';
     path: string;
+    configHashBefore?: string;
+    configHashAfter?: string;
+    writesPerformed: number;
   };
   workflow: {
     action: 'create' | 'update' | 'noop' | 'skip';
@@ -146,7 +150,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const ciMode = getFlag(args, '--ci');
   const presetFlag = getFlag(args, '--preset');
   const detectOnly = args.includes('--detect-only');
-  const force = options.yes || args.includes('--force');
+  const explicitForce = args.includes('--force');
+  const force = options.yes || explicitForce;
   const noDependencySync = args.includes('--no-dependency-sync');
 
   if (ciMode && ciMode !== 'github') {
@@ -195,14 +200,15 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   }
 
   const baselinePath = path.join(options.configPath, 'config.json');
-  const baselinePlan = planBaselineMutation(baselinePath, force);
+  const configHashBefore = hashFileIfExists(baselinePath);
+  const baselinePlan = planBaselineMutation(baselinePath, explicitForce);
   const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
   const workflowPlan = ciMode === 'github'
     ? planManagedFile(workflowPath, getGithubWorkflow())
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
-  const initResult = initializeCharter(options.configPath, force, {
+  const initResult = initializeCharter(options.configPath, explicitForce, {
     preset: selectedPreset,
     projectName: inferProjectName(contexts),
     features: {
@@ -212,6 +218,13 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       vite: detection.signals.hasVite,
     },
   });
+  const configHashAfter = hashFileIfExists(baselinePath);
+  const baselineAppliedAction: SetupMutationReport['baseline']['action'] =
+    !configHashBefore && !!configHashAfter
+      ? 'create'
+      : configHashBefore !== configHashAfter
+        ? 'update'
+        : 'noop';
 
   const result: SetupResult = {
     configPath: options.configPath,
@@ -236,6 +249,9 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       baseline: {
         action: baselinePlan.action,
         path: baselinePath.replace(/\\/g, '/'),
+        configHashBefore: configHashBefore || undefined,
+        configHashAfter: configHashBefore || undefined,
+        writesPerformed: 0,
       },
       workflow: {
         action: workflowPlan.action,
@@ -246,8 +262,11 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     },
     appliedMutations: {
       baseline: {
-        action: baselinePlan.action,
+        action: baselineAppliedAction,
         path: baselinePath.replace(/\\/g, '/'),
+        configHashBefore: configHashBefore || undefined,
+        configHashAfter: configHashAfter || undefined,
+        writesPerformed: initResult.writesPerformed,
       },
       workflow: {
         action: 'skip',
@@ -327,6 +346,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     const added = result.dependencies.added.length > 0 ? `added [${result.dependencies.added.join(', ')}]` : '';
     const updated = result.dependencies.updatedEntries.length > 0 ? `updated [${result.dependencies.updatedEntries.join(', ')}]` : '';
     console.log(`  Package dependencies synced: ${[added, updated].filter(Boolean).join('; ')} (${result.dependencies.packageJsonPath})`);
+  } else if (result.dependencies.skipped) {
+    console.log(`  Package dependency sync skipped: ${result.dependencies.reason}`);
   }
 
   console.log('');
@@ -569,6 +590,15 @@ function planBaselineMutation(configFilePath: string, force: boolean): { action:
     return { action: 'update' };
   }
   return { action: 'noop' };
+}
+
+function hashFileIfExists(targetPath: string): string | null {
+  const absolute = path.resolve(targetPath);
+  if (!fs.existsSync(absolute)) {
+    return null;
+  }
+  const content = fs.readFileSync(absolute);
+  return createHash('sha256').update(content).digest('hex');
 }
 
 function planManagedFile(targetPath: string, content: string): { action: 'create' | 'update' | 'noop' } {
