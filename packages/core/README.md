@@ -2,6 +2,12 @@
 
 Zod schemas and sanitization helpers for [Charter Kit](https://github.com/Stackbilt-dev/charter) -- a local-first governance toolkit for software repos.
 
+> **Want the full toolkit?** Just install the CLI — it includes everything:
+> ```bash
+> npm install -g @stackbilt/cli
+> ```
+> Only install this package directly if you need schemas and sanitizers without the CLI.
+
 ## Install
 
 ```bash
