@@ -2,6 +2,12 @@
 
 Heuristic change classification for [Charter Kit](https://github.com/Stackbilt-dev/charter) -- a local-first governance toolkit for software repos. Classifies changes as **SURFACE**, **LOCAL**, or **CROSS_CUTTING** using pure pattern matching. No LLM calls, runs in under 5 ms.
 
+> **Want the full toolkit?** Just install the CLI — it includes everything:
+> ```bash
+> npm install -g @stackbilt/cli
+> ```
+> Only install this package directly if you need change classification without the CLI.
+
 ## Install
 
 ```bash
