@@ -46,7 +46,7 @@ Upgrade path in existing repos:
 
 ```bash
 npm install --save-dev @stackbilt/cli@latest
-npx charter --version
+npx --no-install charter --version
 ```
 
 ## Why Charter
@@ -153,6 +153,7 @@ Decision rules for agents:
 - Treat `validate` and `drift` with `--ci` as merge gates.
 - In `validate` JSON, use `evidence.policyOffenders` for strict trailer policy failures and `evidence.riskOffenders` for threshold-risk failures.
 - Treat `policyOffenders` as compliance findings and `riskOffenders` as risk-threshold findings.
+- `validate` exposes `effectiveRangeSource` and `defaultCommitRange` when `--range` is not explicitly provided.
 
 ## Trailer Adoption Ramp
 

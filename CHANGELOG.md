@@ -18,6 +18,19 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.19] - 2026-02-17
+
+### Added
+- `validate` now emits `effectiveRangeSource` and `defaultCommitRange` for explicit default-range traceability.
+- `policyOffenders` entries now include `policyReason` while keeping `riskReason` for backward compatibility.
+
+### Changed
+- Root and CLI docs now recommend `npx --no-install charter --version` for deterministic post-upgrade version checks.
+- Agent docs now clarify strict branching: use `strictTrailerMode.mode` and offender classification fields.
+
+### Fixed
+- Reduced semantic ambiguity by making policy-offender reasoning explicitly policy-scoped.
+
 ## [0.1.18] - 2026-02-17
 
 ### Added
@@ -175,7 +188,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.19
 [0.1.18]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.18
 [0.1.17]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.17
 [0.1.16]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.16
