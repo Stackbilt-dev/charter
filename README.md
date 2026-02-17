@@ -35,6 +35,10 @@ charter setup --detect-only
 charter setup --preset fullstack --ci github --yes
 ```
 
+`setup` also adds optional root `package.json` scripts when missing:
+- `charter:detect`
+- `charter:setup`
+
 Upgrade path in existing repos:
 
 ```bash
@@ -158,9 +162,9 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only]`: detect stack and scaffold `.charter/` baseline
 - `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
 - `charter doctor`: validate environment/config state
-- `charter validate [--ci]`: validate commit governance and citations
+- `charter validate [--ci] [--range <revset>]`: validate commit governance and citations
 - `charter drift [--path <dir>] [--ci]`: run drift scan
-- `charter audit [--ci]`: produce governance audit summary
+- `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
 - `charter why`: explain adoption rationale and expected payoff
 

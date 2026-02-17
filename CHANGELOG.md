@@ -8,10 +8,14 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Added
 - Documentation runbook updates for mixed-stack setup decision flow and LM-agent decision rules.
+- `setup` now adds optional onboarding scripts to root `package.json` when missing: `charter:detect` and `charter:setup`.
+- `validate` and `audit` now include explicit commit range in output for easier score interpretation.
 
 ### Changed
 - Root and CLI README now lead with detect-first setup (`setup --detect-only`) and explicit CI gating commands (`validate/drift --ci`).
 - Publishing guide now verifies `detected.sources` in setup detection output and includes drift/audit checks in post-publish validation.
+- Generated GitHub workflow from `setup --ci github` now installs a pinned CLI version for reproducible CI behavior.
+- Default baseline config now enforces stricter trailer policy (`validation.citationStrictness: "FAIL"`).
 
 ### Fixed
 - Placeholder for unreleased fixes.
