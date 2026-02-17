@@ -5,14 +5,14 @@ This is the operator runbook for publishing Charter packages to npm.
 ## Scope
 
 Publishable packages:
-- `@charter/types`
-- `@charter/core`
-- `@charter/git`
-- `@charter/classify`
-- `@charter/validate`
-- `@charter/drift`
-- `@charter/ci`
-- `@charter/cli`
+- `@stackbilt/types`
+- `@stackbilt/core`
+- `@stackbilt/git`
+- `@stackbilt/classify`
+- `@stackbilt/validate`
+- `@stackbilt/drift`
+- `@stackbilt/ci`
+- `@stackbilt/cli`
 
 Repository root package (`charter`) is private and must not be published.
 
@@ -42,7 +42,7 @@ pnpm run test
 
 ## Phase 2: Version and Dependency Prep
 
-Use one synchronized version for all `@charter/*` packages until multi-version strategy is introduced.
+Use one synchronized version for all `@stackbilt/*` packages until multi-version strategy is introduced.
 
 1. Set new version in each `packages/*/package.json`.
 2. Replace internal `workspace:*` dependencies with the same concrete version.
@@ -57,14 +57,14 @@ rg -n "workspace:\\*" packages -g "package.json"
 1. Dry-run packed contents per package:
 
 ```bash
-pnpm --filter @charter/types pack --dry-run
-pnpm --filter @charter/core pack --dry-run
-pnpm --filter @charter/git pack --dry-run
-pnpm --filter @charter/classify pack --dry-run
-pnpm --filter @charter/validate pack --dry-run
-pnpm --filter @charter/drift pack --dry-run
-pnpm --filter @charter/ci pack --dry-run
-pnpm --filter @charter/cli pack --dry-run
+pnpm --filter @stackbilt/types pack --dry-run
+pnpm --filter @stackbilt/core pack --dry-run
+pnpm --filter @stackbilt/git pack --dry-run
+pnpm --filter @stackbilt/classify pack --dry-run
+pnpm --filter @stackbilt/validate pack --dry-run
+pnpm --filter @stackbilt/drift pack --dry-run
+pnpm --filter @stackbilt/ci pack --dry-run
+pnpm --filter @stackbilt/cli pack --dry-run
 ```
 
 2. Verify CLI behavior before publish:
@@ -82,19 +82,19 @@ node packages/cli/dist/bin.js audit --format json
 
 Publish in this order:
 
-1. `@charter/types`
-2. `@charter/core`, `@charter/git`, `@charter/classify`, `@charter/validate`, `@charter/drift`, `@charter/ci`
-3. `@charter/cli`
+1. `@stackbilt/types`
+2. `@stackbilt/core`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/ci`
+3. `@stackbilt/cli`
 
 ```bash
-pnpm --filter @charter/types publish --access public
-pnpm --filter @charter/core publish --access public
-pnpm --filter @charter/git publish --access public
-pnpm --filter @charter/classify publish --access public
-pnpm --filter @charter/validate publish --access public
-pnpm --filter @charter/drift publish --access public
-pnpm --filter @charter/ci publish --access public
-pnpm --filter @charter/cli publish --access public
+pnpm --filter @stackbilt/types publish --access public
+pnpm --filter @stackbilt/core publish --access public
+pnpm --filter @stackbilt/git publish --access public
+pnpm --filter @stackbilt/classify publish --access public
+pnpm --filter @stackbilt/validate publish --access public
+pnpm --filter @stackbilt/drift publish --access public
+pnpm --filter @stackbilt/ci publish --access public
+pnpm --filter @stackbilt/cli publish --access public
 ```
 
 ## Phase 5: Post-Publish Verification
@@ -102,9 +102,9 @@ pnpm --filter @charter/cli publish --access public
 In a clean external repo:
 
 ```bash
-npx @charter/cli@latest setup --ci github
-npx @charter/cli@latest doctor --format json
-npx @charter/cli@latest validate --format json --ci
+npx @stackbilt/cli@latest setup --ci github
+npx @stackbilt/cli@latest doctor --format json
+npx @stackbilt/cli@latest validate --format json --ci
 ```
 
 Confirm:
@@ -126,7 +126,7 @@ If a bad version ships:
 2. Deprecate broken version(s):
 
 ```bash
-npm deprecate @charter/cli@<bad_version> "Broken release: use <fixed_version>"
+npm deprecate @stackbilt/cli@<bad_version> "Broken release: use <fixed_version>"
 ```
 
 3. Call out corrective version in release notes.

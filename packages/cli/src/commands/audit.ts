@@ -10,9 +10,9 @@ import * as fs from 'node:fs';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { loadConfig, loadPatterns } from '../config';
-import { parseAllTrailers } from '@charter/git';
-import { assessCommitRisk } from '@charter/git';
-import type { GitCommit } from '@charter/types';
+import { parseAllTrailers } from '@stackbilt/git';
+import { assessCommitRisk } from '@stackbilt/git';
+import type { GitCommit } from '@stackbilt/types';
 
 interface AuditReport {
   project: string;

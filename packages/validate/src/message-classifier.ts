@@ -8,7 +8,7 @@
  * Extracted from Charter Cloud (Cognitive Console).
  */
 
-import type { AppMode } from '@charter/types';
+import type { AppMode } from '@stackbilt/types';
 
 // ============================================================================
 // Types

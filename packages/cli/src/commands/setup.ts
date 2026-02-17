@@ -36,7 +36,7 @@ jobs:
           node-version: '20'
 
       - name: Install Charter CLI
-        run: npm install -g @charter/cli
+        run: npm install -g @stackbilt/cli
 
       - name: Validate Commits
         run: charter validate --ci --format text

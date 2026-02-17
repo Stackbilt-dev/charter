@@ -27,14 +27,14 @@ Response targets:
 ## Scope
 
 This policy covers Charter Kit OSS packages:
-- `@charter/types`
-- `@charter/core`
-- `@charter/git`
-- `@charter/classify`
-- `@charter/validate`
-- `@charter/drift`
-- `@charter/cli`
-- `@charter/ci`
+- `@stackbilt/types`
+- `@stackbilt/core`
+- `@stackbilt/git`
+- `@stackbilt/classify`
+- `@stackbilt/validate`
+- `@stackbilt/drift`
+- `@stackbilt/cli`
+- `@stackbilt/ci`
 
 For CSA Cloud issues, contact **support@stackbilt.dev**.
 

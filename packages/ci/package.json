@@ -1,5 +1,5 @@
 {
-  "name": "@charter/ci",
+  "name": "@stackbilt/ci",
   "version": "0.1.1",
   "description": "GitHub Actions adapter for Charter governance checks",
   "main": "./dist/index.js",
@@ -10,17 +10,25 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=18.0.0" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Stackbilt-dev/charter.git",
     "directory": "packages/ci"
   },
-  "bugs": { "url": "https://github.com/Stackbilt-dev/charter/issues" },
+  "bugs": {
+    "url": "https://github.com/Stackbilt-dev/charter/issues"
+  },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@charter/types": "0.1.1"
+    "@stackbilt/types": "workspace:*"
   },
   "license": "Apache-2.0"
 }

@@ -23,34 +23,34 @@ importers:
 
   packages/ci:
     dependencies:
-      '@charter/types':
+      '@stackbilt/types':
         specifier: workspace:*
         version: link:../types
 
   packages/classify:
     dependencies:
-      '@charter/types':
+      '@stackbilt/types':
         specifier: workspace:*
         version: link:../types
 
   packages/cli:
     dependencies:
-      '@charter/classify':
+      '@stackbilt/classify':
         specifier: workspace:*
         version: link:../classify
-      '@charter/core':
+      '@stackbilt/core':
         specifier: workspace:*
         version: link:../core
-      '@charter/drift':
+      '@stackbilt/drift':
         specifier: workspace:*
         version: link:../drift
-      '@charter/git':
+      '@stackbilt/git':
         specifier: workspace:*
         version: link:../git
-      '@charter/types':
+      '@stackbilt/types':
         specifier: workspace:*
         version: link:../types
-      '@charter/validate':
+      '@stackbilt/validate':
         specifier: workspace:*
         version: link:../validate
 
@@ -62,13 +62,13 @@ importers:
 
   packages/drift:
     dependencies:
-      '@charter/types':
+      '@stackbilt/types':
         specifier: workspace:*
         version: link:../types
 
   packages/git:
     dependencies:
-      '@charter/types':
+      '@stackbilt/types':
         specifier: workspace:*
         version: link:../types
 
@@ -76,7 +76,7 @@ importers:
 
   packages/validate:
     dependencies:
-      '@charter/types':
+      '@stackbilt/types':
         specifier: workspace:*
         version: link:../types
 

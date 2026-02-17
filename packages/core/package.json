@@ -1,5 +1,5 @@
 {
-  "name": "@charter/core",
+  "name": "@stackbilt/core",
   "version": "0.1.1",
   "description": "Core schemas, sanitization, and error handling for Charter Kit",
   "main": "./dist/index.js",
@@ -10,14 +10,22 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=18.0.0" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Stackbilt-dev/charter.git",
     "directory": "packages/core"
   },
-  "bugs": { "url": "https://github.com/Stackbilt-dev/charter/issues" },
+  "bugs": {
+    "url": "https://github.com/Stackbilt-dev/charter/issues"
+  },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
     "zod": "^3.24.1"

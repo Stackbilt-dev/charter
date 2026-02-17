@@ -12,7 +12,7 @@ import type {
   GovernanceStatus,
   ChangeRecommendation,
   ChangeClassification,
-} from '@charter/types';
+} from '@stackbilt/types';
 
 // ============================================================================
 // Classification Patterns

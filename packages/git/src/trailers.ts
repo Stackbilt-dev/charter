@@ -7,7 +7,7 @@
  * Extracted from Charter Cloud (RFC-2025-004).
  */
 
-import type { GitCommit } from '@charter/types';
+import type { GitCommit } from '@stackbilt/types';
 
 interface ParsedTrailers {
   governedBy: Array<{ commitSha: string; reference: string }>;

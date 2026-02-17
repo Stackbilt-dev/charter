@@ -10,8 +10,8 @@ import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { loadConfig, loadPatterns } from '../config';
-import { scanForDrift } from '@charter/drift';
-import type { DriftReport } from '@charter/types';
+import { scanForDrift } from '@stackbilt/drift';
+import type { DriftReport } from '@stackbilt/types';
 
 export async function driftCommand(options: CLIOptions, args: string[]): Promise<number> {
   const config = loadConfig(options.configPath);

@@ -10,7 +10,7 @@
  * patterns are provided directly (loaded from .charter/patterns/ by the CLI).
  */
 
-import type { Pattern, DriftViolation, DriftReport } from '@charter/types';
+import type { Pattern, DriftViolation, DriftReport } from '@stackbilt/types';
 
 // ============================================================================
 // Public API

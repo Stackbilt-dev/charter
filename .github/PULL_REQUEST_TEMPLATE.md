@@ -5,14 +5,14 @@
 
 ## Scope
 
-- [ ] `@charter/types`
-- [ ] `@charter/core`
-- [ ] `@charter/git`
-- [ ] `@charter/classify`
-- [ ] `@charter/validate`
-- [ ] `@charter/drift`
-- [ ] `@charter/ci`
-- [ ] `@charter/cli`
+- [ ] `@stackbilt/types`
+- [ ] `@stackbilt/core`
+- [ ] `@stackbilt/git`
+- [ ] `@stackbilt/classify`
+- [ ] `@stackbilt/validate`
+- [ ] `@stackbilt/drift`
+- [ ] `@stackbilt/ci`
+- [ ] `@stackbilt/cli`
 - [ ] Docs only
 
 ## Validation

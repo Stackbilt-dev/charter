@@ -8,10 +8,10 @@
 import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
-import type { GitCommit } from '@charter/types';
+import type { GitCommit } from '@stackbilt/types';
 import { loadConfig } from '../config';
-import { parseAllTrailers } from '@charter/git';
-import { assessCommitRisk, generateSuggestions } from '@charter/git';
+import { parseAllTrailers } from '@stackbilt/git';
+import { assessCommitRisk, generateSuggestions } from '@stackbilt/git';
 
 interface LocalValidationResult {
   status: 'PASS' | 'WARN' | 'FAIL';

@@ -23,7 +23,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [0.1.0] - 2026-02-16
 
 ### Added
-- Initial Charter Kit workspace with modular `@charter/*` packages.
+- Initial Charter Kit workspace with modular `@stackbilt/*` packages.
 - CLI command surface: `init`, `validate`, `drift`, `audit`, `classify`.
 - Governance workflow template in `.github/workflows/governance.yml`.
 

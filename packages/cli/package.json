@@ -1,5 +1,5 @@
 {
-  "name": "@charter/cli",
+  "name": "@stackbilt/cli",
   "version": "0.1.1",
   "description": "Charter CLI — repo-level governance checks",
   "bin": {
@@ -13,26 +13,36 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=18.0.0" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Stackbilt-dev/charter.git",
     "directory": "packages/cli"
   },
-  "bugs": { "url": "https://github.com/Stackbilt-dev/charter/issues" },
+  "bugs": {
+    "url": "https://github.com/Stackbilt-dev/charter/issues"
+  },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "pnpm exec tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@charter/types": "0.1.1",
-    "@charter/core": "0.1.1",
-    "@charter/git": "0.1.1",
-    "@charter/classify": "0.1.1",
-    "@charter/validate": "0.1.1",
-    "@charter/drift": "0.1.1"
+    "@stackbilt/types": "workspace:*",
+    "@stackbilt/core": "workspace:*",
+    "@stackbilt/git": "workspace:*",
+    "@stackbilt/classify": "workspace:*",
+    "@stackbilt/validate": "workspace:*",
+    "@stackbilt/drift": "workspace:*"
   },
   "license": "Apache-2.0"
 }

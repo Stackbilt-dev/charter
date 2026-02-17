@@ -7,7 +7,7 @@
  * Extracted from Charter Cloud (RFC-2025-004).
  */
 
-import type { CommitRiskLevel, GitValidationTrailers, UnlinkedCommit } from '@charter/types';
+import type { CommitRiskLevel, GitValidationTrailers, UnlinkedCommit } from '@stackbilt/types';
 
 // ============================================================================
 // Risk Patterns (configurable per-project in future)

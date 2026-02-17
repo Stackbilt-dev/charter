@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { scanForDrift, extractRules } from '../index';
-import type { Pattern } from '@charter/types';
+import type { Pattern } from '@stackbilt/types';
 
 describe('extractRules', () => {
   it('parses regex literals', () => {

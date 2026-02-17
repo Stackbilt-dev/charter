@@ -8,7 +8,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Pattern } from '@charter/types';
+import type { Pattern } from '@stackbilt/types';
 
 // ============================================================================
 // Config Types

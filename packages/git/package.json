@@ -1,5 +1,5 @@
 {
-  "name": "@charter/git",
+  "name": "@stackbilt/git",
   "version": "0.1.1",
   "description": "Git trailer parsing, commit risk scoring, and PR validation",
   "main": "./dist/index.js",
@@ -10,17 +10,25 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=18.0.0" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Stackbilt-dev/charter.git",
     "directory": "packages/git"
   },
-  "bugs": { "url": "https://github.com/Stackbilt-dev/charter/issues" },
+  "bugs": {
+    "url": "https://github.com/Stackbilt-dev/charter/issues"
+  },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@charter/types": "0.1.1"
+    "@stackbilt/types": "workspace:*"
   },
   "license": "Apache-2.0"
 }

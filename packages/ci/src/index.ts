@@ -1,5 +1,5 @@
 /**
- * @charter/ci — GitHub Actions helpers
+ * @stackbilt/ci — GitHub Actions helpers
  *
  * Provides formatting utilities for GitHub Actions output:
  * - Status check annotations
@@ -10,7 +10,7 @@
  * The actual workflow YAML is in the repo root at .github/actions/.
  */
 
-import type { DriftViolation, GitValidationStatus } from '@charter/types';
+import type { DriftViolation, GitValidationStatus } from '@stackbilt/types';
 
 // ============================================================================
 // GitHub Actions Output

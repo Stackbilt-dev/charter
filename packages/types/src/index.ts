@@ -1,5 +1,5 @@
 /**
- * @charter/types — Shared type definitions for the Charter
+ * @stackbilt/types — Shared type definitions for the Charter
  *
  * These types are extracted from the Charter Cloud platform and represent
  * the portable governance data model. Cloud-specific types (Env, D1, Durable Objects)

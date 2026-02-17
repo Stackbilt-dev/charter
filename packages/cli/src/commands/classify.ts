@@ -7,7 +7,7 @@
 
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
-import { heuristicClassify, determineRecommendation } from '@charter/classify';
+import { heuristicClassify, determineRecommendation } from '@stackbilt/classify';
 
 export async function classifyCommand(options: CLIOptions, args: string[]): Promise<number> {
   const subject = args.filter((a) => !a.startsWith('--')).join(' ');

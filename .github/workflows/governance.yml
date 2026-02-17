@@ -4,7 +4,7 @@
 # It runs governance checks on every PR and posts results as annotations.
 #
 # Prerequisites:
-#   1. Run `npx @charter/cli setup --ci github` in your repo
+#   1. Run `npx @stackbilt/cli setup --ci github` in your repo
 #   2. Or copy this file to .github/workflows/governance.yml
 #
 # Configuration:
@@ -35,7 +35,7 @@ jobs:
           node-version: '20'
 
       - name: Install Charter CLI
-        run: npm install -g @charter/cli
+        run: npm install -g @stackbilt/cli
 
       - name: Validate Commits
         run: charter validate --ci --format text
