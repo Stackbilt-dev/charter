@@ -18,6 +18,24 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.20] - 2026-02-17
+
+### Added
+- New `charter hook install --commit-msg` command to install a commit-msg hook that normalizes `Governed-By` and `Resolves-Request` trailers using `git interpret-trailers`.
+- `setup --detect-only` output now includes `agentStandards` and detects repository-level agent governance files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`).
+- `drift` and `audit` output now include pattern customization signal (`patternsCustomized`) when metadata is present in pattern files.
+
+### Changed
+- Setup-generated GitHub workflow is now pnpm-aware and emits `pnpm/action-setup` + `pnpm install --frozen-lockfile` when pnpm is detected.
+- Stack detection now scans monorepo manifests more broadly (`packages/*` and `pnpm-workspace.yaml` paths) and reports `monorepo`/`hasPnpm`.
+- `charter classify` is now surfaced earlier in onboarding/setup guidance for LM-agent-first workflows.
+- Pattern scaffold output now stores metadata envelope (`customized`, `preset`, `generatedAt`, `patterns`) while remaining backward-compatible in loaders.
+
+### Fixed
+- Trailer parsing now follows terminal contiguous git trailer block semantics, matching `git interpret-trailers` behavior.
+- `validate` now emits explicit trailer parsing warnings when governance-like lines are present but not parsed as valid trailers.
+- Commit parsing in `validate`, `audit`, and quickstart snapshot flow now uses full commit body (`%B`) so trailer/body analysis is accurate.
+
 ## [0.1.19] - 2026-02-17
 
 ### Added
@@ -188,7 +206,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.20...HEAD
+[0.1.20]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.20
 [0.1.19]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.19
 [0.1.18]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.18
 [0.1.17]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.17
