@@ -2,6 +2,12 @@
 
 Citation validation and commit message intent classification for [Charter Kit](https://github.com/Stackbilt-dev/charter) -- a local-first governance toolkit for software repos. Pure heuristics, no LLM calls.
 
+> **Want the full toolkit?** Just install the CLI — it includes everything:
+> ```bash
+> npm install -g @stackbilt/cli
+> ```
+> Only install this package directly if you need citation validation or intent classification without the CLI.
+
 ## Install
 
 ```bash
