@@ -20,6 +20,7 @@ interface AuditReport {
   generatedAt: string;
   configVersion: string;
   git: {
+    commitRange: string;
     totalCommits: number;
     commitsWithTrailers: number;
     coveragePercent: number;
@@ -60,11 +61,12 @@ interface PolicyCoverageResult {
   missingSections: string[];
 }
 
-export async function auditCommand(options: CLIOptions): Promise<number> {
+export async function auditCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const config = loadConfig(options.configPath);
   const patterns = loadPatterns(options.configPath);
+  const range = getCommitRange(args);
 
-  const report = generateAuditReport(config, config.project, options.configPath, patterns);
+  const report = generateAuditReport(config, config.project, options.configPath, patterns, range);
 
   if (options.format === 'json') {
     console.log(JSON.stringify(report, null, 2));
@@ -83,9 +85,10 @@ function generateAuditReport(
   config: CharterConfig,
   projectName: string,
   configPath: string,
-  patterns: Array<{ name: string; category: string; status: string }>
+  patterns: Array<{ name: string; category: string; status: string }>,
+  commitRange: string
 ): AuditReport {
-  const commits = getRecentCommits(50);
+  const commits = getCommits(commitRange);
   const parsed = parseAllTrailers(commits);
 
   const linkedCommits = new Set<string>();
@@ -132,6 +135,7 @@ function generateAuditReport(
     generatedAt: new Date().toISOString(),
     configVersion: '0.1',
     git: {
+      commitRange,
       totalCommits: commits.length,
       commitsWithTrailers: linkedCommits.size,
       coveragePercent,
@@ -178,6 +182,7 @@ function printReport(report: AuditReport): void {
   console.log(`  Score:   ${scoreIcon} ${report.score.overall}/100`);
   console.log('');
   console.log('  Git Governance Coverage');
+  console.log(`    Commit range:       ${report.git.commitRange}`);
   console.log(`    Commits analyzed:   ${report.git.totalCommits}`);
   console.log(`    With trailers:      ${report.git.commitsWithTrailers} (${report.git.coveragePercent}%)`);
   console.log(`    High-risk unlinked: ${report.git.highRiskUnlinked}`);
@@ -212,45 +217,73 @@ function printReport(report: AuditReport): void {
   console.log('');
 }
 
-function getRecentCommits(count: number): GitCommit[] {
+function getCommits(range: string): GitCommit[] {
   try {
-    const log = runGit(['log', `-${count}`, '--format=%H|%an|%aI|%B---END---', '--name-only']);
+    const log = runGit(['log', range, '--format=%H|%an|%aI|%s', '--name-only']);
 
     const commits: GitCommit[] = [];
-    const entries = log.split('---END---');
+    let current: GitCommit | null = null;
 
-    for (const entry of entries) {
-      const lines = entry.trim().split('\n').filter((l) => l.trim());
-      if (lines.length === 0) continue;
-
-      const firstLine = lines[0];
-      if (!firstLine.includes('|')) continue;
-
-      const pipeIdx = firstLine.indexOf('|');
-      const sha = firstLine.slice(0, pipeIdx);
-      const rest = firstLine.slice(pipeIdx + 1);
-      const [author, timestamp, ...msgParts] = rest.split('|');
-
-      const files: string[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line && !line.includes('|')) {
-          files.push(line);
-        }
+    for (const line of log.split('\n')) {
+      if (line.includes('|') && line.length > 40) {
+        if (current) commits.push(current);
+        const [sha, author, timestamp, ...msgParts] = line.split('|');
+        current = {
+          sha,
+          author,
+          timestamp,
+          message: msgParts.join('|'),
+          files_changed: [],
+        };
+      } else if (line.trim() && current) {
+        current.files_changed!.push(line.trim());
       }
-
-      commits.push({
-        sha,
-        author: author || 'unknown',
-        timestamp: timestamp || new Date().toISOString(),
-        message: msgParts.join('|') || '',
-        files_changed: files,
-      });
     }
 
+    if (current) commits.push(current);
     return commits;
   } catch {
     return [];
+  }
+}
+
+function getCommitRange(args: string[]): string {
+  const rangeIdx = args.indexOf('--range');
+  if (rangeIdx !== -1 && rangeIdx + 1 < args.length) {
+    return args[rangeIdx + 1];
+  }
+
+  const recentRange = getRecentCommitRange();
+
+  try {
+    const currentBranch = runGit(['rev-parse', 'HEAD']).trim();
+    let baseBranch = '';
+    try {
+      baseBranch = runGit(['rev-parse', '--verify', 'main']).trim();
+    } catch {
+      baseBranch = runGit(['rev-parse', '--verify', 'master']).trim();
+    }
+
+    if (!baseBranch || baseBranch === currentBranch) {
+      return recentRange;
+    }
+
+    return `${baseBranch}..HEAD`;
+  } catch {
+    return recentRange;
+  }
+}
+
+function getRecentCommitRange(): string {
+  try {
+    const count = Number.parseInt(runGit(['rev-list', '--count', 'HEAD']).trim(), 10);
+    if (!Number.isFinite(count) || count <= 1) {
+      return 'HEAD';
+    }
+    const span = Math.min(5, count - 1);
+    return `HEAD~${span}..HEAD`;
+  } catch {
+    return 'HEAD';
   }
 }
 

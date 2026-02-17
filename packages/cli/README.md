@@ -98,6 +98,7 @@ Agent decision rules:
 - If `mixedStack: true`, use `--preset fullstack`.
 - If framework signals look wrong, inspect `detected.sources` and rerun setup with an explicit `--preset`.
 - Treat `validate --ci` and `drift --ci` as blocking checks.
+- `validate` and `audit` both report commit range explicitly so coverage numbers are comparable.
 
 ## LM Agent Ops Flow
 
@@ -152,6 +153,7 @@ charter setup --preset fullstack --ci github --yes
 ```
 
 Detection output includes `detected.sources` in JSON mode so agents can verify which manifests were scanned before applying a baseline.
+Setup also adds optional root scripts when missing: `charter:detect` and `charter:setup`.
 
 ### `charter init`
 
@@ -167,6 +169,7 @@ Validate git commits for `Governed-By` and `Resolves-Request` trailers.
 
 ```bash
 charter validate --ci --format json
+charter validate --range HEAD~10..HEAD --format json
 ```
 
 ### `charter drift`
@@ -180,6 +183,7 @@ charter drift --path ./src --ci
 ### `charter audit`
 
 Generate a governance audit report covering trailers, risk, drift, and policy-section coverage quality.
+Use `--range <revset>` to audit the same commit window used by validation in reviews.
 
 If score is held down by trailer coverage, enforce `validate --ci` in PR checks and add commit-template guidance for required trailers.
 

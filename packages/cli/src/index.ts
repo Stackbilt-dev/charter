@@ -26,8 +26,10 @@ Usage:
                                    Bootstrap .charter/ and optional CI workflow
   charter init [--preset <worker|frontend|backend|fullstack>]
                                    Scaffold .charter/ config directory
-  charter validate                 Validate git commits for governance trailers
-  charter audit                    Generate governance audit report
+  charter validate [--range <revset>]
+                                   Validate git commits for governance trailers
+  charter audit [--range <revset>]
+                                   Generate governance audit report
   charter drift [--path <dir>]     Scan files for pattern drift
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
   charter why                      Explain why teams adopt Charter and expected ROI
@@ -105,7 +107,7 @@ export async function run(args: string[]): Promise<number> {
     case 'validate':
       return validateCommand(options, restArgs);
     case 'audit':
-      return auditCommand(options);
+      return auditCommand(options, restArgs);
     case 'drift':
       return driftCommand(options, restArgs);
     case 'classify':

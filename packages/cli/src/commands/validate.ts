@@ -16,6 +16,7 @@ import { assessCommitRisk, generateSuggestions } from '@stackbilt/git';
 interface LocalValidationResult {
   status: 'PASS' | 'WARN' | 'FAIL';
   summary: string;
+  commitRange: string;
   commits: number;
   trailersFound: number;
   highRiskUnlinked: number;
@@ -67,7 +68,10 @@ export async function validateCommand(options: CLIOptions, args: string[]): Prom
     return EXIT_CODE.SUCCESS;
   }
 
-  const result = validateCommits(commits, config.git.trailerThreshold);
+  const result = validateCommits(commits, range, config.git.trailerThreshold, {
+    requireTrailers: config.git.requireTrailers,
+    citationStrictness: config.validation.citationStrictness,
+  });
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -84,7 +88,12 @@ export async function validateCommand(options: CLIOptions, args: string[]): Prom
 
 function validateCommits(
   commits: GitCommit[],
-  threshold: 'LOW' | 'MEDIUM' | 'HIGH'
+  commitRange: string,
+  threshold: 'LOW' | 'MEDIUM' | 'HIGH',
+  policy: {
+    requireTrailers: boolean;
+    citationStrictness: 'FAIL' | 'STRICT' | 'WARN' | 'PERMISSIVE';
+  }
 ): LocalValidationResult {
   const parsed = parseAllTrailers(commits);
 
@@ -138,23 +147,29 @@ function validateCommits(
   }));
 
   const suggestions = generateSuggestions(trailers, unlinkedForSuggestions, commits.length);
+  const totalTrailers = parsed.governedBy.length + parsed.resolvesRequest.length;
 
   let status: 'PASS' | 'WARN' | 'FAIL';
+  let summary: string;
+
   if (highRiskUnlinked > 0) {
     status = 'FAIL';
+    summary = `${unlinked.length} commit(s) above ${threshold} risk threshold without governance trailers.`;
+  } else if (policy.requireTrailers && totalTrailers === 0) {
+    status = policy.citationStrictness === 'FAIL' || policy.citationStrictness === 'STRICT' ? 'FAIL' : 'WARN';
+    summary = `No governance trailers found across ${commits.length} commit(s) in scope.`;
   } else if (unlinked.length > 0) {
     status = 'WARN';
+    summary = `${unlinked.length} commit(s) above ${threshold} risk threshold without governance trailers.`;
   } else {
     status = 'PASS';
+    summary = `All ${commits.length} commit(s) pass governance checks.`;
   }
-
-  const totalTrailers = parsed.governedBy.length + parsed.resolvesRequest.length;
 
   return {
     status,
-    summary: status === 'PASS'
-      ? `All ${commits.length} commit(s) pass governance checks.`
-      : `${unlinked.length} commit(s) above ${threshold} risk threshold without governance trailers.`,
+    summary,
+    commitRange,
     commits: commits.length,
     trailersFound: totalTrailers,
     highRiskUnlinked,
@@ -166,6 +181,7 @@ function printResult(result: LocalValidationResult): void {
   const icon = result.status === 'PASS' ? '[ok]' : result.status === 'WARN' ? '[warn]' : '[fail]';
 
   console.log(`\n  ${icon} ${result.status}: ${result.summary}`);
+  console.log(`     Commit range: ${result.commitRange}`);
   console.log(`     Commits: ${result.commits} | Trailers found: ${result.trailersFound}`);
 
   if (result.suggestions.length > 0) {

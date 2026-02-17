@@ -42,8 +42,8 @@ export interface CharterConfig {
 
   /** Validation settings */
   validation: {
-    /** Citation strictness: STRICT, WARN, PERMISSIVE */
-    citationStrictness: 'STRICT' | 'WARN' | 'PERMISSIVE';
+    /** Citation strictness: FAIL/STRICT, WARN, PERMISSIVE */
+    citationStrictness: 'FAIL' | 'STRICT' | 'WARN' | 'PERMISSIVE';
   };
 
   /** CI behavior */
@@ -81,7 +81,7 @@ const DEFAULT_CONFIG: CharterConfig = {
     exclude: ['node_modules/**', 'dist/**', '.git/**', 'coverage/**'],
   },
   validation: {
-    citationStrictness: 'WARN',
+    citationStrictness: 'FAIL',
   },
   ci: {
     failOnWarn: false,

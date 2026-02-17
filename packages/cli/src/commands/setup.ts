@@ -10,8 +10,12 @@ import type { CLIOptions } from '../index';
 import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
 import { initializeCharter, type StackPreset } from './init';
+import packageJson from '../../package.json';
 
-const GITHUB_WORKFLOW = `name: Governance Check
+const CLI_VERSION = packageJson.version;
+
+function getGithubWorkflow(version: string): string {
+  return `name: Governance Check
 
 on:
   pull_request:
@@ -36,7 +40,7 @@ jobs:
           node-version: '20'
 
       - name: Install Charter CLI
-        run: npm install -g @stackbilt/cli
+        run: npm install -g @stackbilt/cli@${version}
 
       - name: Validate Commits
         run: charter validate --ci --format text
@@ -48,6 +52,7 @@ jobs:
         run: charter audit --format json > /tmp/audit.json
         if: always()
 `;
+}
 
 interface SetupResult {
   configPath: string;
@@ -59,6 +64,11 @@ interface SetupResult {
     mode: 'none' | 'github';
     path?: string;
     created?: boolean;
+  };
+  scripts: {
+    packageJsonPath?: string;
+    updated: boolean;
+    added: string[];
   };
 }
 
@@ -156,11 +166,19 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     workflow: {
       mode: ciMode === 'github' ? 'github' : 'none',
     },
+    scripts: {
+      updated: false,
+      added: [],
+    },
   };
 
   if (ciMode === 'github') {
     const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
-    const created = writeFileIfMissing(workflowPath, GITHUB_WORKFLOW, options.yes || args.includes('--force'));
+    const created = writeFileIfMissing(
+      workflowPath,
+      getGithubWorkflow(CLI_VERSION),
+      options.yes || args.includes('--force')
+    );
 
     result.workflow = {
       mode: 'github',
@@ -168,6 +186,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       created,
     };
   }
+
+  result.scripts = upsertPackageScripts(selectedPreset);
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -186,6 +206,9 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
 
   if (result.workflow.mode === 'github') {
     console.log(`  CI policy gate: ${result.workflow.created ? 'enabled' : 'already present'} (${result.workflow.path})`);
+  }
+  if (result.scripts.updated) {
+    console.log(`  Package scripts added: ${result.scripts.added.join(', ')} (${result.scripts.packageJsonPath})`);
   }
 
   console.log('');
@@ -429,4 +452,45 @@ function getFlag(args: string[], flag: string): string | undefined {
 
 function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
+}
+
+function upsertPackageScripts(selectedPreset: StackPreset): SetupResult['scripts'] {
+  const packageJsonPath = path.resolve('package.json');
+  if (!fs.existsSync(packageJsonPath)) {
+    return { updated: false, added: [] };
+  }
+
+  try {
+    const raw = fs.readFileSync(packageJsonPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
+    const scripts = parsed.scripts || {};
+    const added: string[] = [];
+
+    if (!scripts['charter:detect']) {
+      scripts['charter:detect'] = 'charter setup --detect-only --format json';
+      added.push('charter:detect');
+    }
+    if (!scripts['charter:setup']) {
+      scripts['charter:setup'] = `charter setup --preset ${selectedPreset} --ci github --yes`;
+      added.push('charter:setup');
+    }
+
+    if (added.length === 0) {
+      return {
+        packageJsonPath: 'package.json',
+        updated: false,
+        added: [],
+      };
+    }
+
+    parsed.scripts = scripts;
+    fs.writeFileSync(packageJsonPath, JSON.stringify(parsed, null, 2) + '\n');
+    return {
+      packageJsonPath: 'package.json',
+      updated: true,
+      added,
+    };
+  } catch {
+    return { updated: false, added: [] };
+  }
 }
