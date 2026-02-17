@@ -66,6 +66,7 @@ interface DetectionResult {
   runtime: string[];
   frameworks: string[];
   state: string[];
+  sources: string[];
   signals: {
     hasFrontend: boolean;
     hasBackend: boolean;
@@ -78,6 +79,14 @@ interface DetectionResult {
   mixedStack: boolean;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   suggestedPreset: StackPreset;
+}
+
+interface PackageContext {
+  source: string;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  engines?: { node?: string };
+  name?: string;
 }
 
 export async function setupCommand(options: CLIOptions, args: string[]): Promise<number> {
@@ -93,7 +102,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack.`);
   }
 
-  const detection = detectStack();
+  const contexts = loadPackageContexts();
+  const detection = detectStack(contexts);
   const selectedPreset: StackPreset = isValidPreset(presetFlag) ? presetFlag : detection.suggestedPreset;
   const inferenceMode = presetFlag
     ? 'preset-override'
@@ -114,6 +124,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       console.log(`  Runtime: ${detection.runtime.join(', ') || 'none detected'}`);
       console.log(`  Frameworks: ${detection.frameworks.join(', ') || 'none detected'}`);
       console.log(`  State: ${detection.state.join(', ') || 'none detected'}`);
+      console.log(`  Sources: ${detection.sources.join(', ') || 'none'}`);
       console.log(`  Confidence: ${detection.confidence}`);
       console.log(`  Selected preset: ${selectedPreset} (${inferenceMode})`);
       if (detection.mixedStack) {
@@ -127,7 +138,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
 
   const initResult = initializeCharter(options.configPath, options.yes || args.includes('--force'), {
     preset: selectedPreset,
-    projectName: inferProjectName(),
+    projectName: inferProjectName(contexts),
     features: {
       cloudflare: detection.signals.hasCloudflare,
       hono: detection.signals.hasHono,
@@ -191,13 +202,13 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   return EXIT_CODE.SUCCESS;
 }
 
-function detectStack(): DetectionResult {
-  const pkg = loadPackageJson();
-  if (!pkg) {
+function detectStack(contexts: PackageContext[]): DetectionResult {
+  if (contexts.length === 0) {
     return {
       runtime: [],
       frameworks: [],
       state: [],
+      sources: [],
       signals: {
         hasFrontend: false,
         hasBackend: false,
@@ -213,10 +224,11 @@ function detectStack(): DetectionResult {
     };
   }
 
-  const depNames = new Set<string>([
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ]);
+  const depNames = new Set<string>();
+  for (const ctx of contexts) {
+    for (const dep of Object.keys(ctx.dependencies || {})) depNames.add(dep);
+    for (const dep of Object.keys(ctx.devDependencies || {})) depNames.add(dep);
+  }
 
   const hasFrontendDep = hasAny(depNames, ['next', 'react', 'vite', 'vue', '@angular/core', 'svelte']);
   const hasFrontendPathSignals = hasAnyPath(['client', 'frontend', 'apps/web', 'web']);
@@ -241,16 +253,15 @@ function detectStack(): DetectionResult {
   if (hasBackend) {
     frameworks.push(...pick(depNames, ['express', 'fastify', 'nestjs', '@nestjs/core', 'koa', 'hono']));
   }
-  if (hasWorker) {
-    runtime.push('edge-worker');
-  }
-  if (pkg.engines?.node || hasAny(depNames, ['typescript', 'ts-node', 'express', 'fastify', 'next'])) {
+  if (hasWorker) runtime.push('edge-worker');
+  if (contexts.some((ctx) => !!ctx.engines?.node) || hasAny(depNames, ['typescript', 'ts-node', 'express', 'fastify', 'next'])) {
     runtime.push('node');
   }
   if (hasAny(depNames, ['zustand', 'redux', '@reduxjs/toolkit', 'mobx', 'xstate'])) {
     state.push(...pick(depNames, ['zustand', 'redux', '@reduxjs/toolkit', 'mobx', 'xstate']));
   }
 
+  const dedup = (values: string[]) => [...new Set(values)];
   const signals = {
     hasFrontend,
     hasBackend,
@@ -262,42 +273,123 @@ function detectStack(): DetectionResult {
   };
 
   if (mixedStack) {
-    return { runtime, frameworks, state, signals, mixedStack: true, confidence: 'HIGH', suggestedPreset: 'fullstack' };
+    return {
+      runtime: dedup(runtime),
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      signals,
+      mixedStack: true,
+      confidence: 'HIGH',
+      suggestedPreset: 'fullstack',
+    };
   }
   if (hasWorker && !hasFrontend && !hasBackend) {
-    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'HIGH', suggestedPreset: 'worker' };
+    return {
+      runtime: dedup(runtime),
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      signals,
+      mixedStack: false,
+      confidence: 'HIGH',
+      suggestedPreset: 'worker',
+    };
   }
   if (hasFrontend) {
-    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'HIGH', suggestedPreset: 'frontend' };
+    return {
+      runtime: dedup(runtime),
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      signals,
+      mixedStack: false,
+      confidence: 'HIGH',
+      suggestedPreset: 'frontend',
+    };
   }
   if (hasBackend) {
-    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'HIGH', suggestedPreset: 'backend' };
+    return {
+      runtime: dedup(runtime),
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      signals,
+      mixedStack: false,
+      confidence: 'HIGH',
+      suggestedPreset: 'backend',
+    };
   }
   if (runtime.length > 0 || state.length > 0) {
-    return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'MEDIUM', suggestedPreset: 'fullstack' };
+    return {
+      runtime: dedup(runtime),
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      signals,
+      mixedStack: false,
+      confidence: 'MEDIUM',
+      suggestedPreset: 'fullstack',
+    };
   }
-  return { runtime, frameworks, state, signals, mixedStack: false, confidence: 'LOW', suggestedPreset: 'fullstack' };
+  return {
+    runtime: dedup(runtime),
+    frameworks: dedup(frameworks),
+    state: dedup(state),
+    sources: contexts.map((c) => c.source),
+    signals,
+    mixedStack: false,
+    confidence: 'LOW',
+    suggestedPreset: 'fullstack',
+  };
 }
 
-function loadPackageJson(): {
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  engines?: { node?: string };
-  name?: string;
-} | null {
-  const packageJsonPath = path.resolve('package.json');
-  if (!fs.existsSync(packageJsonPath)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-  } catch {
-    return null;
+function loadPackageContexts(): PackageContext[] {
+  const candidates = new Set<string>(['package.json']);
+
+  for (const dir of ['client', 'frontend', 'web']) {
+    candidates.add(path.join(dir, 'package.json'));
   }
+  candidates.add(path.join('apps', 'web', 'package.json'));
+
+  const appsDir = path.resolve('apps');
+  if (fs.existsSync(appsDir)) {
+    for (const entry of fs.readdirSync(appsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        candidates.add(path.join('apps', entry.name, 'package.json'));
+      }
+    }
+  }
+
+  const contexts: PackageContext[] = [];
+  for (const relativePath of candidates) {
+    const absolutePath = path.resolve(relativePath);
+    if (!fs.existsSync(absolutePath)) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(absolutePath, 'utf-8')) as Omit<PackageContext, 'source'>;
+      contexts.push({
+        source: relativePath.replace(/\\/g, '/'),
+        dependencies: parsed.dependencies,
+        devDependencies: parsed.devDependencies,
+        engines: parsed.engines,
+        name: parsed.name,
+      });
+    } catch {
+      // ignore malformed package file
+    }
+  }
+
+  return contexts;
 }
 
-function inferProjectName(): string {
-  const pkg = loadPackageJson();
-  if (pkg?.name && pkg.name.trim().length > 0) {
-    return pkg.name.trim();
+function inferProjectName(contexts: PackageContext[]): string {
+  const root = contexts.find((c) => c.source === 'package.json');
+  if (root?.name && root.name.trim().length > 0) {
+    return root.name.trim();
+  }
+  const firstNamed = contexts.find((c) => c.name && c.name.trim().length > 0);
+  if (firstNamed?.name) {
+    return firstNamed.name.trim();
   }
   return path.basename(process.cwd());
 }

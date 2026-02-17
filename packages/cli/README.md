@@ -83,6 +83,26 @@ Agent handling contract:
 - `exit 1`: policy violation (action required)
 - `exit 2`: runtime/usage failure
 
+## LM Agent Ops Flow
+
+```bash
+# install in target repo
+npm install --save-dev @stackbilt/cli@latest
+
+# setup
+npx charter setup --detect-only --format json
+npx charter setup --ci github --yes --format json
+
+# enforce on PR/build
+npx charter validate --ci --format json
+npx charter drift --ci --format json
+npx charter audit --format json
+
+# recurring maintenance
+npx charter doctor --format json
+npx charter audit --format json
+```
+
 ## Commands
 
 ### `charter` (no args)
