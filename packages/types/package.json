@@ -1,6 +1,6 @@
 {
   "name": "@stackbilt/types",
-  "version": "0.1.3",
+  "version": "0.1.9",
   "description": "Shared type definitions for the Charter Kit",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
