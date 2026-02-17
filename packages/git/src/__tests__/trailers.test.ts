@@ -37,6 +37,20 @@ describe('parseTrailersFromMessage', () => {
     const result = parseTrailersFromMessage('ddd', message);
     expect(result.governedBy).toHaveLength(2);
   });
+
+  it('ignores governance lines outside the terminal trailer block', () => {
+    const message = [
+      'feat: integration',
+      '',
+      'Governed-By: ADR-101',
+      'Resolves-Request: REQ-101',
+      '',
+      'Co-Authored-By: Example <dev@example.com>',
+    ].join('\n');
+    const result = parseTrailersFromMessage('eee', message);
+    expect(result.governedBy).toHaveLength(0);
+    expect(result.resolvesRequest).toHaveLength(0);
+  });
 });
 
 describe('parseAllTrailers', () => {

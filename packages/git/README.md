@@ -68,6 +68,7 @@ const suggestions = generateSuggestions(trailers, unlinkedCommits, totalCommits)
 ### `parseTrailersFromMessage(commitSha, message): ParsedTrailers`
 
 Parse `Governed-By` and `Resolves-Request` trailers from a single commit message.
+Parsing follows terminal git trailer block semantics (trailers must be contiguous at message end).
 
 ### `parseAllTrailers(commits: GitCommit[]): ParsedTrailers`
 

@@ -23,7 +23,7 @@ export function parseTrailersFromMessage(commitSha: string, message: string): Pa
     resolvesRequest: []
   };
 
-  const lines = message.split('\n');
+  const lines = extractTerminalTrailerBlockLines(message);
 
   for (const line of lines) {
     const governedByMatch = line.match(/^Governed-By:\s*(.+)$/i);
@@ -44,6 +44,30 @@ export function parseTrailersFromMessage(commitSha: string, message: string): Pa
   }
 
   return result;
+}
+
+function extractTerminalTrailerBlockLines(message: string): string[] {
+  const normalized = message.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const trailerLines: string[] = [];
+
+  let idx = lines.length - 1;
+  while (idx >= 0 && lines[idx].trim() === '') {
+    idx--;
+  }
+
+  for (; idx >= 0; idx--) {
+    const line = lines[idx];
+    if (line.trim() === '') {
+      break;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9-]*:\s*.+$/.test(line)) {
+      break;
+    }
+    trailerLines.push(line);
+  }
+
+  return trailerLines.reverse();
 }
 
 /**
