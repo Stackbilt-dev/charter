@@ -18,6 +18,14 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.13] - 2026-02-17
+
+### Added
+- `setup --detect-only --format json` now includes `detected.sources` listing which `package.json` files were used for detection.
+
+### Changed
+- Stack detection now merges dependencies from root and nested manifests (`client/`, `frontend/`, `web/`, `apps/*/`), improving React/Vite signal detection in mixed repos.
+
 ## [0.1.12] - 2026-02-17
 
 ### Added
@@ -100,7 +108,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.13
 [0.1.12]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.12
 [0.1.11]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.11
 [0.1.10]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.10

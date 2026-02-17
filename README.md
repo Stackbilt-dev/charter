@@ -106,6 +106,28 @@ Agent contract:
 - Exit codes: `0` success, `1` policy violation, `2` runtime/usage error
 - CI behavior: with `--ci`, treat `1` as gating failure and surface actionable remediation
 
+## LM Agent Runbook (Install To Maintenance)
+
+Use this deterministic flow in agent-driven repos:
+
+```bash
+# install (repo-local)
+npm install --save-dev @stackbilt/cli@latest
+
+# detect + apply baseline
+npx charter setup --detect-only --format json
+npx charter setup --ci github --yes --format json
+
+# pre-merge / CI gates
+npx charter validate --ci --format json
+npx charter drift --ci --format json
+npx charter audit --format json
+
+# maintenance loop (scheduled or pre-release)
+npx charter doctor --format json
+npx charter audit --format json
+```
+
 ## Command Reference
 
 - `charter`: show repo risk/value snapshot and recommended next action
