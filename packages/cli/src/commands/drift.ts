@@ -17,14 +17,30 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
   const config = loadConfig(options.configPath);
 
   if (!config.drift.enabled) {
-    console.log('  Drift scanning is disabled in config.');
+    if (options.format === 'json') {
+      console.log(JSON.stringify({
+        status: 'PASS',
+        summary: 'Drift scanning is disabled in config.',
+        minScore: config.drift.minScore,
+        thresholdPercent: Math.round(config.drift.minScore * 100),
+        configPath: options.configPath,
+      }, null, 2));
+    } else {
+      console.log('  Drift scanning is disabled in config.');
+    }
     return EXIT_CODE.SUCCESS;
   }
 
   const patterns = loadPatterns(options.configPath);
   if (patterns.length === 0) {
     if (options.format === 'json') {
-      console.log(JSON.stringify({ status: 'WARN', summary: 'No patterns defined.' }, null, 2));
+      console.log(JSON.stringify({
+        status: 'WARN',
+        summary: 'No patterns defined.',
+        minScore: config.drift.minScore,
+        thresholdPercent: Math.round(config.drift.minScore * 100),
+        configPath: options.configPath,
+      }, null, 2));
     } else {
       console.log('  No patterns defined in .charter/patterns/');
       console.log('  Run: charter init to create example patterns.');
@@ -37,7 +53,13 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
 
   if (Object.keys(files).length === 0) {
     if (options.format === 'json') {
-      console.log(JSON.stringify({ status: 'WARN', summary: 'No files matched the scan criteria.' }, null, 2));
+      console.log(JSON.stringify({
+        status: 'WARN',
+        summary: 'No files matched the scan criteria.',
+        minScore: config.drift.minScore,
+        thresholdPercent: Math.round(config.drift.minScore * 100),
+        configPath: options.configPath,
+      }, null, 2));
     } else {
       console.log('  No files matched the scan criteria.');
     }
@@ -45,9 +67,17 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
   }
 
   const report = scanForDrift(files, patterns);
+  const status: 'PASS' | 'FAIL' = report.score >= config.drift.minScore ? 'PASS' : 'FAIL';
+  const output = {
+    status,
+    minScore: config.drift.minScore,
+    thresholdPercent: Math.round(config.drift.minScore * 100),
+    configPath: options.configPath,
+    ...report,
+  };
 
   if (options.format === 'json') {
-    console.log(JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(output, null, 2));
   } else {
     printReport(report, config.drift.minScore);
   }

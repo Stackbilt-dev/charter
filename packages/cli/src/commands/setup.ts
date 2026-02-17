@@ -14,7 +14,7 @@ import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
 
-function getGithubWorkflow(version: string): string {
+function getGithubWorkflow(): string {
   return `name: Governance Check
 
 on:
@@ -39,17 +39,22 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Charter CLI
-        run: npm install -g @stackbilt/cli@${version}
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Validate Commits
-        run: charter validate --ci --format text
+        run: npx charter validate --ci --format text
 
       - name: Drift Scan
-        run: charter drift --ci --format text
+        run: npx charter drift --ci --format text
 
       - name: Audit Report
-        run: charter audit --format json > /tmp/audit.json
+        run: npx charter audit --format json > /tmp/audit.json
         if: always()
 `;
 }
@@ -64,8 +69,15 @@ interface SetupResult {
     mode: 'none' | 'github';
     path?: string;
     created?: boolean;
+    updated?: boolean;
   };
   scripts: {
+    packageJsonPath?: string;
+    updated: boolean;
+    added: string[];
+    updatedEntries: string[];
+  };
+  dependencies: {
     packageJsonPath?: string;
     updated: boolean;
     added: string[];
@@ -140,7 +152,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       console.log(`  Confidence: ${detection.confidence}`);
       console.log(`  Selected preset: ${selectedPreset} (${inferenceMode})`);
       if (detection.mixedStack) {
-        console.log('  Mixed stack detected (frontend + backend/worker). Recommended preset: fullstack');
+        console.log('  Mixed stack detected (frontend/backend split or multi-runtime). Recommended preset: fullstack');
         console.log('  Example: charter setup --preset fullstack --ci github --yes');
       }
       for (const warning of detection.warnings) {
@@ -176,24 +188,32 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       added: [],
       updatedEntries: [],
     },
+    dependencies: {
+      updated: false,
+      added: [],
+      updatedEntries: [],
+    },
   };
 
   if (ciMode === 'github') {
     const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
-    const created = writeFileIfMissing(
+    const workflowWrite = writeManagedFile(
       workflowPath,
-      getGithubWorkflow(CLI_VERSION),
+      getGithubWorkflow(),
       options.yes || args.includes('--force')
     );
 
     result.workflow = {
       mode: 'github',
       path: workflowPath,
-      created,
+      created: workflowWrite.created,
+      updated: workflowWrite.updated,
     };
   }
 
-  result.scripts = upsertPackageScripts(selectedPreset);
+  const manifest = upsertPackageManifest(selectedPreset);
+  result.scripts = manifest.scripts;
+  result.dependencies = manifest.dependencies;
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -206,7 +226,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   console.log(`  Stack preset: ${result.selectedPreset} (${result.inferenceMode})`);
   console.log(`  Detection confidence: ${result.detected.confidence}`);
   if (result.detected.mixedStack) {
-    console.log('  Mixed stack detected (frontend + backend/worker).');
+    console.log('  Mixed stack detected (frontend/backend split or multi-runtime).');
     console.log('  Recommendation: use --preset fullstack when frontend exists under client/ or apps/web.');
   }
   for (const warning of result.detected.warnings) {
@@ -214,12 +234,22 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   }
 
   if (result.workflow.mode === 'github') {
-    console.log(`  CI policy gate: ${result.workflow.created ? 'enabled' : 'already present'} (${result.workflow.path})`);
+    const workflowState = result.workflow.created
+      ? 'enabled'
+      : result.workflow.updated
+        ? 'updated'
+        : 'already present';
+    console.log(`  CI policy gate: ${workflowState} (${result.workflow.path})`);
   }
   if (result.scripts.updated) {
     const added = result.scripts.added.length > 0 ? `added [${result.scripts.added.join(', ')}]` : '';
     const updated = result.scripts.updatedEntries.length > 0 ? `updated [${result.scripts.updatedEntries.join(', ')}]` : '';
     console.log(`  Package scripts synced: ${[added, updated].filter(Boolean).join('; ')} (${result.scripts.packageJsonPath})`);
+  }
+  if (result.dependencies.updated) {
+    const added = result.dependencies.added.length > 0 ? `added [${result.dependencies.added.join(', ')}]` : '';
+    const updated = result.dependencies.updatedEntries.length > 0 ? `updated [${result.dependencies.updatedEntries.join(', ')}]` : '';
+    console.log(`  Package dependencies synced: ${[added, updated].filter(Boolean).join('; ')} (${result.dependencies.packageJsonPath})`);
   }
 
   console.log('');
@@ -276,8 +306,6 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
   const hasReact = hasAny(depNames, ['react']);
   const hasVite = hasAny(depNames, ['vite']);
 
-  const mixedStack = hasFrontend && (hasBackend || hasWorker);
-
   const frameworks: string[] = [];
   const runtime: string[] = [];
   const state: string[] = [];
@@ -298,6 +326,7 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
 
   const dedup = (values: string[]) => [...new Set(values)];
   const dedupRuntime = dedup(runtime);
+  const mixedStack = (hasFrontend && (hasBackend || hasWorker)) || dedupRuntime.length > 1;
   const signals = {
     hasFrontend,
     hasBackend,
@@ -309,11 +338,12 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
   };
   const warnings: string[] = [];
 
-  if (dedupRuntime.length > 1 && !mixedStack) {
+  if (dedupRuntime.length > 1 && !(hasFrontend && (hasBackend || hasWorker))) {
     warnings.push('Multiple runtime families detected without clear frontend/backend split; verify preset selection.');
   }
 
   if (mixedStack) {
+    const isClassicMixed = hasFrontend && (hasBackend || hasWorker);
     return {
       runtime: dedupRuntime,
       frameworks: dedup(frameworks),
@@ -321,13 +351,12 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       sources: contexts.map((c) => c.source),
       signals,
       mixedStack: true,
-      confidence: 'HIGH',
+      confidence: isClassicMixed ? 'HIGH' : 'MEDIUM',
       suggestedPreset: 'fullstack',
       warnings,
     };
   }
   if (hasWorker && !hasFrontend && !hasBackend) {
-    const hasMultiRuntime = dedupRuntime.length > 1;
     return {
       runtime: dedupRuntime,
       frameworks: dedup(frameworks),
@@ -335,8 +364,8 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
       sources: contexts.map((c) => c.source),
       signals,
       mixedStack: false,
-      confidence: hasMultiRuntime ? 'MEDIUM' : 'HIGH',
-      suggestedPreset: hasMultiRuntime ? 'fullstack' : 'worker',
+      confidence: 'HIGH',
+      suggestedPreset: 'worker',
       warnings,
     };
   }
@@ -454,17 +483,26 @@ function pick(set: Set<string>, candidates: string[]): string[] {
   return candidates.filter((c) => set.has(c));
 }
 
-function writeFileIfMissing(targetPath: string, content: string, force: boolean): boolean {
+function writeManagedFile(targetPath: string, content: string, force: boolean): { created: boolean; updated: boolean } {
   const absolute = path.resolve(targetPath);
   const exists = fs.existsSync(absolute);
 
-  if (exists && !force) {
-    return false;
+  if (!exists) {
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, content);
+    return { created: true, updated: false };
   }
 
-  fs.mkdirSync(path.dirname(absolute), { recursive: true });
+  const current = fs.readFileSync(absolute, 'utf-8');
+  if (current === content) {
+    return { created: false, updated: false };
+  }
+  if (!force) {
+    return { created: false, updated: false };
+  }
+
   fs.writeFileSync(absolute, content);
-  return true;
+  return { created: false, updated: true };
 }
 
 function getFlag(args: string[], flag: string): string | undefined {
@@ -479,20 +517,28 @@ function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
 }
 
-function upsertPackageScripts(selectedPreset: StackPreset): SetupResult['scripts'] {
+function upsertPackageManifest(selectedPreset: StackPreset): Pick<SetupResult, 'scripts' | 'dependencies'> {
   const packageJsonPath = path.resolve('package.json');
   if (!fs.existsSync(packageJsonPath)) {
-    return { updated: false, added: [], updatedEntries: [] };
+    return {
+      scripts: { updated: false, added: [], updatedEntries: [] },
+      dependencies: { updated: false, added: [], updatedEntries: [] },
+    };
   }
 
   try {
     const raw = fs.readFileSync(packageJsonPath, 'utf-8');
-    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, string>; devDependencies?: Record<string, string> };
     const scripts = parsed.scripts || {};
+    const devDependencies = parsed.devDependencies || {};
+
     const added: string[] = [];
     const updatedEntries: string[] = [];
+    const depAdded: string[] = [];
+    const depUpdated: string[] = [];
     const detectCommand = 'charter setup --detect-only --format json';
     const setupCommand = `charter setup --preset ${selectedPreset} --ci github --yes`;
+    const pinnedCliVersion = CLI_VERSION;
 
     if (!scripts['charter:detect']) {
       scripts['charter:detect'] = detectCommand;
@@ -509,24 +555,52 @@ function upsertPackageScripts(selectedPreset: StackPreset): SetupResult['scripts
       updatedEntries.push('charter:setup');
     }
 
-    if (added.length === 0 && updatedEntries.length === 0) {
+    if (!devDependencies['@stackbilt/cli']) {
+      devDependencies['@stackbilt/cli'] = pinnedCliVersion;
+      depAdded.push('@stackbilt/cli');
+    } else if (devDependencies['@stackbilt/cli'] !== pinnedCliVersion) {
+      devDependencies['@stackbilt/cli'] = pinnedCliVersion;
+      depUpdated.push('@stackbilt/cli');
+    }
+
+    if (added.length === 0 && updatedEntries.length === 0 && depAdded.length === 0 && depUpdated.length === 0) {
       return {
-        packageJsonPath: 'package.json',
-        updated: false,
-        added: [],
-        updatedEntries: [],
+        scripts: {
+          packageJsonPath: 'package.json',
+          updated: false,
+          added: [],
+          updatedEntries: [],
+        },
+        dependencies: {
+          packageJsonPath: 'package.json',
+          updated: false,
+          added: [],
+          updatedEntries: [],
+        },
       };
     }
 
     parsed.scripts = scripts;
+    parsed.devDependencies = devDependencies;
     fs.writeFileSync(packageJsonPath, JSON.stringify(parsed, null, 2) + '\n');
     return {
-      packageJsonPath: 'package.json',
-      updated: true,
-      added,
-      updatedEntries,
+      scripts: {
+        packageJsonPath: 'package.json',
+        updated: added.length > 0 || updatedEntries.length > 0,
+        added,
+        updatedEntries,
+      },
+      dependencies: {
+        packageJsonPath: 'package.json',
+        updated: depAdded.length > 0 || depUpdated.length > 0,
+        added: depAdded,
+        updatedEntries: depUpdated,
+      },
     };
   } catch {
-    return { updated: false, added: [], updatedEntries: [] };
+    return {
+      scripts: { updated: false, added: [], updatedEntries: [] },
+      dependencies: { updated: false, added: [], updatedEntries: [] },
+    };
   }
 }

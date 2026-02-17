@@ -27,6 +27,9 @@ interface LocalValidationResult {
       shortSha: string;
       subject: string;
       riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+      riskRuleId: string;
+      matchedSignals: string[];
+      thresholdSource: string;
       riskReason: string;
       missingTrailers: string[];
       filesChangedCount: number;
@@ -186,22 +189,118 @@ function validateCommits(
     highRiskUnlinked,
     suggestions,
     evidence: {
-      offendingCommits: unlinked.map((entry) => {
-        const commit = commits.find((c) => c.sha === entry.sha);
-        const filesChanged = commit?.files_changed || [];
-        return {
-          sha: entry.sha,
-          shortSha: entry.sha.slice(0, 7),
-          subject: entry.message,
-          riskLevel: entry.risk as 'LOW' | 'MEDIUM' | 'HIGH',
-          riskReason: getRiskReason(filesChanged, entry.message),
-          missingTrailers: ['Governed-By', 'Resolves-Request'],
-          filesChangedCount: filesChanged.length,
-        };
-      }),
+      offendingCommits: buildOffendingCommits(
+        commits,
+        totalTrailers === 0,
+        unlinked,
+        threshold
+      ),
     },
   };
 }
+
+function buildOffendingCommits(
+  commits: GitCommit[],
+  noTrailersFound: boolean,
+  thresholdUnlinked: Array<{ sha: string; message: string; risk: string }>,
+  threshold: 'LOW' | 'MEDIUM' | 'HIGH'
+): LocalValidationResult['evidence']['offendingCommits'] {
+  const thresholdMap = new Map<string, { message: string; risk: string }>();
+  for (const item of thresholdUnlinked) {
+    thresholdMap.set(item.sha, item);
+  }
+
+  const targetCommits = noTrailersFound
+    ? commits
+    : commits.filter((commit) => thresholdMap.has(commit.sha));
+
+  return targetCommits.map((commit) => {
+    const thresholdHit = thresholdMap.get(commit.sha);
+    const filesChanged = commit.files_changed || [];
+    const subject = (thresholdHit?.message || commit.message.split('\n')[0]).slice(0, 200);
+    const riskMeta = getRiskMeta(filesChanged, subject);
+    const riskLevel = (thresholdHit?.risk as 'LOW' | 'MEDIUM' | 'HIGH') || assessCommitRisk(filesChanged, subject);
+
+    return {
+      sha: commit.sha,
+      shortSha: commit.sha.slice(0, 7),
+      subject,
+      riskLevel,
+      riskRuleId: riskMeta.ruleId,
+      matchedSignals: riskMeta.signals,
+      thresholdSource: `config.git.trailerThreshold=${threshold}`,
+      riskReason: riskMeta.reason,
+      missingTrailers: ['Governed-By', 'Resolves-Request'],
+      filesChangedCount: filesChanged.length,
+    };
+  });
+}
+
+function getRiskMeta(filesChanged: string[], subject: string): {
+  ruleId: string;
+  signals: string[];
+  reason: string;
+} {
+  const lowered = `${subject}\n${filesChanged.join('\n')}`.toLowerCase();
+  const signals: string[] = [];
+
+  if (lowered.includes('migration') || lowered.includes('/migrations/')) {
+    signals.push('migration-keyword-or-path');
+  }
+  if (lowered.includes('schema') || lowered.includes('model')) {
+    signals.push('schema-or-model-keyword');
+  }
+  if (lowered.includes('auth') || lowered.includes('security')) {
+    signals.push('auth-or-security-keyword');
+  }
+  if (filesChanged.length >= 10) {
+    signals.push('large-change-footprint');
+  }
+
+  if (signals.length === 0) {
+    return {
+      ruleId: 'risk.generic.threshold',
+      signals: ['generic-threshold-match'],
+      reason: 'Exceeded configured governance risk threshold based on commit content.',
+    };
+  }
+
+  if (signals.includes('migration-keyword-or-path')) {
+    return {
+      ruleId: 'risk.migration.path_or_keyword',
+      signals,
+      reason: 'Touches migration-related paths or message keywords.',
+    };
+  }
+  if (signals.includes('schema-or-model-keyword')) {
+    return {
+      ruleId: 'risk.schema_or_model.keyword',
+      signals,
+      reason: 'Touches schema/model related changes.',
+    };
+  }
+  if (signals.includes('auth-or-security-keyword')) {
+    return {
+      ruleId: 'risk.auth_or_security.keyword',
+      signals,
+      reason: 'Touches auth/security related code or message keywords.',
+    };
+  }
+  if (signals.includes('large-change-footprint')) {
+    return {
+      ruleId: 'risk.change_footprint.large',
+      signals,
+      reason: 'Large change footprint by number of files changed.',
+    };
+  }
+
+  return {
+    ruleId: 'risk.generic.threshold',
+    signals,
+    reason: 'Exceeded configured governance risk threshold based on commit content.',
+  };
+}
+
 
 function printResult(result: LocalValidationResult): void {
   const icon = result.status === 'PASS' ? '[ok]' : result.status === 'WARN' ? '[warn]' : '[fail]';
@@ -337,21 +436,4 @@ function runGit(args: string[]): string {
     maxBuffer: 10 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-}
-
-function getRiskReason(filesChanged: string[], subject: string): string {
-  const lowered = `${subject}\n${filesChanged.join('\n')}`.toLowerCase();
-  if (lowered.includes('migration') || lowered.includes('/migrations/')) {
-    return 'Touches migration-related paths or message keywords.';
-  }
-  if (lowered.includes('schema') || lowered.includes('model')) {
-    return 'Touches schema/model related changes.';
-  }
-  if (lowered.includes('auth') || lowered.includes('security')) {
-    return 'Touches auth/security related code or message keywords.';
-  }
-  if (filesChanged.length >= 10) {
-    return 'Large change footprint by number of files changed.';
-  }
-  return 'Exceeded configured governance risk threshold based on commit content.';
 }
