@@ -1,6 +1,6 @@
 {
   "name": "@stackbilt/ci",
-  "version": "0.1.9",
+  "version": "0.1.20",
   "description": "GitHub Actions adapter for Charter governance checks",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,7 +28,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@stackbilt/types": "^0.1.9"
+    "@stackbilt/types": "^0.1.20"
   },
   "license": "Apache-2.0"
 }
