@@ -104,11 +104,13 @@ This is the command that applies Charter governance into a repository.
 
 ```bash
 charter setup --ci github --yes
+charter setup --detect-only
+charter setup --preset frontend
 ```
 
 ### `charter init`
 
-Scaffold `.charter/` config templates only.
+Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|backend|fullstack`.
 
 ### `charter doctor`
 
@@ -132,7 +134,7 @@ charter drift --path ./src --ci
 
 ### `charter audit`
 
-Generate a governance audit report covering trailers, risk, and drift.
+Generate a governance audit report covering trailers, risk, drift, and policy-section coverage quality.
 
 ### `charter classify`
 
@@ -150,6 +152,10 @@ charter classify "update button color"
 | `--format <mode>` | Output: `text` or `json` | `text` |
 | `--ci` | CI mode: exit non-zero on WARN or FAIL | off |
 | `--yes` | Auto-accept safe setup overwrites | off |
+
+Setup-only options:
+- `--preset <worker|frontend|backend|fullstack>`: override auto-detected preset
+- `--detect-only`: print stack detection result and selected preset without writing files
 
 ## Exit Codes
 

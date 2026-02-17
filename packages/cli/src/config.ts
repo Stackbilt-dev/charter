@@ -53,6 +53,18 @@ export interface CharterConfig {
     /** Post PR comments (requires GitHub token) */
     postComments: boolean;
   };
+
+  /** Audit scoring behavior */
+  audit: {
+    policyCoverage: {
+      enabled: boolean;
+      requiredSections: Array<{
+        id: string;
+        title: string;
+        match: string[];
+      }>;
+    };
+  };
 }
 
 const DEFAULT_CONFIG: CharterConfig = {
@@ -74,6 +86,33 @@ const DEFAULT_CONFIG: CharterConfig = {
   ci: {
     failOnWarn: false,
     postComments: false,
+  },
+  audit: {
+    policyCoverage: {
+      enabled: true,
+      requiredSections: [
+        {
+          id: 'commit_trailers',
+          title: 'Commit Trailers',
+          match: ['commit trailers', 'governed-by', 'resolves-request'],
+        },
+        {
+          id: 'change_classification',
+          title: 'Change Classification',
+          match: ['change classification', 'surface', 'local', 'cross_cutting'],
+        },
+        {
+          id: 'exception_path',
+          title: 'Exception Path',
+          match: ['exception', 'waiver', 'override'],
+        },
+        {
+          id: 'escalation_approval',
+          title: 'Escalation & Approval',
+          match: ['escalation', 'approval', 'architectural review'],
+        },
+      ],
+    },
   },
 };
 
@@ -103,6 +142,13 @@ export function loadConfig(configPath: string): CharterConfig {
       drift: { ...DEFAULT_CONFIG.drift, ...parsed.drift },
       validation: { ...DEFAULT_CONFIG.validation, ...parsed.validation },
       ci: { ...DEFAULT_CONFIG.ci, ...parsed.ci },
+      audit: {
+        policyCoverage: {
+          ...DEFAULT_CONFIG.audit.policyCoverage,
+          ...(parsed.audit?.policyCoverage || {}),
+          requiredSections: parsed.audit?.policyCoverage?.requiredSections || DEFAULT_CONFIG.audit.policyCoverage.requiredSections,
+        },
+      },
     };
   } catch (err) {
     console.warn(`Warning: Failed to parse ${configFile}, using defaults`);
@@ -156,8 +202,12 @@ export function loadPatterns(configPath: string): Pattern[] {
 /**
  * Get the default config as JSON string (for init command).
  */
-export function getDefaultConfigJSON(): string {
-  return JSON.stringify(DEFAULT_CONFIG, null, 2);
+export function getDefaultConfigJSON(projectName?: string): string {
+  const config = {
+    ...DEFAULT_CONFIG,
+    project: projectName || DEFAULT_CONFIG.project,
+  };
+  return JSON.stringify(config, null, 2);
 }
 
 export { DEFAULT_CONFIG };

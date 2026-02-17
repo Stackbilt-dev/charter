@@ -22,8 +22,10 @@ charter - repo-level governance toolkit
 
 Usage:
   charter                          Show immediate governance value + risk snapshot
-  charter setup [--ci github]     Bootstrap .charter/ and optional CI workflow
-  charter init                     Scaffold .charter/ config directory
+  charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only]
+                                   Bootstrap .charter/ and optional CI workflow
+  charter init [--preset <worker|frontend|backend|fullstack>]
+                                   Scaffold .charter/ config directory
   charter validate                 Validate git commits for governance trailers
   charter audit                    Generate governance audit report
   charter drift [--path <dir>]     Scan files for pattern drift
@@ -38,6 +40,8 @@ Options:
   --format <type>    Output format: text, json (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
   --yes              Auto-accept safe setup overwrites
+  --preset <name>    Stack preset: worker, frontend, backend, fullstack
+  --detect-only      Setup only: print detected stack/preset and exit
 `;
 
 export const EXIT_CODE = {

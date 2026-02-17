@@ -10,24 +10,183 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getDefaultConfigJSON } from '../config';
 
-const EXAMPLE_PATTERNS = [
-  {
-    name: 'Cloudflare Workers',
-    category: 'COMPUTE',
-    blessed_solution: 'Cloudflare Workers for serverless compute',
-    rationale: 'Edge-first architecture for global low-latency',
-    anti_patterns: 'Avoid express/fastify for new services - use Workers native fetch handler',
-    status: 'ACTIVE',
-  },
-  {
-    name: 'D1 Database',
-    category: 'DATA',
-    blessed_solution: 'Cloudflare D1 (SQLite at the edge)',
-    rationale: 'Co-located with Workers, zero network hop for reads',
-    anti_patterns: 'Avoid pg/mysql2/mongoose - use D1 bindings',
-    status: 'ACTIVE',
-  },
-];
+export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack';
+
+const PATTERN_TEMPLATES: Record<StackPreset, unknown[]> = {
+  worker: [
+    {
+      name: 'Edge Compute',
+      category: 'COMPUTE',
+      blessed_solution: 'Cloudflare Workers for edge compute',
+      rationale: 'Low-latency runtime close to users',
+      anti_patterns: 'Avoid express/fastify for new edge services',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Edge Data',
+      category: 'DATA',
+      blessed_solution: 'Cloudflare D1 for transactional edge data',
+      rationale: 'Co-located data with worker runtime',
+      anti_patterns: 'Avoid direct pg/mysql clients in edge handlers',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Queue Processing',
+      category: 'ASYNC',
+      blessed_solution: 'Cloudflare Queues for asynchronous workloads',
+      rationale: 'Durable retries for non-request work',
+      anti_patterns: 'Avoid long-running synchronous request chains',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Edge Security',
+      category: 'SECURITY',
+      blessed_solution: 'Token-based auth with scoped service bindings',
+      rationale: 'Limits blast radius across edge services',
+      anti_patterns: 'Avoid shared hardcoded secrets across handlers',
+      status: 'ACTIVE',
+    },
+  ],
+  frontend: [
+    {
+      name: 'Frontend Runtime',
+      category: 'COMPUTE',
+      blessed_solution: 'React/Vite or Next.js for UI runtime',
+      rationale: 'Stable frontend delivery and ecosystem support',
+      anti_patterns: 'Avoid ad-hoc SPA bootstraps without build pipeline',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'State Management',
+      category: 'INTEGRATION',
+      blessed_solution: 'Centralized client state (Zustand/Redux)',
+      rationale: 'Predictable UI state transitions',
+      anti_patterns: 'Avoid deeply nested ad-hoc local state trees',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'API Contract Layer',
+      category: 'INTEGRATION',
+      blessed_solution: 'Typed API client boundary module',
+      rationale: 'Prevents request shape drift across pages',
+      anti_patterns: 'Avoid raw fetch calls scattered across components',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Frontend Security',
+      category: 'SECURITY',
+      blessed_solution: 'HTTP-only session + CSRF-aware mutation flows',
+      rationale: 'Mitigates token leakage and unsafe writes',
+      anti_patterns: 'Avoid storing auth tokens in localStorage',
+      status: 'ACTIVE',
+    },
+  ],
+  backend: [
+    {
+      name: 'Service Runtime',
+      category: 'COMPUTE',
+      blessed_solution: 'Node service runtime with typed request boundaries',
+      rationale: 'Operationally stable API execution model',
+      anti_patterns: 'Avoid implicit any/unknown request payload parsing',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Data Access Layer',
+      category: 'DATA',
+      blessed_solution: 'Repository/service abstraction around DB operations',
+      rationale: 'Centralizes schema and migration safety',
+      anti_patterns: 'Avoid direct SQL calls spread across handlers',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Async Jobs',
+      category: 'ASYNC',
+      blessed_solution: 'Queue-backed workers for retries and background work',
+      rationale: 'Improves resilience of non-critical tasks',
+      anti_patterns: 'Avoid blocking API requests on batch/background tasks',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'API Security',
+      category: 'SECURITY',
+      blessed_solution: 'Scoped auth middleware and service-level authorization',
+      rationale: 'Consistent access control across endpoints',
+      anti_patterns: 'Avoid route-specific ad-hoc authorization logic',
+      status: 'ACTIVE',
+    },
+  ],
+  fullstack: [
+    {
+      name: 'App Runtime Split',
+      category: 'COMPUTE',
+      blessed_solution: 'Frontend app plus API service/edge runtime split',
+      rationale: 'Clear ownership between UI and backend concerns',
+      anti_patterns: 'Avoid coupling frontend state logic directly to DB models',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Primary Data Store',
+      category: 'DATA',
+      blessed_solution: 'Single primary transactional data layer with migrations',
+      rationale: 'Consistent source of truth for read/write paths',
+      anti_patterns: 'Avoid duplicating write sources across multiple stores',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'API Integration Boundary',
+      category: 'INTEGRATION',
+      blessed_solution: 'Typed API client/server contracts',
+      rationale: 'Reduces interface drift between frontend and backend',
+      anti_patterns: 'Avoid undocumented cross-layer payload assumptions',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Background Processing',
+      category: 'ASYNC',
+      blessed_solution: 'Queue/job model for notifications and batch workflows',
+      rationale: 'Protects user-facing latency from long-running tasks',
+      anti_patterns: 'Avoid synchronous execution of retry-prone integrations',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Security Baseline',
+      category: 'SECURITY',
+      blessed_solution: 'Centralized authn/authz and secret management policy',
+      rationale: 'Consistent controls across frontend/backend surfaces',
+      anti_patterns: 'Avoid mixed auth patterns across services and clients',
+      status: 'ACTIVE',
+    },
+  ],
+};
+
+const DEFAULT_POLICY_CONTENT = `# Governance Policy
+
+## Commit Trailers
+
+High-risk commits (migrations, handlers, services) should include:
+
+\`\`\`
+Governed-By: <ADR-ID or ledger entry reference>
+Resolves-Request: <governance request ID>
+\`\`\`
+
+## Change Classification
+
+Changes are classified as:
+- **SURFACE**: Docs, comments, naming - no code logic
+- **LOCAL**: Single service, contained impact
+- **CROSS_CUTTING**: Multiple services, data model, API contracts
+
+## Exception Path
+
+Use documented exception requests when policy cannot be applied directly.
+Capture waiver reason, approver, and expiration.
+
+## Escalation & Approval
+
+Cross-cutting changes require architectural review before merge.
+Escalate ambiguous or high-risk decisions for explicit approval.
+`;
 
 const GITIGNORE_CONTENT = `# Charter local state
 .cache/
@@ -39,9 +198,16 @@ interface InitResult {
   files: string[];
 }
 
+interface InitializeOptions {
+  projectName?: string;
+  preset?: StackPreset;
+}
+
 export async function initCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const force = options.yes || args.includes('--force');
-  const result = initializeCharter(options.configPath, force);
+  const presetFlag = getFlag(args, '--preset');
+  const preset = isValidPreset(presetFlag) ? presetFlag : undefined;
+  const result = initializeCharter(options.configPath, force, { preset });
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -69,7 +235,7 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   return EXIT_CODE.SUCCESS;
 }
 
-export function initializeCharter(configDir: string, force: boolean): InitResult {
+export function initializeCharter(configDir: string, force: boolean, initOptions: InitializeOptions = {}): InitResult {
   const configFile = path.join(configDir, 'config.json');
   const exists = fs.existsSync(configFile);
 
@@ -86,37 +252,15 @@ export function initializeCharter(configDir: string, force: boolean): InitResult
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  fs.writeFileSync(configFile, getDefaultConfigJSON() + '\n');
+  const selectedPreset = initOptions.preset || 'fullstack';
+  fs.writeFileSync(configFile, getDefaultConfigJSON(initOptions.projectName) + '\n');
 
   fs.writeFileSync(
     path.join(configDir, 'patterns', 'blessed-stack.json'),
-    JSON.stringify(EXAMPLE_PATTERNS, null, 2) + '\n'
+    JSON.stringify(PATTERN_TEMPLATES[selectedPreset], null, 2) + '\n'
   );
 
-  fs.writeFileSync(
-    path.join(configDir, 'policies', 'governance.md'),
-    `# Governance Policy
-
-## Commit Trailers
-
-High-risk commits (migrations, handlers, services) should include:
-
-\`\`\`
-Governed-By: <ADR-ID or ledger entry reference>
-Resolves-Request: <governance request ID>
-\`\`\`
-
-## Change Classification
-
-Changes are classified as:
-- **SURFACE**: Docs, comments, naming - no code logic
-- **LOCAL**: Single service, contained impact
-- **CROSS_CUTTING**: Multiple services, data model, API contracts
-
-Cross-cutting changes require architectural review before merge.
-`
-  );
-
+  fs.writeFileSync(path.join(configDir, 'policies', 'governance.md'), DEFAULT_POLICY_CONTENT);
   fs.writeFileSync(path.join(configDir, '.gitignore'), GITIGNORE_CONTENT);
 
   return {
@@ -129,4 +273,16 @@ Cross-cutting changes require architectural review before merge.
       '.gitignore',
     ],
   };
+}
+
+function isValidPreset(value: string | undefined): value is StackPreset {
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
+}
+
+function getFlag(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx !== -1 && idx + 1 < args.length) {
+    return args[idx + 1];
+  }
+  return undefined;
 }

@@ -7,9 +7,10 @@
 
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
-import { loadConfig, loadPatterns } from '../config';
+import { loadConfig, loadPatterns, type CharterConfig } from '../config';
 import { parseAllTrailers } from '@stackbilt/git';
 import { assessCommitRisk } from '@stackbilt/git';
 import type { GitCommit } from '@stackbilt/types';
@@ -33,6 +34,9 @@ interface AuditReport {
   };
   policies: {
     files: string[];
+    coveragePercent: number;
+    matchedSections: string[];
+    missingSections: string[];
   };
   score: {
     overall: number;
@@ -50,11 +54,17 @@ interface AuditReport {
   };
 }
 
+interface PolicyCoverageResult {
+  coveragePercent: number;
+  matchedSections: string[];
+  missingSections: string[];
+}
+
 export async function auditCommand(options: CLIOptions): Promise<number> {
   const config = loadConfig(options.configPath);
   const patterns = loadPatterns(options.configPath);
 
-  const report = generateAuditReport(config.project, options.configPath, patterns);
+  const report = generateAuditReport(config, config.project, options.configPath, patterns);
 
   if (options.format === 'json') {
     console.log(JSON.stringify(report, null, 2));
@@ -70,6 +80,7 @@ export async function auditCommand(options: CLIOptions): Promise<number> {
 }
 
 function generateAuditReport(
+  config: CharterConfig,
   projectName: string,
   configPath: string,
   patterns: Array<{ name: string; category: string; status: string }>
@@ -103,16 +114,17 @@ function generateAuditReport(
   const policyFiles = fs.existsSync(policiesDir)
     ? fs.readdirSync(policiesDir).filter((f) => f.endsWith('.md'))
     : [];
+  const policyCoverage = evaluatePolicyCoverage(config, policiesDir, policyFiles);
 
   const trailerScore = Math.min(100, coveragePercent * 1.5);
   const patternScore = Math.min(100, activePatterns.length * 20);
-  const policyScore = Math.min(100, policyFiles.length * 33);
+  const policyScore = policyCoverage.coveragePercent;
 
   const overall = Math.round((trailerScore * 0.5) + (patternScore * 0.3) + (policyScore * 0.2));
   const scoreInputs = {
     coveragePercent,
     activePatterns: activePatterns.length,
-    policyFiles: policyFiles.length,
+    missingSections: policyCoverage.missingSections,
   };
 
   return {
@@ -134,6 +146,9 @@ function generateAuditReport(
     },
     policies: {
       files: policyFiles,
+      coveragePercent: policyCoverage.coveragePercent,
+      matchedSections: policyCoverage.matchedSections,
+      missingSections: policyCoverage.missingSections,
     },
     score: {
       overall,
@@ -145,7 +160,7 @@ function generateAuditReport(
       criteria: {
         trailerCoverage: 'coverage_percent * 1.5 (max 100). 67%+ coverage earns full points.',
         patternDefinitions: 'active_pattern_count * 20 (max 100). 5+ active patterns earns full points.',
-        policyDocumentation: 'policy_markdown_files * 33 (max 100). 3+ policy files earns full points.',
+        policyDocumentation: 'policy section coverage percent from config.audit.policyCoverage.requiredSections (max 100).',
       },
       recommendations: getRecommendations(scoreInputs),
     },
@@ -174,6 +189,8 @@ function printReport(report: AuditReport): void {
   console.log('');
   console.log('  Policy Documentation');
   console.log(`    Policy files:       ${report.policies.files.length}`);
+  console.log(`    Coverage:           ${report.policies.coveragePercent}%`);
+  console.log(`    Missing sections:   ${report.policies.missingSections.length}`);
   for (const file of report.policies.files) {
     console.log(`    - ${file}`);
   }
@@ -248,7 +265,7 @@ function runGit(args: string[]): string {
 function getRecommendations(inputs: {
   coveragePercent: number;
   activePatterns: number;
-  policyFiles: number;
+  missingSections: string[];
 }): string[] {
   const recommendations: string[] = [];
 
@@ -270,14 +287,52 @@ function getRecommendations(inputs: {
     recommendations.push('Pattern definitions are at full-score threshold.');
   }
 
-  const missingPolicies = Math.max(0, 3 - inputs.policyFiles);
-  if (missingPolicies > 0) {
+  if (inputs.missingSections.length > 0) {
     recommendations.push(
-      `Add ${missingPolicies} policy markdown file(s) in .charter/policies/ to reach full policy score (target: 3 policy files).`
+      `Add missing policy coverage sections: ${inputs.missingSections.join(', ')}.`
     );
   } else {
-    recommendations.push('Policy documentation is at full-score threshold.');
+    recommendations.push('Policy documentation coverage is at full-score threshold.');
   }
 
   return recommendations;
+}
+
+function evaluatePolicyCoverage(
+  config: CharterConfig,
+  policiesDir: string,
+  policyFiles: string[]
+): PolicyCoverageResult {
+  const required = config.audit.policyCoverage.requiredSections || [];
+  if (!config.audit.policyCoverage.enabled || required.length === 0) {
+    return {
+      coveragePercent: 100,
+      matchedSections: [],
+      missingSections: [],
+    };
+  }
+
+  const normalizedContent = policyFiles
+    .map((f) => fs.readFileSync(path.join(policiesDir, f), 'utf-8'))
+    .join('\n')
+    .toLowerCase();
+
+  const matchedSections: string[] = [];
+  const missingSections: string[] = [];
+
+  for (const section of required) {
+    const matches = section.match?.some((token) => normalizedContent.includes(token.toLowerCase())) || false;
+    if (matches) {
+      matchedSections.push(section.title);
+    } else {
+      missingSections.push(section.title);
+    }
+  }
+
+  const coveragePercent = Math.round((matchedSections.length / required.length) * 100);
+  return {
+    coveragePercent,
+    matchedSections,
+    missingSections,
+  };
 }
