@@ -18,6 +18,19 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.18] - 2026-02-17
+
+### Added
+- Setup baseline mutation metadata now includes `configHashBefore`, `configHashAfter`, and `writesPerformed` in `mutationPlan`/`appliedMutations`.
+- `validate.strictTrailerMode` now includes explicit `mode` (`STRICT_ONLY`, `RISK_ONLY`, `STRICT_AND_RISK`, `NONE`).
+
+### Changed
+- `validate` policy offender payload is now policy-context focused and no longer carries risk-rule metadata by default.
+- Setup no longer rewrites `.charter/config.json` on reruns unless an explicit force path is used and content differs.
+
+### Fixed
+- Eliminated baseline idempotency false-positive updates caused by unconditional writes during repeated setup runs.
+
 ## [0.1.17] - 2026-02-17
 
 ### Added
@@ -162,7 +175,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.18
 [0.1.17]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.17
 [0.1.16]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.16
 [0.1.15]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.15

@@ -40,6 +40,7 @@ charter setup --preset fullstack --ci github --yes
 - `charter:setup`
 Setup JSON includes `mutationPlan` and `appliedMutations` so agents can see planned/applied deltas.
 Use `--no-dependency-sync` if you want setup to avoid rewriting `devDependencies["@stackbilt/cli"]`.
+Baseline mutation metadata includes `configHashBefore`, `configHashAfter`, and `writesPerformed` for auditable idempotency checks.
 
 Upgrade path in existing repos:
 
@@ -151,6 +152,7 @@ Decision rules for agents:
 - If detection looks incomplete, inspect `detected.sources` before setup.
 - Treat `validate` and `drift` with `--ci` as merge gates.
 - In `validate` JSON, use `evidence.policyOffenders` for strict trailer policy failures and `evidence.riskOffenders` for threshold-risk failures.
+- Treat `policyOffenders` as compliance findings and `riskOffenders` as risk-threshold findings.
 
 ## Trailer Adoption Ramp
 
