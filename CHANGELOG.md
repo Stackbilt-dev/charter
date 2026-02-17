@@ -18,6 +18,17 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.1.12] - 2026-02-17
+
+### Added
+- Mixed-stack setup guidance now appears directly in `setup --detect-only` and setup completion output.
+- Framework-aware baseline specialization for detected Cloudflare, Hono, and React/Vite signals.
+
+### Changed
+- Auto-detection now prioritizes `fullstack` for mixed frontend + backend/worker repositories.
+- Setup now uses repo path signals (for example `client/`, `apps/web`) to improve mixed-stack inference.
+- Docs now recommend detect-first + explicit fullstack preset for mixed repos.
+
 ## [0.1.11] - 2026-02-17
 
 ### Added
@@ -89,7 +100,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.12
 [0.1.11]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.11
 [0.1.10]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.10
 [0.1.9]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.9

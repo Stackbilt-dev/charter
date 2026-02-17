@@ -23,6 +23,12 @@ charter setup --ci github
 
 `setup` is what applies the governance baseline into the current repo (`.charter/*` and optional workflow).
 Use `charter setup --detect-only` to preview detected stack and selected preset without writing files.
+For mixed repos (frontend + backend/worker), run detect-only first, then choose preset intentionally:
+
+```bash
+charter setup --detect-only
+charter setup --preset fullstack --ci github --yes
+```
 
 ## Why Charter
 
