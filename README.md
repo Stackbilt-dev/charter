@@ -4,6 +4,7 @@ Charter is a local-first governance toolkit for software repos. It works in both
 
 ## Ecosystem Coordination
 
+<!-- DOCSYNC:BEGIN:ecosystem-coordination -->
 Charter is the open-source local/CI governance runtime in the broader StackBilt ecosystem:
 - Digital CSA: governance policy brain and institutional memory
 - StackBilt Architect (formerly EdgeStack Architect): architecture generation and workflow execution engine
@@ -15,6 +16,7 @@ Canonical cross-repo planning artifacts live in:
 - `DigitalCSA/plans/EPIC_EDGESTACK_INTEGRATION.md`
 - `DigitalCSA/plans/GOVERNANCE_WORKFLOW_CONTRACT_2026-02-19.md`
 - `DigitalCSA/plans/STACKBILT_SCAFFOLD_CONTRACT_2026-02-19.md`
+<!-- DOCSYNC:END:ecosystem-coordination -->
 
 ## Install And Adopt (Start Here)
 
@@ -244,4 +246,5 @@ packages/
 ## License
 
 Apache-2.0. See `LICENSE`.
+
 
