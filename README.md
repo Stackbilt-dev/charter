@@ -1,5 +1,13 @@
 # Charter Kit
 
+![Charter Kit hero](./stackbilt-charter-2.png)
+
+<p>
+  <a href="https://www.buymeacoffee.com/kurto" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-5F7FFF?style=for-the-badge&logo=buymeacoffee&logoColor=FFDD00" alt="Buy me a coffee" />
+  </a>
+</p>
+
 Charter is a local-first governance toolkit for software repos. It works in both terminal-first human workflows and deterministic CI/agent workflows.
 
 ## Ecosystem Coordination
