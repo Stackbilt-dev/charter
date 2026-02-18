@@ -1,0 +1,35 @@
+name: Governance Scorecard
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Generate Charter JSON outputs
+        shell: bash
+        run: |
+          mkdir -p governance
+          node packages/cli/dist/bin.js validate --ci --format json > governance/validate.json || true
+          node packages/cli/dist/bin.js drift --ci --format json > governance/drift.json || true
+      - name: Build governance scorecard
+        run: node scripts/generate-scorecard.mjs --repo digitalcsa-kit --source https://github.com/Stackbilt-dev/charter
+      - name: Upload scorecard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-scorecard
+          path: governance/scorecard.json
