@@ -28,6 +28,8 @@ jobs:
           node packages/cli/dist/bin.js drift --ci --format json > governance/drift.json || true
       - name: Build governance scorecard
         run: node scripts/generate-scorecard.mjs --repo digitalcsa-kit --source https://github.com/Stackbilt-dev/charter
+      - name: Validate governance scorecard shape
+        run: node scripts/validate-scorecard.mjs --file governance/scorecard.json
       - name: Upload scorecard artifact
         uses: actions/upload-artifact@v4
         with:
