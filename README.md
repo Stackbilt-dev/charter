@@ -109,6 +109,8 @@ node packages/cli/dist/bin.js drift --format json --ci
 node packages/cli/dist/bin.js audit --format json --ci
 ```
 
+CI also publishes `governance/scorecard.json` as a `governance-scorecard` artifact for cross-repo execution-board rollups.
+
 ## Human Onboarding (Copy/Paste)
 
 For someone new to governance tooling, use this exact sequence inside the target repo:
