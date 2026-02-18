@@ -2,6 +2,17 @@
 
 Charter is a local-first governance toolkit for software repos. It works in both terminal-first human workflows and deterministic CI/agent workflows.
 
+## Ecosystem Coordination
+
+Charter is the open-source local/CI governance runtime in the broader StackBilt ecosystem:
+- Digital CSA: governance policy brain and institutional memory
+- EdgeStack Architect: architecture generation and workflow execution engine
+- Charter Kit: portable runtime for commit, drift, and audit governance checks
+
+Canonical cross-repo planning artifacts live in:
+- `DigitalCSA/plans/ECOSYSTEM_SYNERGY_MASTER_PLAN_2026-02.md`
+- `DigitalCSA/plans/ECOSYSTEM_EXECUTION_BOARD.md`
+
 ## Install And Adopt (Start Here)
 
 Recommended for most repos (local install):
