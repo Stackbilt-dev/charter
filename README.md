@@ -13,17 +13,19 @@ Charter is a local-first governance toolkit for software repos. It works in both
 ## Ecosystem Coordination
 
 <!-- DOCSYNC:BEGIN:ecosystem-coordination -->
-Charter is the open-source local/CI governance runtime in the broader StackBilt ecosystem:
-- Digital CSA: governance policy brain and institutional memory
-- StackBilt Architect (formerly EdgeStack Architect): architecture generation and workflow execution engine
+Ecosystem coordination is canonical in DigitalCSA/plans/ECOSYSTEM_SOT.md.
+
+StackBilt ecosystem roles:
+- StackBilt Compass (DigitalCSA repo): governance policy brain and institutional memory
+- StackBilt Architect (EdgeStack engine): architecture generation and workflow execution engine
 - Charter Kit: portable runtime for commit, drift, and audit governance checks
 
-Canonical cross-repo planning artifacts live in:
-- `DigitalCSA/plans/ECOSYSTEM_SYNERGY_MASTER_PLAN_2026-02.md`
-- `DigitalCSA/plans/ECOSYSTEM_EXECUTION_BOARD.md`
-- `DigitalCSA/plans/EPIC_EDGESTACK_INTEGRATION.md`
-- `DigitalCSA/plans/GOVERNANCE_WORKFLOW_CONTRACT_2026-02-19.md`
-- `DigitalCSA/plans/STACKBILT_SCAFFOLD_CONTRACT_2026-02-19.md`
+Canonical cross-repo planning artifacts:
+- DigitalCSA/plans/ECOSYSTEM_SYNERGY_MASTER_PLAN_2026-02.md
+- DigitalCSA/plans/EXECUTION_BOARD.md (ecosystem tracked via Lane = ECOSYSTEM)
+- DigitalCSA/plans/EPIC_EDGESTACK_INTEGRATION.md
+- DigitalCSA/plans/GOVERNANCE_WORKFLOW_CONTRACT_2026-02-19.md
+- DigitalCSA/plans/STACKBILT_SCAFFOLD_CONTRACT_2026-02-19.md
 <!-- DOCSYNC:END:ecosystem-coordination -->
 
 ## Install And Adopt (Start Here)
