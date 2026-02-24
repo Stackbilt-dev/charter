@@ -10,6 +10,7 @@
     { "path": "../git" },
     { "path": "../classify" },
     { "path": "../validate" },
+    { "path": "../adf" },
     { "path": "../drift" }
   ],
   "include": ["src/**/*.ts"]

@@ -14,6 +14,7 @@ import { driftCommand } from './commands/drift';
 import { classifyCommand } from './commands/classify';
 import { quickstartCommand, whyCommand } from './commands/why';
 import { hookCommand } from './commands/hook';
+import { adfCommand } from './commands/adf';
 import packageJson from '../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -35,6 +36,7 @@ Usage:
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
   charter hook install --commit-msg
                                    Install git commit-msg hook for trailer normalization
+  charter adf <subcommand>         ADF context format tools (init, fmt, patch, bundle)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor                   Check CLI + config health
   charter --help                   Show this help
@@ -123,6 +125,8 @@ export async function run(args: string[]): Promise<number> {
       return doctorCommand(options);
     case 'hook':
       return hookCommand(options, restArgs);
+    case 'adf':
+      return adfCommand(options, restArgs);
     default:
       throw new CLIError(`Unknown command: ${command}\n${HELP}`);
   }

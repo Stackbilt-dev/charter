@@ -62,6 +62,9 @@ charter drift          # scan for blessed-stack drift
 charter audit          # generate governance audit report
 charter classify "migrate auth provider"
 charter hook install --commit-msg
+charter adf init             # scaffold .ai/ context directory
+charter adf fmt .ai/core.adf # reformat ADF to canonical form
+charter adf bundle --task "fix React component"
 ```
 
 ## Human Onboarding (Copy/Paste)
@@ -250,6 +253,22 @@ charter hook install --commit-msg
 
 `--force` (or global `--yes`) allows overwrite when a non-Charter `commit-msg` hook already exists.
 
+### `charter adf`
+
+ADF (Attention-Directed Format) context management. Replaces monolithic `.cursorrules`/`claude.md` files with a modular, AST-backed `.ai/` directory.
+
+```bash
+charter adf init [--ai-dir <dir>] [--force]
+charter adf fmt <file> [--check] [--write]
+charter adf patch <file> --ops '<json>'
+charter adf bundle --task "Fix React component" [--ai-dir <dir>]
+```
+
+- `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, and `state.adf`.
+- `fmt`: Parse and reformat to canonical ADF. `--check` exits 1 if not canonical. `--write` reformats in place. Default prints to stdout.
+- `patch`: Apply typed delta operations (ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION).
+- `bundle`: Read `manifest.adf`, resolve ON_DEMAND modules via keyword matching against the task, and output merged context with token estimate.
+
 ## Global Options
 
 | Option | Description | Default |
@@ -280,6 +299,7 @@ Setup-only options:
 - `@stackbilt/classify` -- heuristic change classification
 - `@stackbilt/drift` -- blessed-stack pattern drift detection
 - `@stackbilt/validate` -- citation validation and intent classification
+- `@stackbilt/adf` -- ADF parser, formatter, patcher, and bundler
 - `@stackbilt/ci` -- GitHub Actions integration helpers
 
 ## License
