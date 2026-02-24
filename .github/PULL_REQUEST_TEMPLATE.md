@@ -7,6 +7,7 @@
 
 - [ ] `@stackbilt/types`
 - [ ] `@stackbilt/core`
+- [ ] `@stackbilt/adf`
 - [ ] `@stackbilt/git`
 - [ ] `@stackbilt/classify`
 - [ ] `@stackbilt/validate`
