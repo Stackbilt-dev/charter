@@ -10,24 +10,6 @@
 
 Charter is a local-first governance toolkit for software repos. It works in both terminal-first human workflows and deterministic CI/agent workflows.
 
-## Ecosystem Coordination
-
-<!-- DOCSYNC:BEGIN:ecosystem-coordination -->
-Ecosystem coordination is canonical in DigitalCSA/plans/ECOSYSTEM_SOT.md.
-
-StackBilt ecosystem roles:
-- StackBilt Compass (DigitalCSA repo): governance policy brain and institutional memory
-- StackBilt Architect (EdgeStack engine): architecture generation and workflow execution engine
-- Charter Kit: portable runtime for commit, drift, and audit governance checks
-
-Canonical cross-repo planning artifacts:
-- DigitalCSA/plans/ECOSYSTEM_SYNERGY_MASTER_PLAN_2026-02.md
-- DigitalCSA/plans/EXECUTION_BOARD.md (ecosystem tracked via Lane = ECOSYSTEM)
-- DigitalCSA/plans/EPIC_EDGESTACK_INTEGRATION.md
-- DigitalCSA/plans/GOVERNANCE_WORKFLOW_CONTRACT_2026-02-19.md
-- DigitalCSA/plans/STACKBILT_SCAFFOLD_CONTRACT_2026-02-19.md
-<!-- DOCSYNC:END:ecosystem-coordination -->
-
 ## Install And Adopt (Start Here)
 
 Recommended for most repos (local install):
@@ -90,6 +72,64 @@ npx --no-install charter --version
 - Manage AI agent context with ADF (Attention-Directed Format) -- modular `.ai/` context files with AST-backed parsing, formatting, patching, and bundling
 - Produce stable JSON output for automation
 - Make governance purpose obvious on first run with a repo risk/value snapshot
+
+## ADF: Attention-Directed Format
+
+ADF is a structured context format designed for AI agent workflows. Instead of dumping flat markdown into an LLM's context window, ADF uses emoji-decorated semantic keys, a strict AST, and a module system with progressive disclosure — so agents load only the context they need for the current task.
+
+Charter manages ADF through the `.ai/` directory:
+
+```text
+.ai/
+  manifest.adf    # Module registry: default-load vs on-demand with trigger keywords
+  core.adf        # Always-loaded context (role, constraints, output format)
+  state.adf       # Session state (current task, decisions, blockers)
+  frontend.adf    # On-demand: loaded when task mentions "react", "css", etc.
+  api.adf         # On-demand: loaded when task mentions "endpoint", "REST", etc.
+```
+
+### Quick Start
+
+```bash
+# Scaffold the .ai/ directory with starter modules
+charter adf init
+
+# Reformat an ADF file to canonical form
+charter adf fmt .ai/core.adf --write
+
+# Apply a typed patch (add a bullet to a list section)
+charter adf patch .ai/state.adf --ops '[{"op":"ADD_BULLET","section":"STATE","value":"Reviewing PR #42"}]'
+
+# Bundle context for a specific task — resolves manifest triggers automatically
+charter adf bundle --task "Fix the React login component"
+```
+
+### Format Overview
+
+```text
+ADF: 0.1
+
+🎯 TASK:
+  Build the user dashboard
+
+📋 CONTEXT:
+  - React 18 with TypeScript
+  - TailwindCSS for styling
+  - REST API at /api/v2
+
+⚠️ CONSTRAINTS:
+  - No external state libraries
+  - Must support SSR
+
+🧠 STATE:
+  CURRENT: Implementing layout grid
+  NEXT: Add data fetching
+  BLOCKED: Waiting on API schema
+```
+
+Sections use emoji decorations for attention signaling, support three content types (text, list, key-value map), and follow a canonical ordering that the formatter enforces.
+
+See the [`@stackbilt/adf` package README](./packages/adf/README.md) for full API documentation.
 
 ## Choose Your Path
 
