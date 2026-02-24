@@ -12,6 +12,7 @@
       "@stackbilt/validate": ["packages/validate"],
       "@stackbilt/drift": ["packages/drift"],
       "@stackbilt/ci": ["packages/ci"],
+      "@stackbilt/adf": ["packages/adf"],
       "@stackbilt/cli": ["packages/cli"]
     },
     "lib": ["ES2022"],

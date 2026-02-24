@@ -21,37 +21,42 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
+  packages/adf: {}
+
   packages/ci:
     dependencies:
       '@stackbilt/types':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../types
 
   packages/classify:
     dependencies:
       '@stackbilt/types':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../types
 
   packages/cli:
     dependencies:
+      '@stackbilt/adf':
+        specifier: workspace:^
+        version: link:../adf
       '@stackbilt/classify':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../classify
       '@stackbilt/core':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../core
       '@stackbilt/drift':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../drift
       '@stackbilt/git':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../git
       '@stackbilt/types':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../types
       '@stackbilt/validate':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../validate
 
   packages/core:
@@ -63,13 +68,13 @@ importers:
   packages/drift:
     dependencies:
       '@stackbilt/types':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../types
 
   packages/git:
     dependencies:
       '@stackbilt/types':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../types
 
   packages/types: {}
@@ -77,7 +82,7 @@ importers:
   packages/validate:
     dependencies:
       '@stackbilt/types':
-        specifier: ^0.1.20
+        specifier: workspace:^
         version: link:../types
 
 packages:
