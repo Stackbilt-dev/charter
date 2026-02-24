@@ -87,6 +87,7 @@ npx --no-install charter --version
 - Score commit risk and flag high-risk ungoverned changes
 - Detect stack drift against blessed patterns
 - Classify change scope as `SURFACE`, `LOCAL`, or `CROSS_CUTTING`
+- Manage AI agent context with ADF (Attention-Directed Format) -- modular `.ai/` context files with AST-backed parsing, formatting, patching, and bundling
 - Produce stable JSON output for automation
 - Make governance purpose obvious on first run with a repo risk/value snapshot
 
@@ -209,6 +210,10 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
 - `charter hook install --commit-msg`: install commit-msg trailer normalization hook
+- `charter adf init`: scaffold `.ai/` context directory with manifest, core, and state modules
+- `charter adf fmt <file> [--check] [--write]`: parse and reformat ADF files to canonical form
+- `charter adf patch <file> --ops <json>`: apply typed delta operations to ADF files
+- `charter adf bundle --task "<prompt>"`: resolve manifest modules and output merged context
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
@@ -233,6 +238,7 @@ Audit policy scoring note:
 packages/
   types/      Shared contracts
   core/       Schemas, sanitization, errors
+  adf/        ADF parser, formatter, patcher, bundler (AI context format)
   git/        Trailer parsing and risk scoring
   classify/   Heuristic classification
   validate/   Governance validation

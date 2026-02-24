@@ -29,6 +29,7 @@ Response targets:
 This policy covers Charter Kit OSS packages:
 - `@stackbilt/types`
 - `@stackbilt/core`
+- `@stackbilt/adf`
 - `@stackbilt/git`
 - `@stackbilt/classify`
 - `@stackbilt/validate`

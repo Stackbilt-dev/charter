@@ -17,6 +17,7 @@ pnpm run build
 packages/
   types/      Shared TypeScript contracts
   core/       Schemas, sanitization, shared errors
+  adf/        ADF parser, formatter, patcher, bundler (AI context format)
   git/        Git trailer parsing and risk scoring
   classify/   Heuristic change classification
   validate/   Citation and governance validation
@@ -67,6 +68,7 @@ Belongs here:
 - Heuristic classifiers and validators
 - Schema definitions and validation
 - Git integration logic
+- ADF context format parsing, formatting, and patching
 - CLI commands and local config parsing
 
 Stays in CSA Cloud:

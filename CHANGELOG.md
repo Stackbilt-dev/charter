@@ -18,6 +18,26 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Placeholder for unreleased security updates.
 
+## [0.2.0] - 2026-02-24
+
+### Added
+- New `@stackbilt/adf` package: AST-backed parser, formatter, patcher, and bundler for the ADF (Attention-Directed Format) standard. Zero runtime dependencies.
+- New `charter adf` command namespace with four subcommands:
+  - `charter adf init` scaffolds `.ai/` directory with `manifest.adf`, `core.adf`, and `state.adf` modules.
+  - `charter adf fmt <file>` parses and reformats ADF files to canonical form (`--check` for CI gating, `--write` for in-place reformat).
+  - `charter adf patch <file> --ops <json>` applies typed delta operations (ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION) for safe agent memory updates.
+  - `charter adf bundle --task "<prompt>"` resolves manifest modules via keyword trigger matching and outputs merged context with token estimate.
+- ADF parser supports three content types: text (inline values), list (dash-prefixed items), and map (KEY: value pairs for STATE sub-keys).
+- ADF formatter auto-injects standard emoji decorations and sorts sections by canonical key order (TASK, ROLE, CONTEXT, OUTPUT, CONSTRAINTS, RULES, DEFAULT_LOAD, ON_DEMAND, FILES, TOOLS, RISKS, STATE).
+- ADF patcher is immutable -- original documents are never mutated. Throws `AdfPatchError` with context on invalid operations.
+- ADF bundler merges duplicate sections across modules (lists concatenated, texts joined, maps concatenated) and reports trigger match details.
+- 48 new tests covering parser, formatter, patcher, and bundler.
+
+### Changed
+- All internal `@stackbilt/*` dependency specifiers now use `workspace:^` protocol for consistent monorepo resolution.
+- Workspace layout documentation updated across README, CLAUDE.md, AGENTS.md, CONTRIBUTING.md, PUBLISHING.md, and SECURITY.md.
+- Package dependency flow now includes: `adf (NEW -- zero deps, self-contained AST) <- cli`.
+
 ## [0.1.20] - 2026-02-17
 
 ### Added

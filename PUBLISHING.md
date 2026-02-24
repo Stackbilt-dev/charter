@@ -7,6 +7,7 @@ This is the operator runbook for publishing Charter packages to npm.
 Publishable packages:
 - `@stackbilt/types`
 - `@stackbilt/core`
+- `@stackbilt/adf`
 - `@stackbilt/git`
 - `@stackbilt/classify`
 - `@stackbilt/validate`
@@ -45,11 +46,11 @@ pnpm run test
 Use one synchronized version for all `@stackbilt/*` packages until multi-version strategy is introduced.
 
 1. Set new version in each `packages/*/package.json`.
-2. Replace internal `workspace:*` dependencies with the same concrete version.
-3. Confirm no `workspace:*` remains:
+2. Replace internal `workspace:^` dependencies with the same concrete version (e.g. `"^0.2.0"`).
+3. Confirm no `workspace:` specifiers remain:
 
 ```bash
-rg -n "workspace:\\*" packages -g "package.json"
+rg -n "workspace:" packages -g "package.json"
 ```
 
 ## Phase 3: Artifact Validation (Required)
@@ -59,6 +60,7 @@ rg -n "workspace:\\*" packages -g "package.json"
 ```bash
 pnpm --filter @stackbilt/types pack --dry-run
 pnpm --filter @stackbilt/core pack --dry-run
+pnpm --filter @stackbilt/adf pack --dry-run
 pnpm --filter @stackbilt/git pack --dry-run
 pnpm --filter @stackbilt/classify pack --dry-run
 pnpm --filter @stackbilt/validate pack --dry-run
@@ -80,6 +82,9 @@ node packages/cli/dist/bin.js doctor --format json
 node packages/cli/dist/bin.js validate --format json --ci
 node packages/cli/dist/bin.js drift --format json --ci
 node packages/cli/dist/bin.js audit --format json
+node packages/cli/dist/bin.js adf init
+node packages/cli/dist/bin.js adf fmt .ai/core.adf
+node packages/cli/dist/bin.js adf bundle --task "test task" --format json
 ```
 
 When reviewing detect output, confirm:
@@ -91,12 +96,13 @@ When reviewing detect output, confirm:
 Publish in this order:
 
 1. `@stackbilt/types`
-2. `@stackbilt/core`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/ci`
+2. `@stackbilt/core`, `@stackbilt/adf`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/ci`
 3. `@stackbilt/cli`
 
 ```bash
 pnpm --filter @stackbilt/types publish --access public
 pnpm --filter @stackbilt/core publish --access public
+pnpm --filter @stackbilt/adf publish --access public
 pnpm --filter @stackbilt/git publish --access public
 pnpm --filter @stackbilt/classify publish --access public
 pnpm --filter @stackbilt/validate publish --access public
