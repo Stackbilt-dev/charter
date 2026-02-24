@@ -1,6 +1,6 @@
 {
   "name": "@stackbilt/classify",
-  "version": "0.1.20",
+  "version": "0.2.0",
   "description": "Heuristic change classification (SURFACE/LOCAL/CROSS_CUTTING)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,7 +28,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@stackbilt/types": "^0.1.20"
+    "@stackbilt/types": "workspace:^"
   },
   "license": "Apache-2.0"
 }
