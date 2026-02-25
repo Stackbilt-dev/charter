@@ -49,6 +49,10 @@ jobs:
         run: npx charter drift --ci --format text
         if: hashFiles('.charter/patterns/*.json') != ''
 
+      - name: ADF Evidence
+        run: npx charter adf evidence --auto-measure --ci --format text
+        if: hashFiles('.ai/manifest.adf') != ''
+
       - name: Audit Report
         run: npx charter audit --format json > /tmp/audit.json
         if: always()

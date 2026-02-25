@@ -25,6 +25,7 @@ jobs:
           mkdir -p governance
           node packages/cli/dist/bin.js validate --ci --format json > governance/validate.json || true
           node packages/cli/dist/bin.js drift --ci --format json > governance/drift.json || true
+          node packages/cli/dist/bin.js adf evidence --auto-measure --ci --format json > governance/evidence.json || true
       - name: Build governance scorecard
         run: node scripts/generate-scorecard.mjs --repo digitalcsa-kit --source https://github.com/Stackbilt-dev/charter
       - name: Validate governance scorecard shape
