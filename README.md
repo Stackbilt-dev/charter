@@ -2,12 +2,6 @@
 
 ![Charter Kit hero](./stackbilt-charter-2.png)
 
-<p>
-  <a href="https://www.buymeacoffee.com/kurto" target="_blank" rel="noopener noreferrer">
-    <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-5F7FFF?style=for-the-badge&logo=buymeacoffee&logoColor=FFDD00" alt="Buy me a coffee" />
-  </a>
-</p>
-
 > **ADF is currently running its inaugural full-SDLC cycle to gather real-world data for iterative improvement. Updates coming soon and regularly.**
 
 Charter is a local-first governance toolkit with a built-in AI context compiler. It ships **ADF (Attention-Directed Format)** -- a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files -- alongside offline governance checks for commit trailers, risk scoring, drift detection, and change classification.
@@ -199,3 +193,9 @@ packages/
 ## License
 
 Apache-2.0. See `LICENSE`.
+
+<p>
+  <a href="https://www.buymeacoffee.com/kurto" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-5F7FFF?style=for-the-badge&logo=buymeacoffee&logoColor=FFDD00" alt="Buy me a coffee" />
+  </a>
+</p>
