@@ -257,7 +257,7 @@ packages/
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. See [LICENSE](./LICENSE).
 
 <p>
   <a href="https://www.buymeacoffee.com/kurto" target="_blank" rel="noopener noreferrer">
