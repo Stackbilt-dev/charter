@@ -14,8 +14,9 @@ import {
   parseManifest,
   resolveModules,
   bundleModules,
+  validateConstraints,
 } from '@stackbilt/adf';
-import type { PatchOperation } from '@stackbilt/adf';
+import type { PatchOperation, EvidenceResult } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 
@@ -82,8 +83,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfBundle(options, restArgs);
     case 'sync':
       return adfSync(options, restArgs);
+    case 'evidence':
+      return adfEvidence(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle, sync`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle, sync, evidence`);
   }
 }
 
@@ -502,6 +505,165 @@ function loadLockFile(lockFile: string): Record<string, string> {
 }
 
 // ============================================================================
+// adf evidence
+// ============================================================================
+
+function adfEvidence(options: CLIOptions, args: string[]): number {
+  const task = getFlag(args, '--task');
+  const aiDir = getFlag(args, '--ai-dir') || '.ai';
+  const contextJson = getFlag(args, '--context');
+
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  if (!fs.existsSync(manifestPath)) {
+    throw new CLIError(`manifest.adf not found at ${manifestPath}. Run: charter adf init`);
+  }
+
+  const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
+  const manifestDoc = parseAdf(manifestContent);
+  const manifest = parseManifest(manifestDoc);
+
+  // Resolve modules
+  let modulePaths: string[];
+  let keywords: string[] = [];
+  if (task) {
+    keywords = task
+      .split(/[\s,;:()[\]{}]+/)
+      .filter(w => w.length > 1)
+      .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
+    modulePaths = resolveModules(manifest, keywords);
+  } else {
+    modulePaths = [...manifest.defaultLoad];
+  }
+
+  const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
+
+  let context: Record<string, number> | undefined;
+  if (contextJson) {
+    try {
+      const parsed = JSON.parse(contextJson);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('must be a JSON object');
+      }
+      context = parsed as Record<string, number>;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new CLIError(`Invalid --context JSON: ${msg}`);
+    }
+  }
+
+  try {
+    const bundle = bundleModules(aiDir, modulePaths, readFile);
+    const evidence: EvidenceResult = validateConstraints(bundle.mergedDocument, context);
+
+    // Check sync status
+    const lockFile = path.join(aiDir, '.adf.lock');
+    const locked = loadLockFile(lockFile);
+    const syncEntries: Array<{ source: string; inSync: boolean }> = [];
+    for (const entry of manifest.sync) {
+      const sourcePath = path.join(aiDir, entry.source);
+      if (fs.existsSync(sourcePath)) {
+        const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
+        const sourceHash = hashContent(sourceContent);
+        const lockedHash = locked[entry.source] ?? null;
+        syncEntries.push({ source: entry.source, inSync: lockedHash === sourceHash });
+      }
+    }
+    const allInSync = syncEntries.length === 0 || syncEntries.every(e => e.inSync);
+    const staleCount = syncEntries.filter(e => !e.inSync).length;
+
+    if (options.format === 'json') {
+      const jsonOut: Record<string, unknown> = {
+        aiDir,
+        resolvedModules: bundle.resolvedModules,
+        tokenEstimate: bundle.tokenEstimate,
+        tokenBudget: bundle.tokenBudget,
+        tokenUtilization: bundle.tokenUtilization,
+        constraints: evidence.constraints,
+        weightSummary: evidence.weightSummary,
+        allPassing: evidence.allPassing,
+        failCount: evidence.failCount,
+        warnCount: evidence.warnCount,
+        syncStatus: { allInSync, staleCount },
+      };
+      if (task) {
+        jsonOut.task = task;
+        jsonOut.keywords = keywords;
+      }
+      console.log(JSON.stringify(jsonOut, null, 2));
+    } else {
+      console.log('');
+      console.log('  ADF Evidence Report');
+      console.log('  ===================');
+      console.log(`  Modules loaded: ${bundle.resolvedModules.join(', ')}`);
+      console.log(`  Token estimate: ~${bundle.tokenEstimate}`);
+      if (bundle.tokenBudget !== null) {
+        const pct = bundle.tokenUtilization !== null
+          ? ` (${(bundle.tokenUtilization * 100).toFixed(0)}%)`
+          : '';
+        console.log(`  Token budget: ${bundle.tokenBudget}${pct}`);
+      }
+      console.log('');
+
+      // Weight summary
+      console.log('  Section weights:');
+      console.log(`    Load-bearing: ${evidence.weightSummary.loadBearing}`);
+      console.log(`    Advisory: ${evidence.weightSummary.advisory}`);
+      console.log(`    Unweighted: ${evidence.weightSummary.unweighted}`);
+      console.log('');
+
+      // Constraints
+      if (evidence.constraints.length > 0) {
+        console.log('  Constraints:');
+        for (const c of evidence.constraints) {
+          const icon = c.status === 'pass' ? 'ok' : c.status === 'warn' ? 'WARN' : 'FAIL';
+          console.log(`    [${icon}] ${c.message}`);
+        }
+      } else {
+        console.log('  Constraints: (none)');
+      }
+      console.log('');
+
+      // Sync status
+      if (syncEntries.length > 0) {
+        if (allInSync) {
+          console.log('  Sync: all sources in sync');
+        } else {
+          console.log(`  Sync: ${staleCount} source${staleCount === 1 ? '' : 's'} out of sync`);
+        }
+      } else {
+        console.log('  Sync: no sync entries configured');
+      }
+      console.log('');
+
+      // Verdict
+      const verdict = evidence.allPassing ? 'PASS' : 'FAIL';
+      console.log(`  Verdict: ${verdict}`);
+      if (evidence.warnCount > 0) {
+        console.log(`  (${evidence.warnCount} warning${evidence.warnCount === 1 ? '' : 's'} — at ceiling boundary)`);
+      }
+      console.log('');
+    }
+
+    // CI mode: exit 1 on constraint failures
+    if (options.ciMode && !evidence.allPassing) {
+      return EXIT_CODE.POLICY_VIOLATION;
+    }
+
+    return EXIT_CODE.SUCCESS;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AdfBundleError') {
+      if (options.format === 'json') {
+        console.log(JSON.stringify({ error: e.message }, null, 2));
+      } else {
+        console.error(`  [error] ${e.message}`);
+      }
+      return EXIT_CODE.RUNTIME_ERROR;
+    }
+    throw e;
+  }
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -539,5 +701,11 @@ function printHelp(): void {
   console.log('');
   console.log('    charter adf sync --write [--ai-dir <dir>]');
   console.log('      Update .adf.lock with current source hashes.');
+  console.log('');
+  console.log('    charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--context \'{"key": value}\']');
+  console.log('      Validate metric constraints and produce a structured evidence report.');
+  console.log('      --task: resolve on-demand modules for task. Omit for defaultLoad only.');
+  console.log('      --context: JSON object of external metric overrides.');
+  console.log('      In --ci mode, exit 1 if any constraint fails.');
   console.log('');
 }
