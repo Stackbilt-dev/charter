@@ -76,6 +76,54 @@ Sections use emoji decorations for attention signaling, support four content typ
 
 See the [`@stackbilt/adf` package README](./packages/adf/README.md) for full API documentation.
 
+## Self-Governance
+
+Charter uses its own ADF system to govern its own codebase. The `.ai/` directory in this repository contains the same modules and metric ceilings that any adopting repo would use -- meaning every Charter commit is subject to the same constraint checks the tool enforces on others.
+
+To reproduce this, run the evidence command against Charter's own context directory:
+
+```bash
+charter adf evidence --auto-measure
+```
+
+Here is the actual output from Charter's dogfood run:
+
+```text
+  ADF Evidence Report
+  ===================
+  Modules loaded: core.adf, state.adf
+  Token estimate: ~342
+  Token budget: 4000 (9%)
+
+  Auto-measured:
+    adf_commands_loc: 835 lines (packages/cli/src/commands/adf.ts)
+    bundler_loc: 389 lines (packages/adf/src/bundler.ts)
+    parser_loc: 214 lines (packages/adf/src/parser.ts)
+    cli_entry_loc: 142 lines (packages/cli/src/index.ts)
+
+  Section weights:
+    Load-bearing: 2
+    Advisory: 0
+    Unweighted: 3
+
+  Constraints:
+    [ok] adf_commands_loc: 835 / 900 [lines] -- PASS
+    [ok] bundler_loc: 389 / 500 [lines] -- PASS
+    [ok] parser_loc: 214 / 300 [lines] -- PASS
+    [ok] cli_entry_loc: 142 / 200 [lines] -- PASS
+
+  Sync: all sources in sync
+
+  Verdict: PASS
+```
+
+What this shows:
+
+- **Metric ceilings enforce LOC limits on source files.** Each key in the `METRICS` section of an `.adf` module declares a ceiling. The `--auto-measure` flag counts lines live from the source files referenced in the manifest.
+- **Real governance pressure.** `adf_commands_loc` sits at 93% of its 900-line ceiling (835/900). That is a signal to the team that the file is approaching the point where it should be split or refactored.
+- **CI gating.** Running `charter adf evidence --ci` exits 1 if any ceiling is breached, blocking the merge. Warnings near the boundary surface in the report but do not fail the build.
+- **Available to any repo.** This is the same system you get by running `charter adf init` in your own project.
+
 ## Why Charter
 
 - **ADF context compiler** -- modular `.ai/` context files with AST-backed parsing, formatting, patching, bundling, sync, and constraint validation

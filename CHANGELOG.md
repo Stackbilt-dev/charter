@@ -33,6 +33,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 - ADF format example in root README updated to show metric sections and weight annotations.
 - Root, CLI, and ADF package README documentation comprehensively updated for all Phase 1-7 features.
 - Help text for `charter adf` updated to list all six subcommands (init, fmt, patch, bundle, sync, evidence).
+- Charter's own `.ai/` directory now uses ADF metric ceilings to enforce LOC limits on its own source files (`adf_commands_loc: 835/900`, `bundler_loc: 389/500`, `parser_loc: 214/300`, `cli_entry_loc: 142/200`), validating the full evidence pipeline end-to-end.
 
 ## [0.2.0] - 2026-02-24
 
