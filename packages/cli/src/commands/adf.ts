@@ -284,25 +284,57 @@ function adfBundle(options: CLIOptions, args: string[]): number {
     const result = bundleModules(aiDir, modulePaths, readFile);
 
     if (options.format === 'json') {
-      console.log(JSON.stringify({
+      const jsonOut: Record<string, unknown> = {
         task,
         keywords,
         resolvedModules: result.resolvedModules,
         tokenEstimate: result.tokenEstimate,
+        tokenBudget: result.tokenBudget,
+        tokenUtilization: result.tokenUtilization,
+        perModuleTokens: result.perModuleTokens,
         triggerMatches: result.triggerMatches,
-      }, null, 2));
+      };
+      if (result.moduleBudgetOverruns.length > 0) {
+        jsonOut.moduleBudgetOverruns = result.moduleBudgetOverruns;
+      }
+      if (result.manifest.cadence.length > 0) {
+        jsonOut.cadence = result.manifest.cadence;
+      }
+      console.log(JSON.stringify(jsonOut, null, 2));
     } else {
       console.log(`  Task: "${task}"`);
       console.log(`  Keywords: ${keywords.join(', ')}`);
       console.log(`  Resolved modules: ${result.resolvedModules.join(', ')}`);
       console.log(`  Token estimate: ~${result.tokenEstimate}`);
+      if (result.tokenBudget !== null) {
+        const pct = result.tokenUtilization !== null
+          ? ` (${(result.tokenUtilization * 100).toFixed(0)}%)`
+          : '';
+        console.log(`  Token budget: ${result.tokenBudget}${pct}`);
+      }
       console.log('');
+
+      if (result.moduleBudgetOverruns.length > 0) {
+        console.log('  Module budget overruns:');
+        for (const o of result.moduleBudgetOverruns) {
+          console.log(`    [!] ${o.module}: ~${o.tokens} tokens (budget: ${o.budget})`);
+        }
+        console.log('');
+      }
 
       if (result.triggerMatches.length > 0) {
         console.log('  Trigger report:');
         for (const tm of result.triggerMatches) {
           const icon = tm.matched ? '+' : '-';
           console.log(`    [${icon}] ${tm.module} (${tm.trigger})`);
+        }
+        console.log('');
+      }
+
+      if (result.manifest.cadence.length > 0) {
+        console.log('  Cadence schedule:');
+        for (const c of result.manifest.cadence) {
+          console.log(`    ${c.check}: ${c.frequency}`);
         }
         console.log('');
       }
