@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
-## [Unreleased]
+## [0.3.0] - 2026-02-25
 
 ### Added
 - **Metric content type**: ADF parser now supports `key: value / ceiling [unit]` syntax for numeric metrics with hard ceilings. Metric entries are auto-detected by lowercase key and value/ceiling/unit structure.
@@ -243,7 +243,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
-[Unreleased]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.20...HEAD
+[0.3.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.20...v0.2.0
 [0.1.20]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.20
 [0.1.19]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.19
 [0.1.18]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.18
