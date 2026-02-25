@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { loadPatterns } from '../config';
+import { parseAdf, parseManifest } from '@stackbilt/adf';
 
 interface DoctorResult {
   status: 'PASS' | 'WARN';
@@ -61,6 +62,73 @@ export async function doctorCommand(options: CLIOptions): Promise<number> {
     status: policyCount > 0 ? 'PASS' : 'WARN',
     details: policyCount > 0 ? `${policyCount} markdown policy file(s).` : 'No policy markdown files found.',
   });
+
+  // ADF readiness checks
+  const aiDir = '.ai';
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  const hasManifest = fs.existsSync(manifestPath);
+
+  checks.push({
+    name: 'adf manifest',
+    status: hasManifest ? 'PASS' : 'WARN',
+    details: hasManifest ? `${manifestPath} exists.` : `${manifestPath} not found. Run: charter adf init`,
+  });
+
+  if (hasManifest) {
+    try {
+      const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
+      const manifestDoc = parseAdf(manifestContent);
+      const manifest = parseManifest(manifestDoc);
+
+      checks.push({
+        name: 'adf manifest parse',
+        status: 'PASS',
+        details: `Parsed: ${manifest.defaultLoad.length} default-load, ${manifest.onDemand.length} on-demand module(s).`,
+      });
+
+      // Check that all defaultLoad modules exist and parse
+      const missingModules: string[] = [];
+      for (const mod of manifest.defaultLoad) {
+        const modPath = path.join(aiDir, mod);
+        if (!fs.existsSync(modPath)) {
+          missingModules.push(mod);
+        } else {
+          try {
+            parseAdf(fs.readFileSync(modPath, 'utf-8'));
+          } catch {
+            missingModules.push(`${mod} (parse error)`);
+          }
+        }
+      }
+
+      checks.push({
+        name: 'adf default modules',
+        status: missingModules.length === 0 ? 'PASS' : 'WARN',
+        details: missingModules.length === 0
+          ? `All ${manifest.defaultLoad.length} default-load module(s) present and parseable.`
+          : `Missing or unparseable: ${missingModules.join(', ')}`,
+      });
+
+      // Sync lock status
+      if (manifest.sync.length > 0) {
+        const lockFile = path.join(aiDir, '.adf.lock');
+        const hasLock = fs.existsSync(lockFile);
+        checks.push({
+          name: 'adf sync lock',
+          status: hasLock ? 'PASS' : 'WARN',
+          details: hasLock
+            ? `${lockFile} exists (${manifest.sync.length} sync entry/entries).`
+            : `${lockFile} not found. Run: charter adf sync --write`,
+        });
+      }
+    } catch {
+      checks.push({
+        name: 'adf manifest parse',
+        status: 'WARN',
+        details: `${manifestPath} failed to parse.`,
+      });
+    }
+  }
 
   const hasWarn = checks.some((check) => check.status === 'WARN');
   const result: DoctorResult = {

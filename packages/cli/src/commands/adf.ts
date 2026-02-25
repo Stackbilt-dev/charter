@@ -111,7 +111,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
   if (fs.existsSync(manifestPath) && !force) {
     const result: AdfInitResult = { created: false, aiDir, files: [] };
     if (options.format === 'json') {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify({ ...result, nextActions: ['charter adf fmt .ai/core.adf --check', 'charter adf bundle --task "<prompt>"'] }, null, 2));
     } else {
       console.log(`  .ai/ already exists at ${aiDir}/`);
       console.log('  Use --force (or --yes) to overwrite.');
@@ -131,7 +131,14 @@ function adfInit(options: CLIOptions, args: string[]): number {
   };
 
   if (options.format === 'json') {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      nextActions: [
+        'Edit core.adf with your universal repo rules',
+        'charter adf fmt .ai/core.adf --check',
+        'charter adf bundle --task "<prompt>"',
+      ],
+    }, null, 2));
   } else {
     console.log(`  Initialized ADF context at ${aiDir}/`);
     console.log('');
@@ -209,17 +216,20 @@ function adfPatch(options: CLIOptions, args: string[]): number {
   }
 
   const opsJson = getFlag(args, '--ops');
-  if (!opsJson) {
-    throw new CLIError('adf patch requires --ops <json>.');
+  const opsFile = getFlag(args, '--ops-file');
+  if (!opsJson && !opsFile) {
+    throw new CLIError('adf patch requires --ops <json> or --ops-file <path>.');
   }
 
   if (!fs.existsSync(filePath)) {
     throw new CLIError(`File not found: ${filePath}`);
   }
 
+  const rawOps = opsFile ? readJsonFlag(opsFile, '--ops-file') : opsJson!;
+
   let ops: PatchOperation[];
   try {
-    ops = JSON.parse(opsJson);
+    ops = JSON.parse(rawOps);
     if (!Array.isArray(ops)) {
       throw new Error('ops must be an array');
     }
@@ -287,7 +297,7 @@ function adfBundle(options: CLIOptions, args: string[]): number {
   const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
 
   try {
-    const result = bundleModules(aiDir, modulePaths, readFile);
+    const result = bundleModules(aiDir, modulePaths, readFile, keywords);
 
     if (options.format === 'json') {
       const jsonOut: Record<string, unknown> = {
@@ -300,6 +310,9 @@ function adfBundle(options: CLIOptions, args: string[]): number {
         perModuleTokens: result.perModuleTokens,
         triggerMatches: result.triggerMatches,
       };
+      if (result.unmatchedModules.length > 0) {
+        jsonOut.unmatchedModules = result.unmatchedModules;
+      }
       if (result.moduleBudgetOverruns.length > 0) {
         jsonOut.moduleBudgetOverruns = result.moduleBudgetOverruns;
       }
@@ -335,7 +348,16 @@ function adfBundle(options: CLIOptions, args: string[]): number {
         console.log('  Trigger report:');
         for (const tm of result.triggerMatches) {
           const icon = tm.matched ? '+' : '-';
-          console.log(`    [${icon}] ${tm.module} (${tm.trigger})`);
+          const kw = tm.matchedKeywords.length > 0 ? ` [${tm.matchedKeywords.join(', ')}]` : '';
+          console.log(`    [${icon}] ${tm.module} (${tm.trigger})${kw}`);
+        }
+        console.log('');
+      }
+
+      if (result.unmatchedModules.length > 0) {
+        console.log('  Unmatched modules (not loaded):');
+        for (const m of result.unmatchedModules) {
+          console.log(`    [-] ${m}`);
         }
         console.log('');
       }
@@ -485,7 +507,11 @@ function adfSync(options: CLIOptions, args: string[]): number {
   };
 
   if (options.format === 'json') {
-    console.log(JSON.stringify(result, null, 2));
+    const syncOut: Record<string, unknown> = { ...result };
+    if (!allInSync) {
+      syncOut.nextActions = ['Regenerate targets from source .adf files', 'charter adf sync --write'];
+    }
+    console.log(JSON.stringify(syncOut, null, 2));
   } else {
     for (const e of entries) {
       if (e.inSync) {
@@ -533,6 +559,7 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
   const task = getFlag(args, '--task');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const contextJson = getFlag(args, '--context');
+  const contextFile = getFlag(args, '--context-file');
   const autoMeasure = args.includes('--auto-measure');
 
   const manifestPath = path.join(aiDir, 'manifest.adf');
@@ -560,9 +587,10 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
   const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
 
   let context: Record<string, number> | undefined;
-  if (contextJson) {
+  const rawContext = contextFile ? readJsonFlag(contextFile, '--context-file') : contextJson;
+  if (rawContext) {
     try {
-      const parsed = JSON.parse(contextJson);
+      const parsed = JSON.parse(rawContext);
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
         throw new Error('must be a JSON object');
       }
@@ -595,7 +623,7 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
   }
 
   try {
-    const bundle = bundleModules(aiDir, modulePaths, readFile);
+    const bundle = bundleModules(aiDir, modulePaths, readFile, keywords);
     const evidence: EvidenceResult = validateConstraints(bundle.mergedDocument, context);
 
     // Check sync status
@@ -637,6 +665,20 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
       }
       if (autoMeasured.length > 0) {
         jsonOut.autoMeasured = autoMeasured;
+      }
+      // Suggest logical next steps based on results
+      const nextActions: string[] = [];
+      if (!evidence.allPassing) {
+        nextActions.push('Fix failing constraints before merging');
+      }
+      if (!allInSync) {
+        nextActions.push('charter adf sync --write');
+      }
+      if (evidence.warnCount > 0) {
+        nextActions.push('Review metrics at ceiling boundary');
+      }
+      if (nextActions.length > 0) {
+        jsonOut.nextActions = nextActions;
       }
       console.log(JSON.stringify(jsonOut, null, 2));
     } else {
@@ -746,6 +788,13 @@ function getFlag(args: string[], flag: string): string | undefined {
   return undefined;
 }
 
+function readJsonFlag(filePath: string, flagName: string): string {
+  if (!fs.existsSync(filePath)) {
+    throw new CLIError(`File not found for ${flagName}: ${filePath}`);
+  }
+  return fs.readFileSync(filePath, 'utf-8');
+}
+
 function printHelp(): void {
   console.log('');
   console.log('  charter adf — Attention-Directed Format tools');
@@ -760,7 +809,7 @@ function printHelp(): void {
   console.log('      --write: reformat file in place');
   console.log('      Default: print formatted output to stdout.');
   console.log('');
-  console.log('    charter adf patch <file> --ops <json>');
+  console.log('    charter adf patch <file> --ops <json> | --ops-file <path>');
   console.log('      Apply ADF_PATCH operations to a file.');
   console.log('');
   console.log('    charter adf bundle --task "<prompt>" [--ai-dir <dir>]');
@@ -779,6 +828,7 @@ function printHelp(): void {
   console.log('      --task: resolve on-demand modules for task. Omit for defaultLoad only.');
   console.log('      --auto-measure: count lines in files from manifest METRICS section.');
   console.log('      --context: JSON object of external metric overrides (wins over auto).');
+  console.log('      --context-file: read --context JSON from a file instead.');
   console.log('      In --ci mode, exit 1 if any constraint fails.');
   console.log('');
 }
