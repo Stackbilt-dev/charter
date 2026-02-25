@@ -7,16 +7,32 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ## [Unreleased]
 
 ### Added
-- Placeholder for unreleased additions.
+- **Metric content type**: ADF parser now supports `key: value / ceiling [unit]` syntax for numeric metrics with hard ceilings. Metric entries are auto-detected by lowercase key and value/ceiling/unit structure.
+- **Weight annotations**: ADF sections can carry `[load-bearing]` or `[advisory]` weight annotations (e.g., `CONSTRAINTS [load-bearing]:`). Weight is preserved through parse/format/patch/merge cycles.
+- **`UPDATE_METRIC` patch op**: New patch operation updates a metric entry's value by key while keeping ceiling and unit immutable.
+- **Token budgets**: Manifest `BUDGET` section with `MAX_TOKENS` sets a global token budget. `bundleModules()` reports `tokenBudget`, `tokenUtilization`, and `perModuleTokens`.
+- **Per-module budgets**: ON_DEMAND entries support `[budget: N]` suffix for module-level token limits. Budget overruns reported in `moduleBudgetOverruns`.
+- **`charter adf sync`**: New subcommand with `--check` (verify source `.adf` hashes against `.adf.lock`, exit 1 on drift) and `--write` (update lock file).
+- **Cadence scheduling**: Manifest `CADENCE` section declares check frequency expectations (e.g., `LINT_PASS: every commit`). Cadence entries reported in bundle output.
+- **Constraint validation**: New `validateConstraints()` API checks all metric entries against their ceilings. Status semantics: `value < ceiling` = pass, `value === ceiling` = warn, `value > ceiling` = fail.
+- **`charter adf evidence`**: New subcommand produces structured evidence reports with constraint results, weight summary, sync status, and verdict. Supports `--task`, `--context`, `--context-file`, and `--auto-measure` flags. In `--ci` mode, exits 1 on constraint failures.
+- **`computeWeightSummary()`**: Standalone API to count sections by weight category (load-bearing, advisory, unweighted).
+- **Scaffold LOC guardrail**: `charter adf init` now scaffolds `core.adf` with a `[load-bearing]` CONSTRAINTS section and a `METRICS [load-bearing]` section containing `entry_loc: 0 / 500 [lines]`.
+- **Auto-measurement**: `charter adf evidence --auto-measure` counts lines in files referenced by the manifest `METRICS` section and injects them as context overrides.
+- **Manifest METRICS section**: `parseManifest()` now reads a `METRICS` map section mapping metric keys to source file paths for auto-measurement.
+- **Advisory-only warnings**: `bundleModules()` flags on-demand modules loaded without any `[load-bearing]` sections. Reported in both bundle and evidence output.
+- **`--ops-file` flag**: `charter adf patch` accepts `--ops-file <path>` as an alternative to inline `--ops <json>`.
+- **`--context-file` flag**: `charter adf evidence` accepts `--context-file <path>` as an alternative to inline `--context <json>`.
+- **Doctor ADF checks**: `charter doctor` now validates ADF readiness: manifest existence, manifest parse, default-load module presence/parseability, and sync lock status.
+- **Trigger observability**: `triggerMatches` now includes `matchedKeywords` (which task keywords matched each trigger) and `loadReason` (`'default'` or `'trigger'`). New `unmatchedModules` field lists on-demand modules not resolved for the current task.
+- **`nextActions` in JSON output**: `adf init`, `adf evidence`, and `adf sync --check` now include a `nextActions` array in JSON output suggesting logical follow-up commands based on results.
+- 178 tests across 12 test files (up from 48 in v0.2.0).
 
 ### Changed
-- Placeholder for unreleased changes.
-
-### Fixed
-- Placeholder for unreleased fixes.
-
-### Security
-- Placeholder for unreleased security updates.
+- `bundleModules()` now accepts an optional `taskKeywords` parameter for richer trigger reporting.
+- ADF format example in root README updated to show metric sections and weight annotations.
+- Root, CLI, and ADF package README documentation comprehensively updated for all Phase 1-7 features.
+- Help text for `charter adf` updated to list all six subcommands (init, fmt, patch, bundle, sync, evidence).
 
 ## [0.2.0] - 2026-02-24
 

@@ -37,6 +37,12 @@ charter adf patch .ai/state.adf --ops '[{"op":"ADD_BULLET","section":"STATE","va
 
 # Bundle context for a specific task -- resolves manifest triggers automatically
 charter adf bundle --task "Fix the React login component"
+
+# Verify source .adf files haven't drifted from locked hashes
+charter adf sync --check
+
+# Validate metric constraints and produce a structured evidence report
+charter adf evidence --auto-measure --format json
 ```
 
 ### Format Example
@@ -52,9 +58,13 @@ ADF: 0.1
   - TailwindCSS for styling
   - REST API at /api/v2
 
-⚠️ CONSTRAINTS:
+⚠️ CONSTRAINTS [load-bearing]:
   - No external state libraries
   - Must support SSR
+
+📊 METRICS [load-bearing]:
+  entry_loc: 142 / 500 [lines]
+  handler_loc: 88 / 300 [lines]
 
 🧠 STATE:
   CURRENT: Implementing layout grid
@@ -62,17 +72,18 @@ ADF: 0.1
   BLOCKED: Waiting on API schema
 ```
 
-Sections use emoji decorations for attention signaling, support four content types (text, list, key-value map, and metric with value/ceiling/unit), and follow a canonical ordering that the formatter enforces. Sections can carry a `[load-bearing]` or `[advisory]` weight annotation to distinguish measurable constraints from preferences.
+Sections use emoji decorations for attention signaling, support four content types (text, list, key-value map, and metric with value/ceiling/unit), and follow a canonical ordering that the formatter enforces. Sections can carry a `[load-bearing]` or `[advisory]` weight annotation to distinguish measurable constraints from preferences. Metric entries (`key: value / ceiling [unit]`) define hard ceilings that the `evidence` command validates automatically.
 
 See the [`@stackbilt/adf` package README](./packages/adf/README.md) for full API documentation.
 
 ## Why Charter
 
-- **ADF context compiler** -- modular `.ai/` context files with AST-backed parsing, formatting, patching, and bundling
+- **ADF context compiler** -- modular `.ai/` context files with AST-backed parsing, formatting, patching, bundling, sync, and constraint validation
+- **Evidence-based governance** -- metric ceilings with auto-measurement, structured pass/fail evidence reports, and CI gating
 - **Commit governance** -- validate `Governed-By` and `Resolves-Request` trailers, score commit risk
 - **Drift detection** -- scan for stack drift against blessed patterns
 - **Change classification** -- heuristic `SURFACE`, `LOCAL`, or `CROSS_CUTTING` scope labeling
-- **Stable JSON output** -- every command supports `--format json` for automation and CI
+- **Stable JSON output** -- every command supports `--format json` with `nextActions` hints for agent workflows
 
 ## Install
 
@@ -110,13 +121,16 @@ charter validate --format json --ci
 charter drift --format json --ci
 charter audit --format json
 charter adf bundle --task "describe the task" --format json
+charter adf evidence --auto-measure --format json --ci
+charter adf sync --check --format json
 ```
 
 Agent contract:
 - Inputs: git repo + optional existing `.charter/`
-- Stable machine output: `--format json`
+- Stable machine output: `--format json` with `nextActions` hints where applicable
 - Exit codes: `0` success, `1` policy violation, `2` runtime/usage error
 - CI behavior: with `--ci`, treat `1` as gating failure and surface actionable remediation
+- Evidence: `adf evidence --ci` exits 1 on metric ceiling breaches; warnings (at boundary) don't fail
 
 <details>
 <summary>Trailer Adoption Ramp</summary>
@@ -139,13 +153,13 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
 - `charter hook install --commit-msg`: install commit-msg trailer normalization hook
-- `charter adf init`: scaffold `.ai/` context directory with manifest, core, and state modules
+- `charter adf init [--ai-dir <dir>] [--force]`: scaffold `.ai/` context directory with manifest, core, and state modules
 - `charter adf fmt <file> [--check] [--write]`: parse and reformat ADF files to canonical form
-- `charter adf patch <file> --ops <json>`: apply typed delta operations to ADF files
-- `charter adf bundle --task "<prompt>"`: resolve manifest modules and output merged context
-- `charter adf sync --check`: verify source .adf files match locked hashes (exit 1 on drift)
-- `charter adf sync --write`: update `.adf.lock` with current source hashes
-- `charter adf evidence [--task "<prompt>"] [--context '{"key": value}']`: validate metric constraints and produce evidence report
+- `charter adf patch <file> --ops <json> | --ops-file <path>`: apply typed delta operations to ADF files
+- `charter adf bundle --task "<prompt>" [--ai-dir <dir>]`: resolve manifest modules and output merged context with trigger observability
+- `charter adf sync --check [--ai-dir <dir>]`: verify source .adf files match locked hashes (exit 1 on drift)
+- `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current source hashes
+- `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce structured evidence report
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
