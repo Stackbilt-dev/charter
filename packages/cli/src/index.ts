@@ -36,7 +36,7 @@ Usage:
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
   charter hook install --commit-msg
                                    Install git commit-msg hook for trailer normalization
-  charter adf <subcommand>         ADF context format tools (init, fmt, patch, bundle)
+  charter adf <subcommand>         ADF context format tools (init, fmt, patch, bundle, sync, evidence)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor                   Check CLI + config health
   charter --help                   Show this help
