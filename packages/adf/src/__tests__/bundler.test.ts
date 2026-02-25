@@ -337,6 +337,83 @@ ON_DEMAND:
     expect(result.moduleBudgetOverruns).toEqual([]);
   });
 
+  // --- Advisory-only module detection ---
+
+  it('flags on-demand module with no load-bearing sections', () => {
+    const files: Record<string, string> = {
+      '/ai/manifest.adf': MANIFEST_ADF,
+      '/ai/core.adf': `ADF: 0.1\nCONSTRAINTS [load-bearing]:\n  - No secrets\n`,
+      '/ai/state.adf': `ADF: 0.1\nSTATE:\n  CURRENT: Working\n`,
+      '/ai/frontend.adf': `ADF: 0.1\nCONTEXT [advisory]:\n  - Use React hooks\n`,
+    };
+    const read = (p: string): string => {
+      const content = files[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf'], read);
+    expect(result.advisoryOnlyModules).toEqual(['frontend.adf']);
+  });
+
+  it('does not flag on-demand module with load-bearing section', () => {
+    const files: Record<string, string> = {
+      '/ai/manifest.adf': MANIFEST_ADF,
+      '/ai/core.adf': `ADF: 0.1\nCONSTRAINTS:\n  - No secrets\n`,
+      '/ai/state.adf': `ADF: 0.1\nSTATE:\n  CURRENT: Working\n`,
+      '/ai/frontend.adf': `ADF: 0.1\nCONSTRAINTS [load-bearing]:\n  - Max 300 LOC\n`,
+    };
+    const read = (p: string): string => {
+      const content = files[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf'], read);
+    expect(result.advisoryOnlyModules).toEqual([]);
+  });
+
+  it('does not flag default-load modules even without load-bearing', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf'], readFile);
+    // core.adf and state.adf are defaultLoad — never flagged
+    expect(result.advisoryOnlyModules).toEqual([]);
+  });
+
+  it('flags on-demand module with no weight annotations', () => {
+    const files: Record<string, string> = {
+      '/ai/manifest.adf': MANIFEST_ADF,
+      '/ai/core.adf': `ADF: 0.1\nCONSTRAINTS:\n  - No secrets\n`,
+      '/ai/state.adf': `ADF: 0.1\nSTATE:\n  CURRENT: Working\n`,
+      '/ai/frontend.adf': `ADF: 0.1\nCONTEXT:\n  - Use React hooks\n`,
+    };
+    const read = (p: string): string => {
+      const content = files[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf'], read);
+    expect(result.advisoryOnlyModules).toEqual(['frontend.adf']);
+  });
+
+  it('reports multiple advisory-only modules', () => {
+    const files: Record<string, string> = {
+      '/ai/manifest.adf': MANIFEST_ADF,
+      '/ai/core.adf': `ADF: 0.1\nCONSTRAINTS [load-bearing]:\n  - No secrets\n`,
+      '/ai/state.adf': `ADF: 0.1\nSTATE:\n  CURRENT: Working\n`,
+      '/ai/frontend.adf': `ADF: 0.1\nCONTEXT:\n  - Use React hooks\n`,
+      '/ai/backend.adf': `ADF: 0.1\nCONTEXT:\n  - Use Express\n`,
+    };
+    const read = (p: string): string => {
+      const content = files[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf', 'backend.adf'], read);
+    expect(result.advisoryOnlyModules).toEqual(['frontend.adf', 'backend.adf']);
+  });
+
   // --- Metric merge ---
 
   it('merges metric sections by concatenating entries', () => {

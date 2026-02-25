@@ -191,6 +191,7 @@ export interface BundleResult {
     trigger: string;
     matched: boolean;
   }>;
+  advisoryOnlyModules: string[];
 }
 
 // ============================================================================

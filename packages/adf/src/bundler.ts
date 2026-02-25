@@ -183,6 +183,8 @@ export function bundleModules(
 
   const documents: AdfDocument[] = [];
   const perModuleTokens: Record<string, number> = {};
+  const advisoryOnlyModules: string[] = [];
+  const defaultLoadSet = new Set(manifest.defaultLoad);
 
   for (const modPath of modulePaths) {
     const fullPath = joinPath(basePath, modPath);
@@ -195,6 +197,14 @@ export function bundleModules(
     const doc = parseAdf(content);
     documents.push(doc);
     perModuleTokens[modPath] = estimateTokens(doc);
+
+    // Flag on-demand modules with no load-bearing sections
+    if (!defaultLoadSet.has(modPath)) {
+      const hasLoadBearing = doc.sections.some(s => s.weight === 'load-bearing');
+      if (!hasLoadBearing) {
+        advisoryOnlyModules.push(modPath);
+      }
+    }
   }
 
   const merged = mergeDocuments(documents);
@@ -227,6 +237,7 @@ export function bundleModules(
     perModuleTokens,
     moduleBudgetOverruns,
     triggerMatches,
+    advisoryOnlyModules,
   };
 }
 
