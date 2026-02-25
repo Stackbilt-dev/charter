@@ -145,6 +145,7 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter adf bundle --task "<prompt>"`: resolve manifest modules and output merged context
 - `charter adf sync --check`: verify source .adf files match locked hashes (exit 1 on drift)
 - `charter adf sync --write`: update `.adf.lock` with current source hashes
+- `charter adf evidence [--task "<prompt>"] [--context '{"key": value}']`: validate metric constraints and produce evidence report
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
