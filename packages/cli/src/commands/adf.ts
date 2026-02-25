@@ -303,6 +303,9 @@ function adfBundle(options: CLIOptions, args: string[]): number {
       if (result.moduleBudgetOverruns.length > 0) {
         jsonOut.moduleBudgetOverruns = result.moduleBudgetOverruns;
       }
+      if (result.advisoryOnlyModules.length > 0) {
+        jsonOut.advisoryOnlyModules = result.advisoryOnlyModules;
+      }
       if (result.manifest.cadence.length > 0) {
         jsonOut.cadence = result.manifest.cadence;
       }
@@ -333,6 +336,14 @@ function adfBundle(options: CLIOptions, args: string[]): number {
         for (const tm of result.triggerMatches) {
           const icon = tm.matched ? '+' : '-';
           console.log(`    [${icon}] ${tm.module} (${tm.trigger})`);
+        }
+        console.log('');
+      }
+
+      if (result.advisoryOnlyModules.length > 0) {
+        console.log('  Advisory-only modules:');
+        for (const m of result.advisoryOnlyModules) {
+          console.log(`    [!] ${m}: no load-bearing sections`);
         }
         console.log('');
       }
@@ -592,6 +603,9 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
         jsonOut.task = task;
         jsonOut.keywords = keywords;
       }
+      if (bundle.advisoryOnlyModules.length > 0) {
+        jsonOut.advisoryOnlyModules = bundle.advisoryOnlyModules;
+      }
       console.log(JSON.stringify(jsonOut, null, 2));
     } else {
       console.log('');
@@ -613,6 +627,15 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
       console.log(`    Advisory: ${evidence.weightSummary.advisory}`);
       console.log(`    Unweighted: ${evidence.weightSummary.unweighted}`);
       console.log('');
+
+      // Advisory-only module warnings
+      if (bundle.advisoryOnlyModules.length > 0) {
+        console.log('  Advisory-only modules:');
+        for (const m of bundle.advisoryOnlyModules) {
+          console.log(`    [!] ${m}: no load-bearing sections`);
+        }
+        console.log('');
+      }
 
       // Constraints
       if (evidence.constraints.length > 0) {
