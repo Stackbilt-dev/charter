@@ -272,6 +272,10 @@ interface EvidenceResult {
 - `AdfPatchError` -- invalid patch operation (with op name, section, index context)
 - `AdfBundleError` -- module resolution failure (with optional module path)
 
+## Self-Governance
+
+Charter uses `@stackbilt/adf` to govern its own codebase. The `.ai/manifest.adf` maps metric keys to source files, and `validateConstraints()` with auto-measured line counts enforces LOC ceilings on every key module. When `adf_commands_loc` approaches its 900-line ceiling, the evidence report signals that a refactor is needed -- the same mechanism available to any project using ADF.
+
 ## Requirements
 
 - Node >= 18
