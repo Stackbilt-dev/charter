@@ -289,4 +289,3 @@ Apache-2.0
 
 - [Repository](https://github.com/Stackbilt-dev/charter)
 - [Issues](https://github.com/Stackbilt-dev/charter/issues)
-- [ADF Specification](https://github.com/Stackbilt-dev/charter/blob/main/plans/ADF_SPEC.md)
