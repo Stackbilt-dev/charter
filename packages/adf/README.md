@@ -2,6 +2,8 @@
 
 ADF (Attention-Directed Format) parser, formatter, patcher, and bundler for [Charter Kit](https://github.com/Stackbilt-dev/charter) -- a local-first governance toolkit for software repos. ADF is an attention-optimized microformat that replaces monolithic context files (`.cursorrules`, `claude.md`) with a modular, AST-backed system designed for LLM context windows.
 
+![ADF Architecture](../../ADF_1.png)
+
 > **Want the full toolkit?** Just install the CLI -- it includes everything:
 > ```bash
 > npm install -g @stackbilt/cli
