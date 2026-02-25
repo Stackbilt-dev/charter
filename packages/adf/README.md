@@ -193,6 +193,14 @@ Resolve which modules to load. Always includes `defaultLoad`; adds `ON_DEMAND` m
 
 Parse, merge, and bundle resolved modules into a single ADF document. Duplicate sections are merged (lists concatenated, texts joined, maps concatenated, metrics concatenated). Returns token estimate, budget utilization, per-module token counts, and trigger match report.
 
+### `validateConstraints(doc: AdfDocument, context?: Record<string, number>): EvidenceResult`
+
+Validate all metric entries against their ceilings. Returns a structured evidence report with pass/fail/warn per metric, weight summary, and aggregate counts. Optional `context` parameter injects external measurements (e.g., actual LOC count) that override the document's own values. Status semantics: `value < ceiling` = pass, `value === ceiling` = warn, `value > ceiling` = fail.
+
+### `computeWeightSummary(doc: AdfDocument): WeightSummary`
+
+Count sections by weight category (`load-bearing`, `advisory`, unweighted). Useful independently from constraint validation.
+
 ## AST Types
 
 ```ts
@@ -212,6 +220,17 @@ type AdfContent =
 
 interface AdfMapEntry    { key: string; value: string; }
 interface AdfMetricEntry { key: string; value: number; ceiling: number; unit: string; }
+
+type ConstraintStatus = 'pass' | 'fail' | 'warn';
+interface ConstraintResult {
+  section: string; metric: string; value: number; ceiling: number;
+  unit: string; status: ConstraintStatus; message: string; source: 'metric' | 'context';
+}
+interface WeightSummary  { loadBearing: number; advisory: number; unweighted: number; total: number; }
+interface EvidenceResult {
+  constraints: ConstraintResult[]; weightSummary: WeightSummary;
+  allPassing: boolean; failCount: number; warnCount: number;
+}
 ```
 
 ## Error Types

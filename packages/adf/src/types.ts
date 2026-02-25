@@ -192,3 +192,35 @@ export interface BundleResult {
     matched: boolean;
   }>;
 }
+
+// ============================================================================
+// Constraint Validation
+// ============================================================================
+
+export type ConstraintStatus = 'pass' | 'fail' | 'warn';
+
+export interface ConstraintResult {
+  section: string;
+  metric: string;
+  value: number;
+  ceiling: number;
+  unit: string;
+  status: ConstraintStatus;
+  message: string;
+  source: 'metric' | 'context';
+}
+
+export interface WeightSummary {
+  loadBearing: number;
+  advisory: number;
+  unweighted: number;
+  total: number;
+}
+
+export interface EvidenceResult {
+  constraints: ConstraintResult[];
+  weightSummary: WeightSummary;
+  allPassing: boolean;
+  failCount: number;
+  warnCount: number;
+}
