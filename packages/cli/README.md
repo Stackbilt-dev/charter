@@ -282,6 +282,32 @@ charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]
 - `sync --write`: Update `.adf.lock` with current source hashes.
 - `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail).
 
+#### Evidence Example (from Charter's own repo)
+
+Charter uses its own ADF system for self-governance. Running evidence with auto-measurement:
+
+```bash
+charter adf evidence --auto-measure --format json --ci
+```
+
+Produces constraint checks against live source file line counts:
+
+```json
+{
+  "constraints": [
+    { "metric": "adf_commands_loc", "value": 835, "ceiling": 900, "status": "pass", "source": "context" },
+    { "metric": "bundler_loc", "value": 389, "ceiling": 500, "status": "pass", "source": "context" },
+    { "metric": "parser_loc", "value": 214, "ceiling": 300, "status": "pass", "source": "context" },
+    { "metric": "cli_entry_loc", "value": 142, "ceiling": 200, "status": "pass", "source": "context" }
+  ],
+  "allPassing": true,
+  "failCount": 0,
+  "nextActions": []
+}
+```
+
+`source: "context"` indicates values were auto-measured from source files (not from the document's static values). In `--ci` mode, exit code 1 is returned when any constraint fails.
+
 ## Global Options
 
 | Option | Description | Default |
