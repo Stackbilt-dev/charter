@@ -1,6 +1,6 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: Phase 7a-c complete (scaffold guardrails, auto-measure, advisory-only warnings)
-  NEXT: Implement 7d (agent ergonomics: file inputs, doctor ADF checks, trigger observability, nextActions)
-  COMPLETED: Phase 1 (metric, weight, UPDATE_METRIC), Phase 2 (token budget), Phase 3 (adf sync), Phase 4 (per-module budgets, cadence), Phase 5+6 (constraint validation, evidence report), Phase 7a (scaffold LOC guardrail), Phase 7b (auto-measure), Phase 7c (advisory-only warnings)
+  CURRENT: Phase 7 complete (Opinionated Guardrails & Auto-Evidence)
+  NEXT: Stabilize, gather feedback, plan Phase 8
+  COMPLETED: Phase 1 (metric, weight, UPDATE_METRIC), Phase 2 (token budget), Phase 3 (adf sync), Phase 4 (per-module budgets, cadence), Phase 5+6 (constraint validation, evidence report), Phase 7a (scaffold LOC guardrail), Phase 7b (auto-measure), Phase 7c (advisory-only warnings), Phase 7d (agent ergonomics: file inputs, doctor ADF checks, trigger observability, nextActions)
