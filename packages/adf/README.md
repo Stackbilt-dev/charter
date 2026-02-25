@@ -26,6 +26,9 @@ ADF treats LLM context as a compiled language. Key properties:
 - **Module system** with manifest-based routing, progressive disclosure, and token budgets
 - **Weight annotations** distinguish load-bearing constraints from advisory preferences
 - **Sync protocol** detects drift between source .adf files and their compressed targets
+- **Constraint validation** checks metric ceilings and produces structured pass/fail evidence reports
+- **Cadence scheduling** declares check frequency expectations per metric
+- **Auto-measurement** via manifest METRICS section mapping metric keys to source files
 
 Example ADF document:
 
@@ -147,14 +150,17 @@ const keywords = ['React', 'component', 'fix'];
 const modules = resolveModules(manifest, keywords);
 // => ['core.adf', 'state.adf', 'frontend.adf']
 
-// Bundle into single merged document
-const result = bundleModules('.ai', modules, (p) => fs.readFileSync(p, 'utf-8'));
-console.log(result.tokenEstimate);      // rough token count
-console.log(result.tokenBudget);        // from manifest BUDGET section (or null)
-console.log(result.tokenUtilization);   // estimate / budget (or null)
-console.log(result.perModuleTokens);    // { 'core.adf': 45, 'state.adf': 22, ... }
-console.log(result.resolvedModules);    // which modules were loaded
-console.log(result.triggerMatches);     // which triggers matched/missed
+// Bundle into single merged document (pass keywords for trigger observability)
+const result = bundleModules('.ai', modules, (p) => fs.readFileSync(p, 'utf-8'), keywords);
+console.log(result.tokenEstimate);        // rough token count
+console.log(result.tokenBudget);          // from manifest BUDGET section (or null)
+console.log(result.tokenUtilization);     // estimate / budget (or null)
+console.log(result.perModuleTokens);      // { 'core.adf': 45, 'state.adf': 22, ... }
+console.log(result.resolvedModules);      // which modules were loaded
+console.log(result.triggerMatches);       // per-trigger detail with matchedKeywords + loadReason
+console.log(result.unmatchedModules);     // on-demand modules not resolved
+console.log(result.advisoryOnlyModules);  // loaded modules with no load-bearing sections
+console.log(result.moduleBudgetOverruns); // modules exceeding their per-module budget
 ```
 
 ## API Reference
@@ -183,15 +189,15 @@ Immutable patcher. Returns a new document; the original is never mutated. Suppor
 
 ### `parseManifest(doc: AdfDocument): Manifest`
 
-Extract routing manifest from a parsed ADF document. Reads `DEFAULT_LOAD`, `ON_DEMAND` (with trigger parsing), `BUDGET`, `SYNC`, `ROLE`, and `RULES` sections.
+Extract routing manifest from a parsed ADF document. Reads `DEFAULT_LOAD`, `ON_DEMAND` (with trigger parsing and optional `[budget: N]` suffix), `BUDGET` (global `MAX_TOKENS`), `SYNC`, `CADENCE`, `METRICS` (source file mappings), `ROLE`, and `RULES` sections.
 
 ### `resolveModules(manifest: Manifest, taskKeywords: string[]): string[]`
 
 Resolve which modules to load. Always includes `defaultLoad`; adds `ON_DEMAND` modules whose triggers match any keyword (case-insensitive).
 
-### `bundleModules(basePath: string, modulePaths: string[], readFile: (p: string) => string): BundleResult`
+### `bundleModules(basePath: string, modulePaths: string[], readFile: (p: string) => string, taskKeywords?: string[]): BundleResult`
 
-Parse, merge, and bundle resolved modules into a single ADF document. Duplicate sections are merged (lists concatenated, texts joined, maps concatenated, metrics concatenated). Returns token estimate, budget utilization, per-module token counts, and trigger match report.
+Parse, merge, and bundle resolved modules into a single ADF document. Duplicate sections are merged (lists concatenated, texts joined, maps concatenated, metrics concatenated). Returns token estimate, budget utilization, per-module token counts, trigger match report with keyword-level detail, unmatched modules, and advisory-only module warnings. Optional `taskKeywords` enables richer trigger observability in the report.
 
 ### `validateConstraints(doc: AdfDocument, context?: Record<string, number>): EvidenceResult`
 
@@ -204,6 +210,7 @@ Count sections by weight category (`load-bearing`, `advisory`, unweighted). Usef
 ## AST Types
 
 ```ts
+// --- Document Model ---
 interface AdfDocument { version: '0.1'; sections: AdfSection[]; }
 interface AdfSection  {
   key: string;
@@ -221,6 +228,32 @@ type AdfContent =
 interface AdfMapEntry    { key: string; value: string; }
 interface AdfMetricEntry { key: string; value: number; ceiling: number; unit: string; }
 
+// --- Manifest ---
+interface Manifest {
+  version: '0.1'; role?: string; defaultLoad: string[];
+  onDemand: ManifestModule[]; rules: string[]; tokenBudget?: number;
+  sync: SyncEntry[]; cadence: CadenceEntry[]; metrics: MetricSource[];
+}
+interface ManifestModule { path: string; triggers: string[]; loadPolicy: 'DEFAULT' | 'ON_DEMAND'; tokenBudget?: number; }
+interface SyncEntry      { source: string; target: string; }
+interface CadenceEntry   { check: string; frequency: string; }
+interface MetricSource   { key: string; path: string; }
+
+// --- Bundle Result ---
+interface BundleResult {
+  manifest: Manifest; resolvedModules: string[]; mergedDocument: AdfDocument;
+  tokenEstimate: number; tokenBudget: number | null; tokenUtilization: number | null;
+  perModuleTokens: Record<string, number>;
+  moduleBudgetOverruns: Array<{ module: string; tokens: number; budget: number }>;
+  triggerMatches: Array<{
+    module: string; trigger: string; matched: boolean;
+    matchedKeywords: string[]; loadReason: 'default' | 'trigger';
+  }>;
+  unmatchedModules: string[];
+  advisoryOnlyModules: string[];
+}
+
+// --- Constraint Validation ---
 type ConstraintStatus = 'pass' | 'fail' | 'warn';
 interface ConstraintResult {
   section: string; metric: string; value: number; ceiling: number;
