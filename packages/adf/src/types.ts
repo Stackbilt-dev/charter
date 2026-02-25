@@ -18,16 +18,25 @@ export interface AdfSection {
   key: string;
   decoration: string | null;
   content: AdfContent;
+  weight?: 'load-bearing' | 'advisory';
 }
 
 export type AdfContent =
   | { type: 'text'; value: string }
   | { type: 'list'; items: string[] }
-  | { type: 'map'; entries: AdfMapEntry[] };
+  | { type: 'map'; entries: AdfMapEntry[] }
+  | { type: 'metric'; entries: AdfMetricEntry[] };
 
 export interface AdfMapEntry {
   key: string;
   value: string;
+}
+
+export interface AdfMetricEntry {
+  key: string;
+  value: number;
+  ceiling: number;
+  unit: string;
 }
 
 // ============================================================================
@@ -47,6 +56,7 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   TOOLS: '\u{1F6E0}\u{FE0F}',
   RISKS: '\u{1F6A8}',
   STATE: '\u{1F9E0}',
+  BUDGET: '\u{1F4B0}',
 };
 
 export const CANONICAL_KEY_ORDER: string[] = [
@@ -58,6 +68,7 @@ export const CANONICAL_KEY_ORDER: string[] = [
   'RULES',
   'DEFAULT_LOAD',
   'ON_DEMAND',
+  'BUDGET',
   'FILES',
   'TOOLS',
   'RISKS',
@@ -92,6 +103,7 @@ export interface AddSectionOp {
   key: string;
   decoration?: string | null;
   content: AdfContent;
+  weight?: 'load-bearing' | 'advisory';
 }
 
 export interface ReplaceSectionOp {
@@ -105,13 +117,21 @@ export interface RemoveSectionOp {
   key: string;
 }
 
+export interface UpdateMetricOp {
+  op: 'UPDATE_METRIC';
+  section: string;
+  key: string;
+  value: number;
+}
+
 export type PatchOperation =
   | AddBulletOp
   | ReplaceBulletOp
   | RemoveBulletOp
   | AddSectionOp
   | ReplaceSectionOp
-  | RemoveSectionOp;
+  | RemoveSectionOp
+  | UpdateMetricOp;
 
 // ============================================================================
 // Manifest Types
@@ -123,6 +143,7 @@ export interface Manifest {
   defaultLoad: string[];
   onDemand: ManifestModule[];
   rules: string[];
+  tokenBudget?: number;
 }
 
 export interface ManifestModule {
@@ -140,6 +161,9 @@ export interface BundleResult {
   resolvedModules: string[];
   mergedDocument: AdfDocument;
   tokenEstimate: number;
+  tokenBudget: number | null;
+  tokenUtilization: number | null;
+  perModuleTokens: Record<string, number>;
   triggerMatches: Array<{
     module: string;
     trigger: string;

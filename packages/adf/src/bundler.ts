@@ -57,6 +57,18 @@ export function parseManifest(doc: AdfDocument): Manifest {
         }
         break;
       }
+      case 'BUDGET': {
+        if (section.content.type === 'map') {
+          const maxTokens = section.content.entries.find(e => e.key === 'MAX_TOKENS');
+          if (maxTokens) {
+            const parsed = parseInt(maxTokens.value, 10);
+            if (!isNaN(parsed)) {
+              manifest.tokenBudget = parsed;
+            }
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -127,6 +139,8 @@ export function bundleModules(
   const triggerMatches = buildTriggerReport(manifest, modulePaths);
 
   const documents: AdfDocument[] = [];
+  const perModuleTokens: Record<string, number> = {};
+
   for (const modPath of modulePaths) {
     const fullPath = joinPath(basePath, modPath);
     let content: string;
@@ -135,17 +149,24 @@ export function bundleModules(
     } catch {
       throw new AdfBundleError(`Module not found: ${modPath}`, modPath);
     }
-    documents.push(parseAdf(content));
+    const doc = parseAdf(content);
+    documents.push(doc);
+    perModuleTokens[modPath] = estimateTokens(doc);
   }
 
   const merged = mergeDocuments(documents);
   const tokenEstimate = estimateTokens(merged);
+  const tokenBudget = manifest.tokenBudget ?? null;
+  const tokenUtilization = tokenBudget !== null ? tokenEstimate / tokenBudget : null;
 
   return {
     manifest,
     resolvedModules: modulePaths,
     mergedDocument: merged,
     tokenEstimate,
+    tokenBudget,
+    tokenUtilization,
+    perModuleTokens,
     triggerMatches,
   };
 }
@@ -181,7 +202,8 @@ function buildTriggerReport(
 
 /**
  * Merge multiple ADF documents into one.
- * Duplicate section keys are merged: lists concatenated, texts joined, maps concatenated.
+ * Duplicate section keys are merged: lists concatenated, texts joined,
+ * maps concatenated, metrics concatenated.
  */
 function mergeDocuments(docs: AdfDocument[]): AdfDocument {
   const sectionMap = new Map<string, AdfSection>();
@@ -215,8 +237,17 @@ function mergeSectionContent(target: AdfSection, source: AdfSection): void {
     } else if (source.content.value) {
       target.content.value = source.content.value;
     }
+  } else if (target.content.type === 'metric' && source.content.type === 'metric') {
+    target.content.entries.push(...source.content.entries);
   }
   // Mismatched types: keep target content as-is (first-wins)
+
+  // Promote weight: if either is load-bearing, result is load-bearing
+  if (source.weight === 'load-bearing' || target.weight === 'load-bearing') {
+    target.weight = 'load-bearing';
+  } else if (source.weight === 'advisory' && !target.weight) {
+    target.weight = 'advisory';
+  }
 }
 
 /**
@@ -238,6 +269,13 @@ function estimateTokens(doc: AdfDocument): number {
       case 'map':
         for (const entry of section.content.entries) {
           charCount += entry.key.length + entry.value.length + 4;
+        }
+        break;
+      case 'metric':
+        for (const entry of section.content.entries) {
+          // key: value / ceiling [unit]
+          charCount += entry.key.length + String(entry.value).length +
+            String(entry.ceiling).length + entry.unit.length + 8;
         }
         break;
     }

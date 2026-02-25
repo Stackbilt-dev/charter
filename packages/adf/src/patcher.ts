@@ -28,11 +28,13 @@ function applyOne(doc: AdfDocument, op: PatchOperation): AdfDocument {
     case 'REMOVE_BULLET':
       return removeBullet(doc, op.section, op.index);
     case 'ADD_SECTION':
-      return addSection(doc, op.key, op.decoration ?? null, op.content);
+      return addSection(doc, op.key, op.decoration ?? null, op.content, op.weight);
     case 'REPLACE_SECTION':
       return replaceSection(doc, op.key, op.content);
     case 'REMOVE_SECTION':
       return removeSection(doc, op.key);
+    case 'UPDATE_METRIC':
+      return updateMetric(doc, op.section, op.key, op.value);
   }
 }
 
@@ -62,7 +64,7 @@ function addBullet(doc: AdfDocument, sectionKey: string, value: string): AdfDocu
     }
   } else {
     throw new AdfPatchError(
-      `Cannot ADD_BULLET to text section "${sectionKey}". Section must be list or map.`,
+      `Cannot ADD_BULLET to ${section.content.type} section "${sectionKey}". Section must be list or map.`,
       'ADD_BULLET',
       sectionKey
     );
@@ -104,7 +106,7 @@ function replaceBullet(doc: AdfDocument, sectionKey: string, index: number, valu
     }
   } else {
     throw new AdfPatchError(
-      `Cannot REPLACE_BULLET in text section "${sectionKey}". Section must be list or map.`,
+      `Cannot REPLACE_BULLET in ${section.content.type} section "${sectionKey}". Section must be list or map.`,
       'REPLACE_BULLET',
       sectionKey
     );
@@ -138,7 +140,7 @@ function removeBullet(doc: AdfDocument, sectionKey: string, index: number): AdfD
     section.content.entries.splice(index, 1);
   } else {
     throw new AdfPatchError(
-      `Cannot REMOVE_BULLET from text section "${sectionKey}". Section must be list or map.`,
+      `Cannot REMOVE_BULLET from ${section.content.type} section "${sectionKey}". Section must be list or map.`,
       'REMOVE_BULLET',
       sectionKey
     );
@@ -151,14 +153,19 @@ function addSection(
   doc: AdfDocument,
   key: string,
   decoration: string | null,
-  content: import('./types').AdfContent
+  content: import('./types').AdfContent,
+  weight?: 'load-bearing' | 'advisory'
 ): AdfDocument {
   const existing = doc.sections.find(s => s.key === key);
   if (existing) {
     throw new AdfPatchError(`Section "${key}" already exists`, 'ADD_SECTION', key);
   }
 
-  doc.sections.push({ key, decoration, content });
+  const section: AdfSection = { key, decoration, content };
+  if (weight) {
+    section.weight = weight;
+  }
+  doc.sections.push(section);
   return doc;
 }
 
@@ -178,5 +185,29 @@ function removeSection(doc: AdfDocument, key: string): AdfDocument {
     throw new AdfPatchError(`Section "${key}" not found`, 'REMOVE_SECTION', key);
   }
   doc.sections.splice(idx, 1);
+  return doc;
+}
+
+function updateMetric(doc: AdfDocument, sectionKey: string, metricKey: string, value: number): AdfDocument {
+  const section = findSection(doc, sectionKey, 'UPDATE_METRIC');
+
+  if (section.content.type !== 'metric') {
+    throw new AdfPatchError(
+      `Cannot UPDATE_METRIC in ${section.content.type} section "${sectionKey}". Section must be metric.`,
+      'UPDATE_METRIC',
+      sectionKey
+    );
+  }
+
+  const entry = section.content.entries.find(e => e.key === metricKey);
+  if (!entry) {
+    throw new AdfPatchError(
+      `Metric key "${metricKey}" not found in section "${sectionKey}"`,
+      'UPDATE_METRIC',
+      sectionKey
+    );
+  }
+
+  entry.value = value;
   return doc;
 }

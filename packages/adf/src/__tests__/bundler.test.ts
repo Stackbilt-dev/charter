@@ -18,6 +18,23 @@ RULES:
   - Never assume unseen modules were loaded.
 `;
 
+const MANIFEST_WITH_BUDGET = `ADF: 0.1
+ROLE: Repo context router
+
+DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+ON_DEMAND:
+  - frontend.adf (Triggers on: React, CSS, UI)
+
+BUDGET:
+  MAX_TOKENS: 4000
+
+RULES:
+  - Prefer smallest relevant module set.
+`;
+
 describe('parseManifest', () => {
   it('extracts defaultLoad modules', () => {
     const doc = parseAdf(MANIFEST_ADF);
@@ -44,6 +61,18 @@ describe('parseManifest', () => {
     const doc = parseAdf(MANIFEST_ADF);
     const manifest = parseManifest(doc);
     expect(manifest.rules).toHaveLength(2);
+  });
+
+  it('extracts tokenBudget from BUDGET section', () => {
+    const doc = parseAdf(MANIFEST_WITH_BUDGET);
+    const manifest = parseManifest(doc);
+    expect(manifest.tokenBudget).toBe(4000);
+  });
+
+  it('omits tokenBudget when no BUDGET section', () => {
+    const doc = parseAdf(MANIFEST_ADF);
+    const manifest = parseManifest(doc);
+    expect(manifest.tokenBudget).toBeUndefined();
   });
 });
 
@@ -117,5 +146,64 @@ describe('bundleModules', () => {
   it('includes manifest in result', () => {
     const result = bundleModules('/ai', ['core.adf'], readFile);
     expect(result.manifest.defaultLoad).toEqual(['core.adf', 'state.adf']);
+  });
+
+  // --- Token budget ---
+
+  it('reports tokenBudget as null when manifest has no BUDGET', () => {
+    const result = bundleModules('/ai', ['core.adf'], readFile);
+    expect(result.tokenBudget).toBeNull();
+    expect(result.tokenUtilization).toBeNull();
+  });
+
+  it('reports tokenBudget and tokenUtilization when manifest has BUDGET', () => {
+    const filesWithBudget: Record<string, string> = {
+      '/ai/manifest.adf': MANIFEST_WITH_BUDGET,
+      '/ai/core.adf': `ADF: 0.1\nCONSTRAINTS:\n  - No secrets\n`,
+      '/ai/state.adf': `ADF: 0.1\nSTATE:\n  CURRENT: Working\n`,
+    };
+    const read = (p: string): string => {
+      const content = filesWithBudget[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+
+    const result = bundleModules('/ai', ['core.adf', 'state.adf'], read);
+    expect(result.tokenBudget).toBe(4000);
+    expect(result.tokenUtilization).toBeGreaterThan(0);
+    expect(result.tokenUtilization).toBeLessThan(1);
+  });
+
+  // --- Per-module token tracking ---
+
+  it('reports perModuleTokens for each loaded module', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf'], readFile);
+    expect(result.perModuleTokens['core.adf']).toBeGreaterThan(0);
+    expect(result.perModuleTokens['state.adf']).toBeGreaterThan(0);
+    expect(result.perModuleTokens['frontend.adf']).toBeGreaterThan(0);
+  });
+
+  // --- Metric merge ---
+
+  it('merges metric sections by concatenating entries', () => {
+    const metricFiles: Record<string, string> = {
+      '/ai/manifest.adf': MANIFEST_ADF,
+      '/ai/mod1.adf': `ADF: 0.1\nMETRICS:\n  entry_loc: 142 / 200 [lines]\n`,
+      '/ai/mod2.adf': `ADF: 0.1\nMETRICS:\n  total_loc: 312 / 400 [lines]\n`,
+    };
+    const read = (p: string): string => {
+      const content = metricFiles[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+
+    const result = bundleModules('/ai', ['mod1.adf', 'mod2.adf'], read);
+    const metrics = result.mergedDocument.sections.find(s => s.key === 'METRICS');
+    expect(metrics).toBeDefined();
+    if (metrics && metrics.content.type === 'metric') {
+      expect(metrics.content.entries).toHaveLength(2);
+      expect(metrics.content.entries[0].key).toBe('entry_loc');
+      expect(metrics.content.entries[1].key).toBe('total_loc');
+    }
   });
 });

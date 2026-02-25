@@ -99,4 +99,73 @@ describe('parseAdf', () => {
     const doc = parseAdf('TASK:\n');
     expect(doc.sections[0].content).toEqual({ type: 'text', value: '' });
   });
+
+  // --- Metric content type ---
+
+  it('parses metric content (key: value / ceiling [unit])', () => {
+    const input = [
+      'STATE:',
+      '  entry_loc: 142 / 200 [lines]',
+      '  total_loc: 312 / 400 [lines]',
+    ].join('\n');
+    const doc = parseAdf(input);
+    expect(doc.sections[0].content).toEqual({
+      type: 'metric',
+      entries: [
+        { key: 'entry_loc', value: 142, ceiling: 200, unit: 'lines' },
+        { key: 'total_loc', value: 312, ceiling: 400, unit: 'lines' },
+      ],
+    });
+  });
+
+  it('parses metric with decimal values', () => {
+    const input = 'BUDGET:\n  summary_size: 1.8 / 2.0 [KB]\n';
+    const doc = parseAdf(input);
+    expect(doc.sections[0].content).toEqual({
+      type: 'metric',
+      entries: [
+        { key: 'summary_size', value: 1.8, ceiling: 2.0, unit: 'KB' },
+      ],
+    });
+  });
+
+  it('parses metric with multi-word unit', () => {
+    const input = 'STATE:\n  context_tokens: 2400 / 4000 [estimated tokens]\n';
+    const doc = parseAdf(input);
+    if (doc.sections[0].content.type === 'metric') {
+      expect(doc.sections[0].content.entries[0].unit).toBe('estimated tokens');
+    }
+  });
+
+  // --- Weight annotations ---
+
+  it('parses [load-bearing] weight annotation', () => {
+    const input = '\u{26A0}\u{FE0F} CONSTRAINTS [load-bearing]:\n  - Max 400 LOC\n';
+    const doc = parseAdf(input);
+    expect(doc.sections[0].weight).toBe('load-bearing');
+    expect(doc.sections[0].key).toBe('CONSTRAINTS');
+    expect(doc.sections[0].content).toEqual({
+      type: 'list',
+      items: ['Max 400 LOC'],
+    });
+  });
+
+  it('parses [advisory] weight annotation', () => {
+    const input = 'CONTEXT [advisory]: Background info\n';
+    const doc = parseAdf(input);
+    expect(doc.sections[0].weight).toBe('advisory');
+    expect(doc.sections[0].content).toEqual({ type: 'text', value: 'Background info' });
+  });
+
+  it('omits weight when no annotation present', () => {
+    const doc = parseAdf('TASK: Build it\n');
+    expect(doc.sections[0].weight).toBeUndefined();
+  });
+
+  it('parses weight annotation without emoji', () => {
+    const input = 'CONSTRAINTS [load-bearing]:\n  - Entry point < 200 LOC\n';
+    const doc = parseAdf(input);
+    expect(doc.sections[0].weight).toBe('load-bearing');
+    expect(doc.sections[0].decoration).toBeNull();
+  });
 });

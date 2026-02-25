@@ -19,7 +19,7 @@ export function formatAdf(doc: AdfDocument): string {
     lines.push('');
     const section = sorted[i];
     const decoration = section.decoration ?? STANDARD_DECORATIONS[section.key] ?? null;
-    const header = formatHeader(section.key, decoration, section.content);
+    const header = formatHeader(section.key, decoration, section.content, section.weight);
     lines.push(header);
 
     const bodyLines = formatBody(section.content);
@@ -51,8 +51,15 @@ function sortSections(sections: AdfSection[]): AdfSection[] {
   return [...canonical, ...nonCanonical];
 }
 
-function formatHeader(key: string, decoration: string | null, content: AdfContent): string {
-  const prefix = decoration ? `${decoration} ${key}:` : `${key}:`;
+function formatHeader(
+  key: string,
+  decoration: string | null,
+  content: AdfContent,
+  weight?: 'load-bearing' | 'advisory'
+): string {
+  const decorPart = decoration ? `${decoration} ` : '';
+  const weightPart = weight ? ` [${weight}]` : '';
+  const prefix = `${decorPart}${key}${weightPart}:`;
 
   // For single-line text, put value on same line as header
   if (content.type === 'text' && !content.value.includes('\n') && content.value.length > 0) {
@@ -78,6 +85,11 @@ function formatBody(content: AdfContent): string[] {
     }
     case 'map': {
       return content.entries.map(entry => `  ${entry.key}: ${entry.value}`);
+    }
+    case 'metric': {
+      return content.entries.map(entry =>
+        `  ${entry.key}: ${entry.value} / ${entry.ceiling} [${entry.unit}]`
+      );
     }
   }
 }

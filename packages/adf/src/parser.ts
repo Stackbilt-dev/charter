@@ -5,15 +5,17 @@
  * inconsistent emoji decorations, mixed content types.
  */
 
-import type { AdfDocument, AdfSection, AdfContent, AdfMapEntry } from './types';
+import type { AdfDocument, AdfSection, AdfContent, AdfMapEntry, AdfMetricEntry } from './types';
 import { AdfParseError } from './errors';
 
 // Matches section headers: optional emoji + UPPERCASE_KEY: optional inline value
+// Optional weight annotation: [load-bearing] or [advisory]
 // Emoji is any Emoji_Presentation or Extended_Pictographic codepoint
-const SECTION_HEADER_RE = /^(?:(\p{Emoji_Presentation}|\p{Extended_Pictographic})\uFE0F?\s+)?([A-Z][A-Z0-9_]*)\s*:\s*(.*)$/u;
+const SECTION_HEADER_RE = /^(?:(\p{Emoji_Presentation}|\p{Extended_Pictographic})\uFE0F?\s+)?([A-Z][A-Z0-9_]*)\s*(?:\[(load-bearing|advisory)\]\s*)?:\s*(.*)$/u;
 const VERSION_RE = /^ADF\s*:\s*(.+)$/i;
 const LIST_ITEM_RE = /^\s*-\s+(.*)$/;
 const MAP_ENTRY_RE = /^\s*([A-Z][A-Z0-9_]*)\s*:\s*(.*)$/;
+const METRIC_ENTRY_RE = /^\s*([a-z][a-z0-9_]*)\s*:\s*(-?[\d.]+)\s*\/\s*(-?[\d.]+)\s*\[([^\]]+)\]\s*$/;
 
 export function parseAdf(input: string): AdfDocument {
   const lines = normalizeInput(input);
@@ -50,6 +52,7 @@ function normalizeInput(input: string): string[] {
 interface RawSection {
   key: string;
   decoration: string | null;
+  weight: 'load-bearing' | 'advisory' | undefined;
   inlineValue: string;
   bodyLines: string[];
   lineNumber: number;
@@ -74,7 +77,8 @@ function parseSections(lines: string[], startIndex: number): AdfSection[] {
       current = {
         key: headerMatch[2],
         decoration: headerMatch[1] || null,
-        inlineValue: headerMatch[3].trim(),
+        weight: (headerMatch[3] as 'load-bearing' | 'advisory' | undefined) || undefined,
+        inlineValue: headerMatch[4].trim(),
         bodyLines: [],
         lineNumber: i + 1,
       };
@@ -114,11 +118,15 @@ function parseSections(lines: string[], startIndex: number): AdfSection[] {
 
 function classifySection(raw: RawSection): AdfSection {
   const content = classifyContent(raw.inlineValue, raw.bodyLines);
-  return {
+  const section: AdfSection = {
     key: raw.key,
     decoration: raw.decoration,
     content,
   };
+  if (raw.weight) {
+    section.weight = raw.weight;
+  }
+  return section;
 }
 
 function classifyContent(inlineValue: string, bodyLines: string[]): AdfContent {
@@ -147,6 +155,24 @@ function classifyContent(inlineValue: string, bodyLines: string[]): AdfContent {
       }
     }
     return { type: 'list', items };
+  }
+
+  // Check if body lines are all metric entries (lowercase_key: value / ceiling [unit])
+  const allMetric = dedented.every(l => l.trim() === '' || METRIC_ENTRY_RE.test(l));
+  if (allMetric && dedented.some(l => METRIC_ENTRY_RE.test(l))) {
+    const entries: AdfMetricEntry[] = [];
+    for (const line of dedented) {
+      const m = line.match(METRIC_ENTRY_RE);
+      if (m) {
+        entries.push({
+          key: m[1],
+          value: parseFloat(m[2]),
+          ceiling: parseFloat(m[3]),
+          unit: m[4].trim(),
+        });
+      }
+    }
+    return { type: 'metric', entries };
   }
 
   // Check if body lines are all KEY: value pairs (map)

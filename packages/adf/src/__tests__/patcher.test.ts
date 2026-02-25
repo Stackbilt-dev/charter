@@ -31,6 +31,25 @@ function makeDoc(): AdfDocument {
   };
 }
 
+function makeMetricDoc(): AdfDocument {
+  return {
+    version: '0.1',
+    sections: [
+      {
+        key: 'METRICS',
+        decoration: null,
+        content: {
+          type: 'metric',
+          entries: [
+            { key: 'entry_loc', value: 142, ceiling: 200, unit: 'lines' },
+            { key: 'total_loc', value: 312, ceiling: 400, unit: 'lines' },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 describe('applyPatches', () => {
   it('ADD_BULLET: appends item to list section', () => {
     const result = applyPatches(makeDoc(), [
@@ -161,5 +180,74 @@ describe('applyPatches', () => {
     const result = applyPatches(makeDoc(), ops);
     const sec = result.sections.find(s => s.key === 'CONSTRAINTS')!;
     expect(sec.content.type === 'list' && sec.content.items).toEqual(['Stay fast', 'Third']);
+  });
+
+  // --- UPDATE_METRIC ---
+
+  it('UPDATE_METRIC: updates metric value, preserves ceiling and unit', () => {
+    const result = applyPatches(makeMetricDoc(), [
+      { op: 'UPDATE_METRIC', section: 'METRICS', key: 'entry_loc', value: 156 },
+    ]);
+    const sec = result.sections.find(s => s.key === 'METRICS')!;
+    if (sec.content.type === 'metric') {
+      expect(sec.content.entries[0]).toEqual({
+        key: 'entry_loc', value: 156, ceiling: 200, unit: 'lines',
+      });
+      // second entry unchanged
+      expect(sec.content.entries[1]).toEqual({
+        key: 'total_loc', value: 312, ceiling: 400, unit: 'lines',
+      });
+    }
+  });
+
+  it('UPDATE_METRIC: does not mutate original', () => {
+    const original = makeMetricDoc();
+    const origJson = JSON.stringify(original);
+    applyPatches(original, [
+      { op: 'UPDATE_METRIC', section: 'METRICS', key: 'entry_loc', value: 999 },
+    ]);
+    expect(JSON.stringify(original)).toBe(origJson);
+  });
+
+  it('UPDATE_METRIC: throws on non-metric section', () => {
+    expect(() =>
+      applyPatches(makeDoc(), [
+        { op: 'UPDATE_METRIC', section: 'CONSTRAINTS', key: 'x', value: 1 },
+      ])
+    ).toThrow('must be metric');
+  });
+
+  it('UPDATE_METRIC: throws when metric key not found', () => {
+    expect(() =>
+      applyPatches(makeMetricDoc(), [
+        { op: 'UPDATE_METRIC', section: 'METRICS', key: 'nonexistent', value: 1 },
+      ])
+    ).toThrow('not found');
+  });
+
+  it('UPDATE_METRIC: throws when section not found', () => {
+    expect(() =>
+      applyPatches(makeMetricDoc(), [
+        { op: 'UPDATE_METRIC', section: 'NOPE', key: 'entry_loc', value: 1 },
+      ])
+    ).toThrow('not found');
+  });
+
+  // --- Weight in ADD_SECTION ---
+
+  it('ADD_SECTION: preserves weight annotation', () => {
+    const result = applyPatches(makeDoc(), [
+      {
+        op: 'ADD_SECTION',
+        key: 'METRICS',
+        content: {
+          type: 'metric',
+          entries: [{ key: 'loc', value: 100, ceiling: 200, unit: 'lines' }],
+        },
+        weight: 'load-bearing',
+      },
+    ]);
+    const sec = result.sections.find(s => s.key === 'METRICS')!;
+    expect(sec.weight).toBe('load-bearing');
   });
 });
