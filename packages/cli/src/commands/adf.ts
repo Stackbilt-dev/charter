@@ -1,11 +1,12 @@
 /**
  * charter adf
  *
- * ADF (Attention-Directed Format) subcommands: init, fmt, patch, bundle.
+ * ADF (Attention-Directed Format) subcommands: init, fmt, patch, bundle, sync.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import {
   parseAdf,
   formatAdf,
@@ -79,8 +80,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfPatch(options, restArgs);
     case 'bundle':
       return adfBundle(options, restArgs);
+    case 'sync':
+      return adfSync(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle, sync`);
   }
 }
 
@@ -324,6 +327,149 @@ function adfBundle(options: CLIOptions, args: string[]): number {
 }
 
 // ============================================================================
+// adf sync
+// ============================================================================
+
+interface SyncStatus {
+  source: string;
+  target: string;
+  sourceHash: string;
+  lockedHash: string | null;
+  inSync: boolean;
+}
+
+interface AdfSyncResult {
+  aiDir: string;
+  lockFile: string;
+  entries: SyncStatus[];
+  allInSync: boolean;
+  written: boolean;
+}
+
+function adfSync(options: CLIOptions, args: string[]): number {
+  const aiDir = getFlag(args, '--ai-dir') || '.ai';
+  const checkMode = args.includes('--check');
+  const writeMode = args.includes('--write');
+
+  if (!checkMode && !writeMode) {
+    throw new CLIError('adf sync requires --check or --write. Usage: charter adf sync --check');
+  }
+
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  if (!fs.existsSync(manifestPath)) {
+    throw new CLIError(`manifest.adf not found at ${manifestPath}. Run: charter adf init`);
+  }
+
+  const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
+  const manifestDoc = parseAdf(manifestContent);
+  const manifest = parseManifest(manifestDoc);
+
+  if (manifest.sync.length === 0) {
+    const result: AdfSyncResult = {
+      aiDir,
+      lockFile: path.join(aiDir, '.adf.lock'),
+      entries: [],
+      allInSync: true,
+      written: false,
+    };
+    if (options.format === 'json') {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log('  No SYNC entries in manifest. Nothing to check.');
+    }
+    return EXIT_CODE.SUCCESS;
+  }
+
+  const lockFile = path.join(aiDir, '.adf.lock');
+  const locked = loadLockFile(lockFile);
+
+  const entries: SyncStatus[] = [];
+  for (const entry of manifest.sync) {
+    const sourcePath = path.join(aiDir, entry.source);
+    if (!fs.existsSync(sourcePath)) {
+      throw new CLIError(`Sync source not found: ${sourcePath}`);
+    }
+    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
+    const sourceHash = hashContent(sourceContent);
+    const lockedHash = locked[entry.source] ?? null;
+
+    entries.push({
+      source: entry.source,
+      target: entry.target,
+      sourceHash,
+      lockedHash,
+      inSync: lockedHash === sourceHash,
+    });
+  }
+
+  const allInSync = entries.every(e => e.inSync);
+
+  if (writeMode) {
+    const newLock: Record<string, string> = {};
+    for (const e of entries) {
+      newLock[e.source] = e.sourceHash;
+    }
+    fs.writeFileSync(lockFile, JSON.stringify(newLock, null, 2) + '\n');
+
+    const result: AdfSyncResult = {
+      aiDir,
+      lockFile,
+      entries,
+      allInSync: true,
+      written: true,
+    };
+    if (options.format === 'json') {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`  [ok] Updated ${lockFile} with ${entries.length} hash${entries.length === 1 ? '' : 'es'}.`);
+    }
+    return EXIT_CODE.SUCCESS;
+  }
+
+  // --check mode
+  const result: AdfSyncResult = {
+    aiDir,
+    lockFile,
+    entries,
+    allInSync,
+    written: false,
+  };
+
+  if (options.format === 'json') {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    for (const e of entries) {
+      if (e.inSync) {
+        console.log(`  [ok] ${e.source} -> ${e.target} (in sync)`);
+      } else if (e.lockedHash === null) {
+        console.log(`  [warn] ${e.source} -> ${e.target} (no lock entry — run: charter adf sync --write)`);
+      } else {
+        console.log(`  [fail] ${e.source} -> ${e.target} (source changed since last sync)`);
+      }
+    }
+    if (!allInSync) {
+      console.log('');
+      console.log('  Source .adf files have changed. Regenerate targets and run: charter adf sync --write');
+    }
+  }
+
+  return allInSync ? EXIT_CODE.SUCCESS : EXIT_CODE.POLICY_VIOLATION;
+}
+
+function hashContent(content: string): string {
+  return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
+
+function loadLockFile(lockFile: string): Record<string, string> {
+  if (!fs.existsSync(lockFile)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(lockFile, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -354,5 +500,12 @@ function printHelp(): void {
   console.log('');
   console.log('    charter adf bundle --task "<prompt>" [--ai-dir <dir>]');
   console.log('      Resolve manifest modules for a task and output merged context.');
+  console.log('');
+  console.log('    charter adf sync --check [--ai-dir <dir>]');
+  console.log('      Verify source .adf files match their locked hashes.');
+  console.log('      Exit 1 if any source has changed since last sync.');
+  console.log('');
+  console.log('    charter adf sync --write [--ai-dir <dir>]');
+  console.log('      Update .adf.lock with current source hashes.');
   console.log('');
 }
