@@ -16,3 +16,9 @@ ADF: 0.1
   - Exit codes: 0 success, 1 policy violation, 2 runtime/usage error
   - Commits via scripts/smart-commit.sh only
   - Use pnpm exec tsc instead of npx tsc in WSL
+
+📊 METRICS [load-bearing]:
+  adf_commands_loc: 834 / 900 [lines]
+  bundler_loc: 388 / 500 [lines]
+  parser_loc: 213 / 300 [lines]
+  cli_entry_loc: 141 / 200 [lines]

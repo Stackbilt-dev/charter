@@ -18,5 +18,11 @@ ADF: 0.1
 💰 BUDGET:
   MAX_TOKENS: 4000
 
+📊 METRICS:
+  ADF_COMMANDS_LOC: packages/cli/src/commands/adf.ts
+  BUNDLER_LOC: packages/adf/src/bundler.ts
+  PARSER_LOC: packages/adf/src/parser.ts
+  CLI_ENTRY_LOC: packages/cli/src/index.ts
+
 🔄 SYNC:
   - core.adf -> CLAUDE.md
