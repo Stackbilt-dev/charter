@@ -21,9 +21,11 @@ npm install @stackbilt/adf
 ADF treats LLM context as a compiled language. Key properties:
 
 - **Emoji-decorated semantic keys** act as high-contrast attention boundaries for transformer models
-- **Strict AST** with three content types: text, list, and map
+- **Strict AST** with four content types: text, list, map, and metric
 - **Patch protocol** for safe delta updates (agents issue typed ops, not full rewrites)
-- **Module system** with manifest-based routing and progressive disclosure
+- **Module system** with manifest-based routing, progressive disclosure, and token budgets
+- **Weight annotations** distinguish load-bearing constraints from advisory preferences
+- **Sync protocol** detects drift between source .adf files and their compressed targets
 
 Example ADF document:
 
@@ -34,12 +36,15 @@ CONTEXT:
   - High-traffic /api/users endpoint
   - Cloudflare Workers environment
 OUTPUT: Patch diff + brief explanation
-CONSTRAINTS:
+CONSTRAINTS [load-bearing]:
   - No new dependencies
   - P99 latency must improve
 STATE:
   CURRENT: Baseline endpoint works but slow under load
   NEXT: Add cache + invalidation logic
+  METRICS:
+    entry_loc: 142 / 200 [lines]
+    total_loc: 312 / 400 [lines]
 ```
 
 ## Usage
@@ -67,6 +72,37 @@ console.log(doc.sections[1].content);    // { type: 'list', items: ['No new deps
 console.log(doc.sections[2].content);    // { type: 'map', entries: [{key:'CURRENT',value:'Starting'}, ...] }
 ```
 
+### Parse metric content
+
+```ts
+const doc = parseAdf(`
+STATE:
+  entry_loc: 142 / 200 [lines]
+  total_loc: 312 / 400 [lines]
+`);
+
+// doc.sections[0].content =>
+// { type: 'metric', entries: [
+//   { key: 'entry_loc', value: 142, ceiling: 200, unit: 'lines' },
+//   { key: 'total_loc', value: 312, ceiling: 400, unit: 'lines' },
+// ]}
+```
+
+Metric entries use `lowercase_key: value / ceiling [unit]` syntax. Map entries use `UPPERCASE_KEY: value`. This is the disambiguation.
+
+### Parse weight annotations
+
+```ts
+const doc = parseAdf(`
+CONSTRAINTS [load-bearing]:
+  - Max 400 LOC
+`);
+
+console.log(doc.sections[0].weight);  // 'load-bearing'
+```
+
+Sections can carry `[load-bearing]` or `[advisory]` annotations. Weight defaults to `undefined` when no annotation is present.
+
 ### Format to canonical ADF
 
 ```ts
@@ -75,6 +111,8 @@ import { parseAdf, formatAdf } from '@stackbilt/adf';
 const doc = parseAdf(messyInput);
 const canonical = formatAdf(doc);
 // Sections sorted by canonical key order, standard emoji auto-injected, 2-space indent
+// Metric entries formatted as: key: value / ceiling [unit]
+// Weight annotations preserved in headers
 ```
 
 ### Apply patches (safe delta updates)
@@ -88,11 +126,12 @@ const patched = applyPatches(doc, [
   { op: 'REPLACE_BULLET', section: 'STATE', index: 1, value: 'NEXT: Deploy to prod' },
   { op: 'REMOVE_BULLET', section: 'STATE', index: 0 },
   { op: 'ADD_SECTION', key: 'RISKS', content: { type: 'list', items: ['Data loss'] } },
+  { op: 'UPDATE_METRIC', section: 'METRICS', key: 'entry_loc', value: 156 },
 ]);
 console.log(formatAdf(patched));
 ```
 
-Patch operations throw `AdfPatchError` with context on invalid ops (missing section, out-of-bounds index, duplicate section).
+Patch operations throw `AdfPatchError` with context on invalid ops (missing section, out-of-bounds index, duplicate section). `UPDATE_METRIC` only changes the value; ceiling and unit are immutable through patches.
 
 ### Manifest-based module bundling
 
@@ -111,6 +150,9 @@ const modules = resolveModules(manifest, keywords);
 // Bundle into single merged document
 const result = bundleModules('.ai', modules, (p) => fs.readFileSync(p, 'utf-8'));
 console.log(result.tokenEstimate);      // rough token count
+console.log(result.tokenBudget);        // from manifest BUDGET section (or null)
+console.log(result.tokenUtilization);   // estimate / budget (or null)
+console.log(result.perModuleTokens);    // { 'core.adf': 45, 'state.adf': 22, ... }
 console.log(result.resolvedModules);    // which modules were loaded
 console.log(result.triggerMatches);     // which triggers matched/missed
 ```
@@ -119,15 +161,15 @@ console.log(result.triggerMatches);     // which triggers matched/missed
 
 ### `parseAdf(input: string): AdfDocument`
 
-Tolerant parser that handles messy LLM output. Strips emoji decorations, normalizes line endings, auto-detects content types (text, list, map). Defaults to version `0.1` if version line is missing.
+Tolerant parser that handles messy LLM output. Strips emoji decorations, normalizes line endings, auto-detects content types (text, list, map, metric). Defaults to version `0.1` if version line is missing. Parses `[load-bearing]` and `[advisory]` weight annotations on section headers.
 
 ### `formatAdf(doc: AdfDocument): string`
 
-Strict emitter producing canonical ADF. Sorts sections by canonical key order, auto-injects standard emoji decorations when missing, uses 2-space indent for body content.
+Strict emitter producing canonical ADF. Sorts sections by canonical key order, auto-injects standard emoji decorations when missing, uses 2-space indent for body content. Emits weight annotations and metric entries in canonical form.
 
 ### `applyPatches(doc: AdfDocument, ops: PatchOperation[]): AdfDocument`
 
-Immutable patcher. Returns a new document; the original is never mutated. Supports six operation types:
+Immutable patcher. Returns a new document; the original is never mutated. Supports seven operation types:
 
 | Op | Target | Description |
 |---|---|---|
@@ -137,10 +179,11 @@ Immutable patcher. Returns a new document; the original is never mutated. Suppor
 | `ADD_SECTION` | document | Add new section (throws if duplicate) |
 | `REPLACE_SECTION` | document | Replace entire section content |
 | `REMOVE_SECTION` | document | Remove section by key |
+| `UPDATE_METRIC` | metric section | Update value by key (ceiling/unit immutable) |
 
 ### `parseManifest(doc: AdfDocument): Manifest`
 
-Extract routing manifest from a parsed ADF document. Reads `DEFAULT_LOAD`, `ON_DEMAND` (with trigger parsing), `ROLE`, and `RULES` sections.
+Extract routing manifest from a parsed ADF document. Reads `DEFAULT_LOAD`, `ON_DEMAND` (with trigger parsing), `BUDGET`, `SYNC`, `ROLE`, and `RULES` sections.
 
 ### `resolveModules(manifest: Manifest, taskKeywords: string[]): string[]`
 
@@ -148,20 +191,27 @@ Resolve which modules to load. Always includes `defaultLoad`; adds `ON_DEMAND` m
 
 ### `bundleModules(basePath: string, modulePaths: string[], readFile: (p: string) => string): BundleResult`
 
-Parse, merge, and bundle resolved modules into a single ADF document. Duplicate sections are merged (lists concatenated, texts joined, maps concatenated). Returns token estimate and trigger match report.
+Parse, merge, and bundle resolved modules into a single ADF document. Duplicate sections are merged (lists concatenated, texts joined, maps concatenated, metrics concatenated). Returns token estimate, budget utilization, per-module token counts, and trigger match report.
 
 ## AST Types
 
 ```ts
 interface AdfDocument { version: '0.1'; sections: AdfSection[]; }
-interface AdfSection  { key: string; decoration: string | null; content: AdfContent; }
+interface AdfSection  {
+  key: string;
+  decoration: string | null;
+  content: AdfContent;
+  weight?: 'load-bearing' | 'advisory';
+}
 
 type AdfContent =
   | { type: 'text'; value: string }
   | { type: 'list'; items: string[] }
-  | { type: 'map';  entries: AdfMapEntry[] };
+  | { type: 'map';  entries: AdfMapEntry[] }
+  | { type: 'metric'; entries: AdfMetricEntry[] };
 
-interface AdfMapEntry { key: string; value: string; }
+interface AdfMapEntry    { key: string; value: string; }
+interface AdfMetricEntry { key: string; value: number; ceiling: number; unit: string; }
 ```
 
 ## Error Types

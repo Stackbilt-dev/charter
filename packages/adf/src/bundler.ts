@@ -11,6 +11,7 @@ import type {
   AdfSection,
   Manifest,
   ManifestModule,
+  SyncEntry,
   BundleResult,
 } from './types';
 import { AdfBundleError } from './errors';
@@ -29,6 +30,7 @@ export function parseManifest(doc: AdfDocument): Manifest {
     defaultLoad: [],
     onDemand: [],
     rules: [],
+    sync: [],
   };
 
   for (const section of doc.sections) {
@@ -57,6 +59,12 @@ export function parseManifest(doc: AdfDocument): Manifest {
         }
         break;
       }
+      case 'SYNC': {
+        if (section.content.type === 'list') {
+          manifest.sync = section.content.items.map(parseSyncEntry).filter((e): e is SyncEntry => e !== null);
+        }
+        break;
+      }
       case 'BUDGET': {
         if (section.content.type === 'map') {
           const maxTokens = section.content.entries.find(e => e.key === 'MAX_TOKENS');
@@ -73,6 +81,16 @@ export function parseManifest(doc: AdfDocument): Manifest {
   }
 
   return manifest;
+}
+
+/**
+ * Parse a SYNC entry like:
+ *   "governance.adf -> src/adf-read.ts"
+ */
+function parseSyncEntry(entry: string): SyncEntry | null {
+  const match = entry.match(/^(.+?)\s*->\s*(.+)$/);
+  if (!match) return null;
+  return { source: match[1].trim(), target: match[2].trim() };
 }
 
 /**

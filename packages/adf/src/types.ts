@@ -57,6 +57,7 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   RISKS: '\u{1F6A8}',
   STATE: '\u{1F9E0}',
   BUDGET: '\u{1F4B0}',
+  SYNC: '\u{1F504}',
 };
 
 export const CANONICAL_KEY_ORDER: string[] = [
@@ -69,6 +70,7 @@ export const CANONICAL_KEY_ORDER: string[] = [
   'DEFAULT_LOAD',
   'ON_DEMAND',
   'BUDGET',
+  'SYNC',
   'FILES',
   'TOOLS',
   'RISKS',
@@ -144,6 +146,12 @@ export interface Manifest {
   onDemand: ManifestModule[];
   rules: string[];
   tokenBudget?: number;
+  sync: SyncEntry[];
+}
+
+export interface SyncEntry {
+  source: string;
+  target: string;
 }
 
 export interface ManifestModule {
