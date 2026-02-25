@@ -522,10 +522,18 @@ function loadLockFile(lockFile: string): Record<string, string> {
 // adf evidence
 // ============================================================================
 
+interface AutoMeasurement {
+  metric: string;
+  path: string;
+  lines: number | null;
+  error?: string;
+}
+
 function adfEvidence(options: CLIOptions, args: string[]): number {
   const task = getFlag(args, '--task');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const contextJson = getFlag(args, '--context');
+  const autoMeasure = args.includes('--auto-measure');
 
   const manifestPath = path.join(aiDir, 'manifest.adf');
   if (!fs.existsSync(manifestPath)) {
@@ -563,6 +571,27 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
       const msg = e instanceof Error ? e.message : String(e);
       throw new CLIError(`Invalid --context JSON: ${msg}`);
     }
+  }
+
+  // Auto-measure: count lines in files referenced by manifest METRICS
+  // Manifest keys are UPPERCASE (parser map disambiguation), metric keys are lowercase.
+  const autoMeasured: AutoMeasurement[] = [];
+  if (autoMeasure && manifest.metrics.length > 0) {
+    const measured: Record<string, number> = {};
+    for (const ms of manifest.metrics) {
+      const metricKey = ms.key.toLowerCase();
+      const filePath = path.resolve(ms.path);
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const lines = content.split('\n').length;
+        measured[metricKey] = lines;
+        autoMeasured.push({ metric: metricKey, path: ms.path, lines });
+      } else {
+        autoMeasured.push({ metric: metricKey, path: ms.path, lines: null, error: 'file not found' });
+      }
+    }
+    // Merge: explicit --context wins over auto-measured
+    context = { ...measured, ...context };
   }
 
   try {
@@ -606,6 +635,9 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
       if (bundle.advisoryOnlyModules.length > 0) {
         jsonOut.advisoryOnlyModules = bundle.advisoryOnlyModules;
       }
+      if (autoMeasured.length > 0) {
+        jsonOut.autoMeasured = autoMeasured;
+      }
       console.log(JSON.stringify(jsonOut, null, 2));
     } else {
       console.log('');
@@ -620,6 +652,19 @@ function adfEvidence(options: CLIOptions, args: string[]): number {
         console.log(`  Token budget: ${bundle.tokenBudget}${pct}`);
       }
       console.log('');
+
+      // Auto-measured metrics
+      if (autoMeasured.length > 0) {
+        console.log('  Auto-measured:');
+        for (const m of autoMeasured) {
+          if (m.lines !== null) {
+            console.log(`    ${m.metric}: ${m.lines} lines (${m.path})`);
+          } else {
+            console.log(`    ${m.metric}: [file not found] (${m.path})`);
+          }
+        }
+        console.log('');
+      }
 
       // Weight summary
       console.log('  Section weights:');
@@ -728,10 +773,12 @@ function printHelp(): void {
   console.log('    charter adf sync --write [--ai-dir <dir>]');
   console.log('      Update .adf.lock with current source hashes.');
   console.log('');
-  console.log('    charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--context \'{"key": value}\']');
+  console.log('    charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]');
+  console.log('                        [--context \'{"key": value}\']');
   console.log('      Validate metric constraints and produce a structured evidence report.');
   console.log('      --task: resolve on-demand modules for task. Omit for defaultLoad only.');
-  console.log('      --context: JSON object of external metric overrides.');
+  console.log('      --auto-measure: count lines in files from manifest METRICS section.');
+  console.log('      --context: JSON object of external metric overrides (wins over auto).');
   console.log('      In --ci mode, exit 1 if any constraint fails.');
   console.log('');
 }
