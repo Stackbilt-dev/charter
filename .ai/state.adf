@@ -1,6 +1,6 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: Phase 5+6 implemented (constraint validation, adf evidence command)
-  NEXT: Phase 7 planning (prose constraint parsing or metric extraction)
+  CURRENT: Phase 7 planned (opinionated guardrails & auto-evidence)
+  NEXT: Implement 7a (default metric ceilings in scaffold)
   COMPLETED: Phase 1 (metric, weight, UPDATE_METRIC), Phase 2 (token budget), Phase 3 (adf sync), Phase 4 (per-module budgets, cadence), Phase 5+6 (constraint validation, evidence report)
