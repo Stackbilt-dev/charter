@@ -65,6 +65,8 @@ charter hook install --commit-msg
 charter adf init             # scaffold .ai/ context directory
 charter adf fmt .ai/core.adf # reformat ADF to canonical form
 charter adf bundle --task "fix React component"
+charter adf sync --check     # verify .adf files match locked hashes
+charter adf evidence --auto-measure --format json  # validate metric ceilings
 ```
 
 ## Human Onboarding (Copy/Paste)
@@ -131,6 +133,10 @@ npx charter validate --ci --format json
 npx charter drift --ci --format json
 npx charter audit --format json
 
+# ADF context management
+npx charter adf evidence --auto-measure --format json --ci
+npx charter adf sync --check --format json
+
 # recurring maintenance
 npx charter doctor --format json
 npx charter audit --format json
@@ -179,7 +185,7 @@ Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|b
 
 ### `charter doctor`
 
-Validate CLI installation and `.charter/` config.
+Validate CLI installation, `.charter/` config, and ADF readiness (manifest existence, module parseability, sync lock status).
 
 ### `charter validate`
 
@@ -260,14 +266,21 @@ ADF (Attention-Directed Format) context management. Replaces monolithic `.cursor
 ```bash
 charter adf init [--ai-dir <dir>] [--force]
 charter adf fmt <file> [--check] [--write]
-charter adf patch <file> --ops '<json>'
+charter adf patch <file> --ops '<json>' | --ops-file <path>
 charter adf bundle --task "Fix React component" [--ai-dir <dir>]
+charter adf sync --check [--ai-dir <dir>]
+charter adf sync --write [--ai-dir <dir>]
+charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]
+                     [--context '{"key": value}'] [--context-file <path>]
 ```
 
-- `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, and `state.adf`.
+- `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, and `state.adf`. Core module includes a 500-line LOC guardrail metric by default.
 - `fmt`: Parse and reformat to canonical ADF. `--check` exits 1 if not canonical. `--write` reformats in place. Default prints to stdout.
-- `patch`: Apply typed delta operations (ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION).
-- `bundle`: Read `manifest.adf`, resolve ON_DEMAND modules via keyword matching against the task, and output merged context with token estimate.
+- `patch`: Apply typed delta operations (ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION, UPDATE_METRIC). Accepts `--ops <json>` inline or `--ops-file <path>` from a file.
+- `bundle`: Read `manifest.adf`, resolve ON_DEMAND modules via keyword matching against the task, and output merged context with token estimate, trigger observability (matched keywords, load reasons), unmatched modules, and advisory-only warnings.
+- `sync --check`: Verify source `.adf` files match their locked hashes. Exits 1 if any source has drifted since last sync.
+- `sync --write`: Update `.adf.lock` with current source hashes.
+- `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail).
 
 ## Global Options
 
