@@ -12,6 +12,7 @@ import type {
   Manifest,
   ManifestModule,
   SyncEntry,
+  CadenceEntry,
   BundleResult,
 } from './types';
 import { AdfBundleError } from './errors';
@@ -31,6 +32,7 @@ export function parseManifest(doc: AdfDocument): Manifest {
     onDemand: [],
     rules: [],
     sync: [],
+    cadence: [],
   };
 
   for (const section of doc.sections) {
@@ -65,6 +67,15 @@ export function parseManifest(doc: AdfDocument): Manifest {
         }
         break;
       }
+      case 'CADENCE': {
+        if (section.content.type === 'map') {
+          manifest.cadence = section.content.entries.map(e => ({
+            check: e.key,
+            frequency: e.value,
+          }));
+        }
+        break;
+      }
       case 'BUDGET': {
         if (section.content.type === 'map') {
           const maxTokens = section.content.entries.find(e => e.key === 'MAX_TOKENS');
@@ -96,20 +107,34 @@ function parseSyncEntry(entry: string): SyncEntry | null {
 /**
  * Parse a single ON_DEMAND entry like:
  *   "frontend.adf (Triggers on: React, CSS, UI)"
+ *   "frontend.adf (Triggers on: React, CSS, UI) [budget: 1200]"
  */
 function parseTriggerEntry(entry: string): ManifestModule {
-  const triggerMatch = entry.match(/^(.+?)\s*\(Triggers?\s+on\s*:\s*(.+)\)\s*$/i);
+  // Extract optional [budget: N] suffix first
+  let remaining = entry;
+  let tokenBudget: number | undefined;
+  const budgetMatch = remaining.match(/\s*\[budget\s*:\s*(\d+)\]\s*$/i);
+  if (budgetMatch) {
+    tokenBudget = parseInt(budgetMatch[1], 10);
+    remaining = remaining.slice(0, budgetMatch.index!).trim();
+  }
+
+  const triggerMatch = remaining.match(/^(.+?)\s*\(Triggers?\s+on\s*:\s*(.+)\)\s*$/i);
   if (triggerMatch) {
     const path = triggerMatch[1].trim();
     const triggers = triggerMatch[2]
       .split(',')
       .map(t => t.trim())
       .filter(t => t.length > 0);
-    return { path, triggers, loadPolicy: 'ON_DEMAND' };
+    const mod: ManifestModule = { path, triggers, loadPolicy: 'ON_DEMAND' };
+    if (tokenBudget !== undefined) mod.tokenBudget = tokenBudget;
+    return mod;
   }
 
-  // No trigger syntax — just a path
-  return { path: entry.trim(), triggers: [], loadPolicy: 'ON_DEMAND' };
+  // No trigger syntax — just a path (possibly with budget)
+  const mod: ManifestModule = { path: remaining.trim(), triggers: [], loadPolicy: 'ON_DEMAND' };
+  if (tokenBudget !== undefined) mod.tokenBudget = tokenBudget;
+  return mod;
 }
 
 // ============================================================================
@@ -177,6 +202,21 @@ export function bundleModules(
   const tokenBudget = manifest.tokenBudget ?? null;
   const tokenUtilization = tokenBudget !== null ? tokenEstimate / tokenBudget : null;
 
+  // Check per-module budget overruns
+  const moduleBudgetOverruns: BundleResult['moduleBudgetOverruns'] = [];
+  for (const mod of manifest.onDemand) {
+    if (mod.tokenBudget !== undefined && modulePaths.includes(mod.path)) {
+      const tokens = perModuleTokens[mod.path];
+      if (tokens !== undefined && tokens > mod.tokenBudget) {
+        moduleBudgetOverruns.push({
+          module: mod.path,
+          tokens,
+          budget: mod.tokenBudget,
+        });
+      }
+    }
+  }
+
   return {
     manifest,
     resolvedModules: modulePaths,
@@ -185,6 +225,7 @@ export function bundleModules(
     tokenBudget,
     tokenUtilization,
     perModuleTokens,
+    moduleBudgetOverruns,
     triggerMatches,
   };
 }

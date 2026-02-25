@@ -58,6 +58,7 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   STATE: '\u{1F9E0}',
   BUDGET: '\u{1F4B0}',
   SYNC: '\u{1F504}',
+  CADENCE: '\u{1F4CA}',
 };
 
 export const CANONICAL_KEY_ORDER: string[] = [
@@ -71,6 +72,7 @@ export const CANONICAL_KEY_ORDER: string[] = [
   'ON_DEMAND',
   'BUDGET',
   'SYNC',
+  'CADENCE',
   'FILES',
   'TOOLS',
   'RISKS',
@@ -147,6 +149,7 @@ export interface Manifest {
   rules: string[];
   tokenBudget?: number;
   sync: SyncEntry[];
+  cadence: CadenceEntry[];
 }
 
 export interface SyncEntry {
@@ -158,6 +161,12 @@ export interface ManifestModule {
   path: string;
   triggers: string[];
   loadPolicy: 'DEFAULT' | 'ON_DEMAND';
+  tokenBudget?: number;
+}
+
+export interface CadenceEntry {
+  check: string;
+  frequency: string;
 }
 
 // ============================================================================
@@ -172,6 +181,11 @@ export interface BundleResult {
   tokenBudget: number | null;
   tokenUtilization: number | null;
   perModuleTokens: Record<string, number>;
+  moduleBudgetOverruns: Array<{
+    module: string;
+    tokens: number;
+    budget: number;
+  }>;
   triggerMatches: Array<{
     module: string;
     trigger: string;
