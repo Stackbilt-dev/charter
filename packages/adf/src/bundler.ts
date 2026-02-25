@@ -187,10 +187,11 @@ export function resolveModules(manifest: Manifest, taskKeywords: string[]): stri
 export function bundleModules(
   basePath: string,
   modulePaths: string[],
-  readFile: (p: string) => string
+  readFile: (p: string) => string,
+  taskKeywords: string[] = [],
 ): BundleResult {
   const manifest = loadAndParseManifest(basePath, readFile);
-  const triggerMatches = buildTriggerReport(manifest, modulePaths);
+  const triggerMatches = buildTriggerReport(manifest, modulePaths, taskKeywords);
 
   const documents: AdfDocument[] = [];
   const perModuleTokens: Record<string, number> = {};
@@ -238,6 +239,11 @@ export function bundleModules(
     }
   }
 
+  // Unmatched: on-demand modules that were not resolved
+  const unmatchedModules = manifest.onDemand
+    .filter(mod => !modulePaths.includes(mod.path))
+    .map(mod => mod.path);
+
   return {
     manifest,
     resolvedModules: modulePaths,
@@ -248,6 +254,7 @@ export function bundleModules(
     perModuleTokens,
     moduleBudgetOverruns,
     triggerMatches,
+    unmatchedModules,
     advisoryOnlyModules,
   };
 }
@@ -266,15 +273,26 @@ function loadAndParseManifest(basePath: string, readFile: (p: string) => string)
 
 function buildTriggerReport(
   manifest: Manifest,
-  resolvedPaths: string[]
+  resolvedPaths: string[],
+  taskKeywords: string[],
 ): BundleResult['triggerMatches'] {
   const matches: BundleResult['triggerMatches'] = [];
+  const lowerKeywords = taskKeywords.map(k => k.toLowerCase());
+  const defaultLoadSet = new Set(manifest.defaultLoad);
+
   for (const mod of manifest.onDemand) {
     for (const trigger of mod.triggers) {
+      const matchedKeywords = lowerKeywords.filter(
+        k => k === trigger.toLowerCase()
+      );
+      const isResolved = resolvedPaths.includes(mod.path);
+      const isDefault = defaultLoadSet.has(mod.path);
       matches.push({
         module: mod.path,
         trigger,
-        matched: resolvedPaths.includes(mod.path),
+        matched: isResolved,
+        matchedKeywords,
+        loadReason: isDefault ? 'default' : 'trigger',
       });
     }
   }

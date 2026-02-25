@@ -196,7 +196,10 @@ export interface BundleResult {
     module: string;
     trigger: string;
     matched: boolean;
+    matchedKeywords: string[];
+    loadReason: 'default' | 'trigger';
   }>;
+  unmatchedModules: string[];
   advisoryOnlyModules: string[];
 }
 

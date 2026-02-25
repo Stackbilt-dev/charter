@@ -438,6 +438,49 @@ ON_DEMAND:
     expect(result.advisoryOnlyModules).toEqual(['frontend.adf', 'backend.adf']);
   });
 
+  // --- Trigger observability ---
+
+  it('reports matchedKeywords for each trigger entry', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf'], readFile, ['React', 'hooks']);
+    const reactTrigger = result.triggerMatches.find(tm => tm.trigger === 'React');
+    expect(reactTrigger).toBeDefined();
+    expect(reactTrigger!.matched).toBe(true);
+    expect(reactTrigger!.matchedKeywords).toEqual(['react']);
+    expect(reactTrigger!.loadReason).toBe('trigger');
+  });
+
+  it('reports empty matchedKeywords for unmatched triggers', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf'], readFile, ['DB']);
+    const cssTrigger = result.triggerMatches.find(tm => tm.trigger === 'CSS');
+    expect(cssTrigger).toBeDefined();
+    expect(cssTrigger!.matched).toBe(false);
+    expect(cssTrigger!.matchedKeywords).toEqual([]);
+  });
+
+  it('computes unmatchedModules for on-demand modules not resolved', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf'], readFile, ['React']);
+    expect(result.unmatchedModules).toEqual(['backend.adf']);
+  });
+
+  it('reports all on-demand as unmatched when no keywords match', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf'], readFile, []);
+    expect(result.unmatchedModules).toEqual(['frontend.adf', 'backend.adf']);
+  });
+
+  it('reports empty unmatchedModules when all on-demand resolved', () => {
+    const filesAll: Record<string, string> = {
+      ...FILES,
+      '/ai/backend.adf': `ADF: 0.1\nCONTEXT:\n  - Use Express\n`,
+    };
+    const read = (p: string): string => {
+      const content = filesAll[p];
+      if (!content) throw new Error(`File not found: ${p}`);
+      return content;
+    };
+    const result = bundleModules('/ai', ['core.adf', 'state.adf', 'frontend.adf', 'backend.adf'], read, ['React', 'API']);
+    expect(result.unmatchedModules).toEqual([]);
+  });
+
   // --- Metric merge ---
 
   it('merges metric sections by concatenating entries', () => {
