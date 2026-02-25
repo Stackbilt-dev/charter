@@ -62,7 +62,7 @@ ADF: 0.1
   BLOCKED: Waiting on API schema
 ```
 
-Sections use emoji decorations for attention signaling, support three content types (text, list, key-value map), and follow a canonical ordering that the formatter enforces.
+Sections use emoji decorations for attention signaling, support four content types (text, list, key-value map, and metric with value/ceiling/unit), and follow a canonical ordering that the formatter enforces. Sections can carry a `[load-bearing]` or `[advisory]` weight annotation to distinguish measurable constraints from preferences.
 
 See the [`@stackbilt/adf` package README](./packages/adf/README.md) for full API documentation.
 
@@ -143,6 +143,8 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter adf fmt <file> [--check] [--write]`: parse and reformat ADF files to canonical form
 - `charter adf patch <file> --ops <json>`: apply typed delta operations to ADF files
 - `charter adf bundle --task "<prompt>"`: resolve manifest modules and output merged context
+- `charter adf sync --check`: verify source .adf files match locked hashes (exit 1 on drift)
+- `charter adf sync --write`: update `.adf.lock` with current source hashes
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
