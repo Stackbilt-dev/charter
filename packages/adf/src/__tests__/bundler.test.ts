@@ -154,6 +154,30 @@ describe('parseManifest', () => {
     const manifest = parseManifest(doc);
     expect(manifest.cadence).toEqual([]);
   });
+
+  // --- METRICS source parsing ---
+
+  it('extracts metric sources from METRICS section', () => {
+    const manifestWithMetrics = `ADF: 0.1
+DEFAULT_LOAD:
+  - core.adf
+
+METRICS:
+  ENTRY_LOC: src/index.ts
+  HANDLER_LOC: src/handler.ts
+`;
+    const doc = parseAdf(manifestWithMetrics);
+    const manifest = parseManifest(doc);
+    expect(manifest.metrics).toHaveLength(2);
+    expect(manifest.metrics[0]).toEqual({ key: 'ENTRY_LOC', path: 'src/index.ts' });
+    expect(manifest.metrics[1]).toEqual({ key: 'HANDLER_LOC', path: 'src/handler.ts' });
+  });
+
+  it('defaults metrics to empty array when not present', () => {
+    const doc = parseAdf(MANIFEST_ADF);
+    const manifest = parseManifest(doc);
+    expect(manifest.metrics).toEqual([]);
+  });
 });
 
 describe('resolveModules', () => {

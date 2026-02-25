@@ -150,6 +150,7 @@ export interface Manifest {
   tokenBudget?: number;
   sync: SyncEntry[];
   cadence: CadenceEntry[];
+  metrics: MetricSource[];
 }
 
 export interface SyncEntry {
@@ -167,6 +168,11 @@ export interface ManifestModule {
 export interface CadenceEntry {
   check: string;
   frequency: string;
+}
+
+export interface MetricSource {
+  key: string;
+  path: string;
 }
 
 // ============================================================================

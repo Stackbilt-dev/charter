@@ -11,6 +11,7 @@ import type {
   AdfSection,
   Manifest,
   ManifestModule,
+  MetricSource,
   SyncEntry,
   CadenceEntry,
   BundleResult,
@@ -33,6 +34,7 @@ export function parseManifest(doc: AdfDocument): Manifest {
     rules: [],
     sync: [],
     cadence: [],
+    metrics: [],
   };
 
   for (const section of doc.sections) {
@@ -72,6 +74,15 @@ export function parseManifest(doc: AdfDocument): Manifest {
           manifest.cadence = section.content.entries.map(e => ({
             check: e.key,
             frequency: e.value,
+          }));
+        }
+        break;
+      }
+      case 'METRICS': {
+        if (section.content.type === 'map') {
+          manifest.metrics = section.content.entries.map(e => ({
+            key: e.key,
+            path: e.value,
           }));
         }
         break;
