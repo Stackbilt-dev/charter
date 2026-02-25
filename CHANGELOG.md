@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.3.1] - 2026-02-25
+
+### Added
+- **CI evidence gating**: Governance workflow template (`governance.yml`) now runs `charter adf evidence --auto-measure --ci` on PRs when `.ai/manifest.adf` is present, automatically validating metric ceilings before merge.
+- **Scorecard evidence**: Charter's own `governance-scorecard.yml` now includes ADF evidence output alongside validate and drift results.
+
 ## [0.3.0] - 2026-02-25
 
 ### Added
@@ -243,6 +249,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.3.1]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.20...v0.2.0
 [0.1.20]: https://github.com/stackbilt-dev/charter-kit/releases/tag/v0.1.20

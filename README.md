@@ -225,6 +225,7 @@ Audit policy scoring note:
 
 - Reusable template in this repo: `.github/workflows/governance.yml`
 - Generated in target repos by `charter setup --ci github`: `.github/workflows/charter-governance.yml`
+- The governance workflow runs `validate`, `drift`, `adf evidence --auto-measure --ci`, and `audit` on every PR. The evidence step gates on metric ceiling breaches when `.ai/manifest.adf` is present.
 
 ## Workspace Layout
 
