@@ -8,74 +8,13 @@
   </a>
 </p>
 
-Charter is a local-first governance toolkit for software repos. It works in both terminal-first human workflows and deterministic CI/agent workflows.
+Charter is a local-first governance toolkit with a built-in AI context compiler. It ships **ADF (Attention-Directed Format)** -- a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files -- alongside offline governance checks for commit trailers, risk scoring, drift detection, and change classification.
 
-## Install And Adopt (Start Here)
-
-Recommended for most repos (local install):
-
-```bash
-npm install --save-dev @stackbilt/cli
-npx charter
-npx charter setup --detect-only --format json
-npx charter setup --ci github --yes
-npx charter doctor --format json
-npx charter validate --ci --format json
-npx charter drift --ci --format json
-npx charter audit --format json
-```
-
-If you are installing at a pnpm workspace root, use:
-
-```bash
-pnpm add -Dw @stackbilt/cli
-```
-
-Global install is optional if you want `charter` on your PATH:
-
-```bash
-npm install -g @stackbilt/cli
-charter
-charter setup --detect-only --format json
-charter setup --ci github --yes
-```
-
-`setup` is what applies the governance baseline into the current repo (`.charter/*` and optional workflow).
-Use `charter setup --detect-only` to preview detected stack and selected preset without writing files, including `detected.sources` so users and agents can verify what was scanned.
-For mixed repos (frontend + backend/worker), run detect-only first, then choose preset intentionally:
-
-```bash
-charter setup --detect-only
-charter setup --preset fullstack --ci github --yes
-```
-
-`setup` also adds optional root `package.json` scripts when missing:
-- `charter:detect`
-- `charter:setup`
-Setup JSON includes `mutationPlan` and `appliedMutations` so agents can see planned/applied deltas.
-Use `--no-dependency-sync` if you want setup to avoid rewriting `devDependencies["@stackbilt/cli"]`.
-Baseline mutation metadata includes `configHashBefore`, `configHashAfter`, and `writesPerformed` for auditable idempotency checks.
-
-Upgrade path in existing repos:
-
-```bash
-npm install --save-dev @stackbilt/cli@latest
-npx --no-install charter --version
-```
-
-## Why Charter
-
-- Validate governance trailers like `Governed-By` and `Resolves-Request`
-- Score commit risk and flag high-risk ungoverned changes
-- Detect stack drift against blessed patterns
-- Classify change scope as `SURFACE`, `LOCAL`, or `CROSS_CUTTING`
-- Manage AI agent context with ADF (Attention-Directed Format) -- modular `.ai/` context files with AST-backed parsing, formatting, patching, and bundling
-- Produce stable JSON output for automation
-- Make governance purpose obvious on first run with a repo risk/value snapshot
+![ADF Architecture](./ADF_1.png)
 
 ## ADF: Attention-Directed Format
 
-ADF is a structured context format designed for AI agent workflows. Instead of dumping flat markdown into an LLM's context window, ADF uses emoji-decorated semantic keys, a strict AST, and a module system with progressive disclosure — so agents load only the context they need for the current task.
+ADF treats LLM context as a compiled language. Instead of dumping flat markdown into a context window, ADF uses emoji-decorated semantic keys, a strict AST, and a module system with progressive disclosure -- so agents load only the context they need for the current task.
 
 Charter manages ADF through the `.ai/` directory:
 
@@ -100,11 +39,11 @@ charter adf fmt .ai/core.adf --write
 # Apply a typed patch (add a bullet to a list section)
 charter adf patch .ai/state.adf --ops '[{"op":"ADD_BULLET","section":"STATE","value":"Reviewing PR #42"}]'
 
-# Bundle context for a specific task — resolves manifest triggers automatically
+# Bundle context for a specific task -- resolves manifest triggers automatically
 charter adf bundle --task "Fix the React login component"
 ```
 
-### Format Overview
+### Format Example
 
 ```text
 ADF: 0.1
@@ -131,60 +70,41 @@ Sections use emoji decorations for attention signaling, support three content ty
 
 See the [`@stackbilt/adf` package README](./packages/adf/README.md) for full API documentation.
 
-## Choose Your Path
+## Why Charter
 
-### Human Path (Local Text Output)
+- **ADF context compiler** -- modular `.ai/` context files with AST-backed parsing, formatting, patching, and bundling
+- **Commit governance** -- validate `Governed-By` and `Resolves-Request` trailers, score commit risk
+- **Drift detection** -- scan for stack drift against blessed patterns
+- **Change classification** -- heuristic `SURFACE`, `LOCAL`, or `CROSS_CUTTING` scope labeling
+- **Stable JSON output** -- every command supports `--format json` for automation and CI
 
-```bash
-pnpm install
-pnpm run build
-node packages/cli/dist/bin.js
-node packages/cli/dist/bin.js why
-node packages/cli/dist/bin.js setup --yes
-node packages/cli/dist/bin.js doctor
-node packages/cli/dist/bin.js validate
-node packages/cli/dist/bin.js drift
-node packages/cli/dist/bin.js audit
-```
-
-### CI/Agent Path (Deterministic JSON)
+## Install
 
 ```bash
-pnpm install
-pnpm run build
-node packages/cli/dist/bin.js --format json
-node packages/cli/dist/bin.js setup --ci github --yes
-node packages/cli/dist/bin.js doctor --format json --ci
-node packages/cli/dist/bin.js validate --format json --ci
-node packages/cli/dist/bin.js drift --format json --ci
-node packages/cli/dist/bin.js audit --format json --ci
+npm install --save-dev @stackbilt/cli
+npx charter setup --detect-only --format json
+npx charter setup --ci github --yes
 ```
 
-CI also publishes `governance/scorecard.json` as a `governance-scorecard` artifact for cross-repo execution-board rollups.
+For pnpm workspaces use `pnpm add -Dw @stackbilt/cli`. For a global install use `npm install -g @stackbilt/cli`.
 
-## Human Onboarding (Copy/Paste)
+## Getting Started
 
-For someone new to governance tooling, use this exact sequence inside the target repo:
+### Human Workflow
 
 ```bash
-npm install -g @stackbilt/cli
-charter
-charter setup --ci github
-charter classify "describe the planned change"
-charter doctor --format json
-charter validate --format text
-charter drift --format text
-charter audit --format text
+charter                              # Repo risk/value snapshot
+charter setup --ci github            # Apply governance baseline
+charter doctor                       # Validate environment/config
+charter validate                     # Check commit governance
+charter drift                        # Scan for stack drift
+charter audit                        # Governance summary
+charter adf init                     # Scaffold .ai/ context directory
 ```
 
-What they should understand after this:
-- Charter is now installed for this repo (`.charter/*` exists)
-- CI can block risky, ungoverned changes (`.github/workflows/charter-governance.yml`)
-- They can see current governance posture immediately (`validate`, `drift`, `audit`)
+### Agent Workflow
 
-## LM Agent Onboarding (Deterministic Path)
-
-For agent integrations, prefer JSON mode and exit-code handling:
+Prefer JSON mode and exit-code handling:
 
 ```bash
 charter --format json
@@ -193,6 +113,7 @@ charter doctor --format json
 charter validate --format json --ci
 charter drift --format json --ci
 charter audit --format json
+charter adf bundle --task "describe the task" --format json
 ```
 
 Agent contract:
@@ -201,43 +122,15 @@ Agent contract:
 - Exit codes: `0` success, `1` policy violation, `2` runtime/usage error
 - CI behavior: with `--ci`, treat `1` as gating failure and surface actionable remediation
 
-## LM Agent Runbook (Install To Maintenance)
-
-Use this deterministic flow in agent-driven repos:
-
-```bash
-# install (repo-local)
-npm install --save-dev @stackbilt/cli@latest
-
-# detect + apply baseline
-npx charter setup --detect-only --format json
-npx charter setup --ci github --yes --format json
-npx charter classify "describe the planned change" --format json
-
-# pre-merge / CI gates
-npx charter validate --ci --format json
-npx charter drift --ci --format json
-npx charter audit --format json
-
-# maintenance loop (scheduled or pre-release)
-npx charter doctor --format json
-npx charter audit --format json
-```
-
-Decision rules for agents:
-- If `setup --detect-only` reports `mixedStack: true`, apply `--preset fullstack`.
-- If detection looks incomplete, inspect `detected.sources` before setup.
-- Treat `validate` and `drift` with `--ci` as merge gates.
-- In `validate` JSON, use `evidence.policyOffenders` for strict trailer policy failures and `evidence.riskOffenders` for threshold-risk failures.
-- Treat `policyOffenders` as compliance findings and `riskOffenders` as risk-threshold findings.
-- `validate` exposes `effectiveRangeSource` and `defaultCommitRange` when `--range` is not explicitly provided.
-
-## Trailer Adoption Ramp
+<details>
+<summary>Trailer Adoption Ramp</summary>
 
 Teams often score lower early due to missing governance trailers. Use this ramp:
 - Stage 1: run `charter validate --ci --format json` in PR CI and fail on policy violations.
 - Stage 2: add a commit template in the repo that includes `Governed-By` and `Resolves-Request`.
 - Stage 3: track audit trend; trailer coverage should rise naturally as PR gating normalizes behavior.
+
+</details>
 
 ## Command Reference
 
@@ -304,5 +197,3 @@ packages/
 ## License
 
 Apache-2.0. See `LICENSE`.
-
-
