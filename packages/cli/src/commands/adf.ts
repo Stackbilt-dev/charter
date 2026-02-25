@@ -47,10 +47,13 @@ const CORE_SCAFFOLD = `ADF: 0.1
   - This file is loaded by default for every task.
   - Keep it lean — add domain-specific rules to on-demand modules.
 
-\u{26A0}\u{FE0F} CONSTRAINTS:
+\u{26A0}\u{FE0F} CONSTRAINTS [load-bearing]:
   - Follow conventional commits.
   - No secrets in source code.
   - Prefer pure functions in library code.
+
+\u{1F4CA} METRICS [load-bearing]:
+  entry_loc: 0 / 500 [lines]
 `;
 
 const STATE_SCAFFOLD = `ADF: 0.1
