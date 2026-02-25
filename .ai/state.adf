@@ -1,0 +1,6 @@
+ADF: 0.1
+
+🧠 STATE:
+  CURRENT: Phase 3 implemented (adf sync command, SYNC manifest section, .adf.lock)
+  NEXT: Update documentation for Phase 1+3, then Phase 5 (constraint validation)
+  COMPLETED: Phase 1 (metric, weight, UPDATE_METRIC), Phase 2 (token budget), Phase 3 (adf sync)

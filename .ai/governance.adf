@@ -1,0 +1,15 @@
+ADF: 0.1
+
+🎯 TASK: Governance subsystem development context
+
+📋 CONTEXT:
+  - packages: git (trailers, risk), classify (heuristic scope), validate (citations), drift (pattern scan), ci (GitHub Actions)
+  - Config lives in .charter/ directory: config.json, patterns/*.json, policies/*.md
+  - Trailer parsing extracts Governed-By, Resolves-Request from commit messages
+  - Risk assessment scores HIGH/MEDIUM/LOW based on file path patterns
+
+⚠ CONSTRAINTS [load-bearing]:
+  - validate, drift, audit commands must support --ci and --format json
+  - --ci mode: exit 1 on policy violation, exit 0 on pass
+  - validate exposes policyOffenders and riskOffenders in evidence
+  - drift scans patterns from .charter/patterns/*.json (regex or keyword matching)

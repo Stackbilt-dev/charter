@@ -1,0 +1,23 @@
+ADF: 0.1
+
+🎯 TASK: ADF package development context
+
+📋 CONTEXT:
+  - Source: packages/adf/src/ (types.ts, parser.ts, formatter.ts, patcher.ts, bundler.ts, errors.ts)
+  - Tests: packages/adf/src/__tests__/ (vitest)
+  - Content types: text, list, map, metric
+  - Patch ops: ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION, UPDATE_METRIC
+  - Section weight: load-bearing (measurable constraint) or advisory (preference)
+  - Canonical key order: TASK, ROLE, CONTEXT, OUTPUT, CONSTRAINTS, RULES, DEFAULT_LOAD, ON_DEMAND, BUDGET, FILES, TOOLS, RISKS, STATE
+
+⚠ CONSTRAINTS [load-bearing]:
+  - ADF package has zero runtime dependencies
+  - Parser is tolerant (handles messy LLM output); formatter is strict (canonical emission)
+  - Patcher is immutable (deep clone via JSON.parse/stringify; original never mutated)
+  - All new content types must support: parse, format, roundtrip idempotency, merge, token estimation
+  - Metric entries use lowercase_key; map entries use UPPERCASE_KEY — this is the disambiguation
+
+🚨 RISKS:
+  - Metric regex uses lowercase key pattern — uppercase metrics would parse as map entries
+  - Weight annotation regex is inside section header regex — order matters
+  - UPDATE_METRIC only changes value; ceiling and unit are immutable through patches

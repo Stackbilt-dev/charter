@@ -1,0 +1,22 @@
+ADF: 0.1
+
+🎯 ROLE: Charter Kit development context router
+
+📐 RULES:
+  - Prefer smallest relevant module set.
+  - Never assume unseen modules were loaded.
+  - Load-bearing constraints must reference measurable thresholds.
+
+📦 DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+📂 ON_DEMAND:
+  - adf-dev.adf (Triggers on: ADF, parser, formatter, patcher, bundler, metric, weight)
+  - governance.adf (Triggers on: validate, drift, audit, trailer, risk, governance)
+
+💰 BUDGET:
+  MAX_TOKENS: 4000
+
+🔄 SYNC:
+  - core.adf -> CLAUDE.md
