@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/git",
   "sideEffects": false,
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Git trailer parsing, commit risk scoring, and PR validation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
