@@ -8,7 +8,7 @@ Attention-Directed Format (ADF).
 
 | ID | Title | Version | Date | Status |
 |---|---|---|---|---|
-| CSA-001 | [Context-as-Code](./context-as-code-v1.0.md) | 1.0 | 2026-02-26 | Published |
+| CSA-001 | [Context-as-Code](./context-as-code-v1.1.md) | 1.1 | 2026-02-26 | Published |
 
 ## Versioning Convention
 
