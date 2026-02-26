@@ -41,17 +41,22 @@ pnpm run build
 pnpm run test
 ```
 
-## Phase 2: Version and Dependency Prep
+## Phase 2: Version Bump
 
 Use one synchronized version for all `@stackbilt/*` packages until multi-version strategy is introduced.
 
 1. Set new version in each `packages/*/package.json`.
-2. Replace internal `workspace:^` dependencies with the same concrete version (e.g. `"^0.2.0"`).
-3. Confirm no `workspace:` specifiers remain:
 
 ```bash
-rg -n "workspace:" packages -g "package.json"
+# Example: bump all packages to 0.4.0
+for pkg in packages/*/package.json; do
+  sed -i 's/"version": ".*"/"version": "0.4.0"/' "$pkg"
+done
 ```
+
+> **Note:** Do NOT manually replace `workspace:^` dependency specifiers.
+> PNPM automatically resolves `workspace:^` to concrete version ranges
+> (e.g. `"^0.4.0"`) in the published tarball. The source files stay as-is.
 
 ## Phase 3: Artifact Validation (Required)
 
@@ -100,15 +105,17 @@ Publish in this order:
 3. `@stackbilt/cli`
 
 ```bash
-pnpm --filter @stackbilt/types publish --access public
-pnpm --filter @stackbilt/core publish --access public
-pnpm --filter @stackbilt/adf publish --access public
-pnpm --filter @stackbilt/git publish --access public
-pnpm --filter @stackbilt/classify publish --access public
-pnpm --filter @stackbilt/validate publish --access public
-pnpm --filter @stackbilt/drift publish --access public
-pnpm --filter @stackbilt/ci publish --access public
-pnpm --filter @stackbilt/cli publish --access public
+# All packages declare publishConfig.access: "public", so --access flag is not needed.
+# PNPM resolves workspace:^ to concrete versions in the published tarball automatically.
+pnpm --filter @stackbilt/types publish
+pnpm --filter @stackbilt/core publish
+pnpm --filter @stackbilt/adf publish
+pnpm --filter @stackbilt/git publish
+pnpm --filter @stackbilt/classify publish
+pnpm --filter @stackbilt/validate publish
+pnpm --filter @stackbilt/drift publish
+pnpm --filter @stackbilt/ci publish
+pnpm --filter @stackbilt/cli publish
 ```
 
 ## Phase 5: Post-Publish Verification
