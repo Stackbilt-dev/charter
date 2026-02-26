@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/types" },
+    { "path": "packages/core" },
+    { "path": "packages/adf" },
+    { "path": "packages/git" },
+    { "path": "packages/classify" },
+    { "path": "packages/validate" },
+    { "path": "packages/drift" },
+    { "path": "packages/ci" },
+    { "path": "packages/cli" }
+  ]
+}

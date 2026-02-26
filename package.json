@@ -6,7 +6,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bash -lc \"pnpm exec tsc --build packages/types/tsconfig.json packages/core/tsconfig.json packages/adf/tsconfig.json packages/git/tsconfig.json packages/classify/tsconfig.json packages/validate/tsconfig.json packages/drift/tsconfig.json packages/ci/tsconfig.json packages/cli/tsconfig.json\"",
+    "build": "bash -lc \"pnpm exec tsc --build tsconfig.build.json\"",
+    "dev": "bash -lc \"pnpm exec tsc --build --watch tsconfig.build.json\"",
     "clean": "node -e \"const fs=require('fs');const path=require('path');for(const e of fs.readdirSync('packages',{withFileTypes:true}).filter(x=>x.isDirectory())){const dir=path.join('packages',e.name);fs.rmSync(path.join(dir,'dist'),{recursive:true,force:true});fs.rmSync(path.join(dir,'tsconfig.tsbuildinfo'),{force:true});}\"",
     "typecheck": "bash -lc \"pnpm exec tsc --noEmit -p tsconfig.json\"",
     "test": "bash -lc \"pnpm exec vitest run\"",
