@@ -249,6 +249,15 @@ packages/
 - `pnpm run build`
 - `pnpm run test`
 
+## Research & White Papers
+
+The [`papers/`](./papers/) directory contains versioned white papers documenting
+ADF design rationale and quantitative analysis.
+
+| Paper | Description |
+|---|---|
+| [Context-as-Code v1.0](./papers/context-as-code-v1.0.md) | Quantifies ADF impact on an AI Orchestration Engine v2 SDLC: 80% token reduction, 0% LOC-limit violations across 33 modules. |
+
 ## Release Docs
 
 - `PUBLISHING.md`: first release/publish workflow
