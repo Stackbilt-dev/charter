@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/adf",
   "sideEffects": false,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "ADF (Attention-Directed Format) — AST-backed context format for AI agents",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.3.3] - 2026-02-26
+
+### Added
+- **`charter bootstrap` command**: One-command repo onboarding that orchestrates detect → setup → ADF init → install → doctor in a single frictionless flow. Supports `--ci github`, `--preset`, `--skip-install`, `--skip-doctor`, and `--format json` for full machine-readable output including next-step plans.
+- **Thin pointer generation**: `charter adf init --emit-pointers` (and bootstrap) generates thin `CLAUDE.md`, `.cursorrules`, and `agents.md` files that redirect to `.ai/` — preventing rule duplication across agent config files.
+- **Rule-routing decision tree**: `adf init` scaffold now includes a commented decision tree in `core.adf` guiding agents on where rules belong (CLAUDE.md vs core.adf vs domain modules), derived from ADX-002 agent DX feedback.
+- **Section taxonomy documentation**: Generated `core.adf` template documents the open section taxonomy (CONTEXT, CONSTRAINTS, ADVISORY, METRICS), weight tags (`[load-bearing]`, `[advisory]`), and custom section rules.
+- **`charter adf sync --explain`**: New flag outputs the `.adf.lock` schema documentation (format, hash algorithm, commands, purpose) in both text and JSON, eliminating lockfile archaeology friction reported in ADX-001.
+- **Agent DX feedback papers**: ADX-002 (rule routing friction), ADX-003 (install automation friction), and RM-001 (vNext roadmap draft) added to papers/.
+- **GitHub Actions governance workflow**: Bootstrap and setup now generate `.github/workflows/charter-governance.yml` for PR governance checks.
+
+### Changed
+- **Scaffold templates shared**: ADF scaffold constants (`MANIFEST_SCAFFOLD`, `CORE_SCAFFOLD`, `STATE_SCAFFOLD`) and pointer templates are now exported from the adf command module and shared with bootstrap, eliminating template drift.
+- **Setup functions exported**: `detectStack()`, `loadPackageContexts()`, `detectPackageManager()`, and other setup utilities are now exported for reuse by the bootstrap command.
+
 ## [0.3.2] - 2026-02-26
 
 ### Added

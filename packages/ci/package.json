@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/ci",
   "sideEffects": false,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "GitHub Actions adapter for Charter governance checks",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
