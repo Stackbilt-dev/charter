@@ -15,7 +15,7 @@ import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
 
-function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
+export function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
   const installStep = packageManager === 'pnpm'
     ? `      - uses: pnpm/action-setup@v4
         with:
@@ -74,7 +74,7 @@ ${installStep}
 `;
 }
 
-interface SetupResult {
+export interface SetupResult {
   configPath: string;
   initialized: boolean;
   detected: DetectionResult;
@@ -104,7 +104,7 @@ interface SetupResult {
   appliedMutations: SetupMutationReport;
 }
 
-interface SetupMutationReport {
+export interface SetupMutationReport {
   baseline: {
     action: 'create' | 'update' | 'noop';
     path: string;
@@ -132,7 +132,7 @@ interface SetupMutationReport {
   };
 }
 
-interface DetectionResult {
+export interface DetectionResult {
   runtime: string[];
   frameworks: string[];
   state: string[];
@@ -155,7 +155,7 @@ interface DetectionResult {
   warnings: string[];
 }
 
-interface PackageContext {
+export interface PackageContext {
   source: string;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -391,7 +391,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   return EXIT_CODE.SUCCESS;
 }
 
-function detectStack(contexts: PackageContext[]): DetectionResult {
+export function detectStack(contexts: PackageContext[]): DetectionResult {
   if (contexts.length === 0) {
     return {
       runtime: [],
@@ -571,7 +571,7 @@ function detectStack(contexts: PackageContext[]): DetectionResult {
   };
 }
 
-function loadPackageContexts(): PackageContext[] {
+export function loadPackageContexts(): PackageContext[] {
   const candidates = new Set<string>(['package.json']);
 
   for (const dir of ['client', 'frontend', 'web']) {
@@ -621,7 +621,7 @@ function loadPackageContexts(): PackageContext[] {
   return contexts;
 }
 
-function detectPackageManager(contexts: PackageContext[]): 'npm' | 'pnpm' {
+export function detectPackageManager(contexts: PackageContext[]): 'npm' | 'pnpm' {
   const root = contexts.find((ctx) => ctx.source === 'package.json');
   if (root?.engines?.pnpm || fs.existsSync(path.resolve('pnpm-lock.yaml'))) {
     return 'pnpm';
@@ -745,7 +745,7 @@ function collectPackageJsonsRecursive(rootDir: string): string[] {
   return results;
 }
 
-function inferProjectName(contexts: PackageContext[]): string {
+export function inferProjectName(contexts: PackageContext[]): string {
   const root = contexts.find((c) => c.source === 'package.json');
   if (root?.name && root.name.trim().length > 0) {
     return root.name.trim();
@@ -804,7 +804,7 @@ function planManagedFile(targetPath: string, content: string): { action: 'create
   return { action: 'update' };
 }
 
-function applyManagedFile(targetPath: string, content: string, force: boolean): { created: boolean; updated: boolean } {
+export function applyManagedFile(targetPath: string, content: string, force: boolean): { created: boolean; updated: boolean } {
   const absolute = path.resolve(targetPath);
   const exists = fs.existsSync(absolute);
 
@@ -838,7 +838,7 @@ function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
 }
 
-function syncPackageManifest(
+export function syncPackageManifest(
   selectedPreset: StackPreset,
   syncDependencies: boolean,
   apply: boolean

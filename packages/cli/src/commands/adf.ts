@@ -24,7 +24,7 @@ import { CLIError, EXIT_CODE } from '../index';
 // Scaffold Content
 // ============================================================================
 
-const MANIFEST_SCAFFOLD = `ADF: 0.1
+export const MANIFEST_SCAFFOLD = `ADF: 0.1
 \u{1F3AF} ROLE: Repo context router
 
 \u{1F4E6} DEFAULT_LOAD:
@@ -40,23 +40,48 @@ const MANIFEST_SCAFFOLD = `ADF: 0.1
   - Never assume unseen modules were loaded.
 `;
 
-const CORE_SCAFFOLD = `ADF: 0.1
-\u{1F3AF} TASK: Define universal repository rules
+export const CORE_SCAFFOLD = `ADF: 0.1
 
-\u{2699}\u{FE0F} CONTEXT:
-  - This file is loaded by default for every task.
-  - Keep it lean — add domain-specific rules to on-demand modules.
+# Rule Routing Guide (remove after initial setup)
+# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# Where does each rule belong?
+#
+# Pure runtime/environment? (OS, line endings, shell)
+#   \u2192 CLAUDE.md (not ADF)
+#
+# Universal architecture constraint? (platform choice, tenant isolation)
+#   \u2192 core.adf CONSTRAINTS [load-bearing]
+#
+# Stack-specific operational rule? (wrangler flags, D1 batching)
+#   \u2192 domain-specific .adf module (backend.adf, frontend.adf)
+#
+# Agent identity/behavior? ("You ARE the X agent", bias toward action)
+#   \u2192 core.adf CONTEXT
+#
+# Language/tooling discipline? (type checks, enum safety)
+#   \u2192 core.adf CONSTRAINTS or dedicated section
+#
+# Section weight guide:
+#   [load-bearing] = violation causes incorrect output
+#   [advisory]     = best practice, not enforced
+#   (no tag)       = informational context
+#
+# Section types (open taxonomy, custom sections allowed):
+#   CONTEXT   \u2014 factual project/agent identity
+#   CONSTRAINTS \u2014 must/never rules
+#   ADVISORY  \u2014 should/prefer guidance
+#   METRICS   \u2014 quantitative ceilings (key: value / ceiling [unit])
 
-\u{26A0}\u{FE0F} CONSTRAINTS [load-bearing]:
-  - Follow conventional commits.
-  - No secrets in source code.
-  - Prefer pure functions in library code.
+\u26A0\uFE0F CONSTRAINTS [load-bearing]:
+  - Use Conventional Commits (feat, fix, docs, chore)
+  - Never commit secrets or credentials
+  - Pure functions in library code; side effects only in entry points
 
-\u{1F4CA} METRICS [load-bearing]:
+\uD83D\uDCCA METRICS:
   entry_loc: 0 / 500 [lines]
 `;
 
-const STATE_SCAFFOLD = `ADF: 0.1
+export const STATE_SCAFFOLD = `ADF: 0.1
 \u{1F9E0} STATE:
   CURRENT: Repository initialized with ADF context system
   NEXT: Configure on-demand modules for your stack
@@ -101,7 +126,43 @@ interface AdfInitResult {
   created: boolean;
   aiDir: string;
   files: string[];
+  pointers?: string[];
 }
+
+// ── Thin pointer file content ──
+
+export const POINTER_CLAUDE_MD = `# Project Context
+
+> This project uses [ADF](https://github.com/Stackbilt-dev/charter) for AI agent context management.
+> All stack rules, constraints, and architectural guidance live in \`.ai/\`.
+> **Do not duplicate ADF rules here.** Only pre-ADF bootstrap content belongs in this file.
+
+See \`.ai/manifest.adf\` for the module routing manifest.
+
+## Environment
+<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->
+`;
+
+export const POINTER_CURSORRULES = `# Cursor Rules
+
+This project uses ADF (Attention-Directed Format) for context management.
+All rules and constraints are in .ai/ \u2014 see .ai/manifest.adf for routing.
+
+Do not add stack rules here. This file exists only as a pointer.
+See: .ai/core.adf for universal constraints.
+`;
+
+export const POINTER_AGENTS_MD = `# Agent Guidelines
+
+This project uses ADF for structured agent context.
+All architectural rules, constraints, and guidance live in \`.ai/\`.
+
+Module manifest: .ai/manifest.adf
+Universal rules: .ai/core.adf
+Current state: .ai/state.adf
+
+Do not duplicate rules from .ai/ modules into this file or other agent config files.
+`;
 
 function adfInit(options: CLIOptions, args: string[]): number {
   const force = options.yes || args.includes('--force');
@@ -129,6 +190,39 @@ function adfInit(options: CLIOptions, args: string[]): number {
     aiDir,
     files: ['manifest.adf', 'core.adf', 'state.adf'],
   };
+
+  // --emit-pointers: generate thin pointer files that redirect to .ai/
+  const emitPointers = args.includes('--emit-pointers') || args.includes('--pointers');
+  if (emitPointers) {
+    const pointerSpecs: Array<{ file: string; content: string; label: string }> = [
+      { file: 'CLAUDE.md', content: POINTER_CLAUDE_MD, label: 'CLAUDE.md (thin pointer)' },
+      { file: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
+      { file: 'agents.md', content: POINTER_AGENTS_MD, label: 'agents.md (thin pointer)' },
+    ];
+    const createdPointers: string[] = [];
+    const skippedPointers: string[] = [];
+
+    for (const spec of pointerSpecs) {
+      if (fs.existsSync(spec.file)) {
+        skippedPointers.push(spec.file);
+      } else {
+        fs.writeFileSync(spec.file, spec.content);
+        createdPointers.push(spec.file);
+        result.files.push(spec.file);
+      }
+    }
+    result.pointers = createdPointers;
+
+    if (options.format !== 'json') {
+      for (const p of createdPointers) {
+        const label = pointerSpecs.find(s => s.file === p)?.label ?? p;
+        console.log(`  Generated ${label}`);
+      }
+      for (const p of skippedPointers) {
+        console.log(`  Skipped ${p} (already exists)`);
+      }
+    }
+  }
 
   if (options.format === 'json') {
     console.log(JSON.stringify({
@@ -418,12 +512,52 @@ interface AdfSyncResult {
 }
 
 function adfSync(options: CLIOptions, args: string[]): number {
+  // --explain: output lockfile schema documentation and exit
+  if (args.includes('--explain')) {
+    const explanation = {
+      format: '.adf.lock',
+      description: 'Flat JSON map of ADF source files to SHA-256 hash prefixes (16 hex chars)',
+      schema: {
+        type: 'object',
+        pattern: '{ "<filename>.adf": "<sha256-prefix-16>" }',
+        example: {
+          'core.adf': '54d5c9a146d6da3c',
+          'state.adf': 'a1b2c3d4e5f67890',
+        },
+      },
+      hashAlgorithm: 'SHA-256, first 16 hex characters',
+      commands: {
+        check: 'charter adf sync --check \u2014 verify sources match locked hashes',
+        write: 'charter adf sync --write \u2014 update lock with current hashes',
+      },
+      location: '.ai/.adf.lock (relative to AI directory)',
+      purpose: 'Detect when ADF source files have changed since last sync. Used in CI to enforce governance drift checks.',
+    };
+
+    if (options.format === 'json') {
+      console.log(JSON.stringify(explanation, null, 2));
+    } else {
+      console.log('ADF Sync Lock Format (.adf.lock)');
+      console.log('================================\n');
+      console.log('Format: Flat JSON map of source files to hash prefixes\n');
+      console.log('Schema: { "<filename>.adf": "<sha256-prefix-16>" }\n');
+      console.log('Hash: SHA-256, first 16 hex characters\n');
+      console.log('Location: .ai/.adf.lock\n');
+      console.log('Commands:');
+      console.log('  sync --check  Verify sources match locked hashes');
+      console.log('  sync --write  Update lock with current hashes');
+      console.log('  sync --explain  Show this schema documentation\n');
+      console.log('Purpose: Detect ADF source drift. Used in CI governance checks.');
+    }
+    return EXIT_CODE.SUCCESS;
+  }
+
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const checkMode = args.includes('--check');
   const writeMode = args.includes('--write');
 
   if (!checkMode && !writeMode) {
-    throw new CLIError('adf sync requires --check or --write. Usage: charter adf sync --check');
+    throw new CLIError('adf sync requires --check, --write, or --explain. Usage: charter adf sync --check');
   }
 
   const manifestPath = path.join(aiDir, 'manifest.adf');
@@ -800,8 +934,9 @@ function printHelp(): void {
   console.log('  charter adf — Attention-Directed Format tools');
   console.log('');
   console.log('  Usage:');
-  console.log('    charter adf init [--ai-dir <dir>] [--force]');
+  console.log('    charter adf init [--ai-dir <dir>] [--force] [--emit-pointers]');
   console.log('      Scaffold .ai/ directory with manifest, core, and state modules.');
+  console.log('      --emit-pointers: also generate thin pointer files (CLAUDE.md, .cursorrules, agents.md)');
   console.log('');
   console.log('    charter adf fmt <file> [--check] [--write]');
   console.log('      Parse and reformat an ADF file to canonical form.');
@@ -821,6 +956,9 @@ function printHelp(): void {
   console.log('');
   console.log('    charter adf sync --write [--ai-dir <dir>]');
   console.log('      Update .adf.lock with current source hashes.');
+  console.log('');
+  console.log('    charter adf sync --explain');
+  console.log('      Show .adf.lock schema documentation.');
   console.log('');
   console.log('    charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]');
   console.log('                        [--context \'{"key": value}\']');

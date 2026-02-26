@@ -15,6 +15,7 @@ import { classifyCommand } from './commands/classify';
 import { quickstartCommand, whyCommand } from './commands/why';
 import { hookCommand } from './commands/hook';
 import { adfCommand } from './commands/adf';
+import { bootstrapCommand } from './commands/bootstrap';
 import packageJson from '../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -24,6 +25,8 @@ charter - repo-level governance toolkit
 
 Usage:
   charter                          Show immediate governance value + risk snapshot
+  charter bootstrap [--ci github] [--preset <name>] [--yes] [--skip-install] [--skip-doctor]
+                                   One-command repo onboarding (detect + setup + ADF + install + doctor)
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
   charter init [--preset <worker|frontend|backend|fullstack>]
@@ -107,6 +110,8 @@ export async function run(args: string[]): Promise<number> {
   const restArgs = args.slice(1);
 
   switch (command) {
+    case 'bootstrap':
+      return bootstrapCommand(options, restArgs);
     case 'setup':
       return setupCommand(options, restArgs);
     case 'init':
