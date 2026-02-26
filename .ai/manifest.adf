@@ -20,6 +20,10 @@ ADF: 0.1
 
 📊 METRICS:
   ADF_COMMANDS_LOC: packages/cli/src/commands/adf.ts
+  ADF_BUNDLE_LOC: packages/cli/src/commands/adf-bundle.ts
+  ADF_SYNC_LOC: packages/cli/src/commands/adf-sync.ts
+  ADF_EVIDENCE_LOC: packages/cli/src/commands/adf-evidence.ts
+  ADF_MIGRATE_LOC: packages/cli/src/commands/adf-migrate.ts
   BUNDLER_LOC: packages/adf/src/bundler.ts
   PARSER_LOC: packages/adf/src/parser.ts
   CLI_ENTRY_LOC: packages/cli/src/index.ts

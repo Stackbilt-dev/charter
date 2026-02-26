@@ -18,7 +18,11 @@ ADF: 0.1
   - Use pnpm exec tsc instead of npx tsc in WSL
 
 📊 METRICS [load-bearing]:
-  adf_commands_loc: 834 / 900 [lines]
-  bundler_loc: 388 / 500 [lines]
-  parser_loc: 213 / 300 [lines]
-  cli_entry_loc: 141 / 200 [lines]
+  adf_commands_loc: 0 / 500 [lines]
+  adf_bundle_loc: 0 / 200 [lines]
+  adf_sync_loc: 0 / 250 [lines]
+  adf_evidence_loc: 0 / 300 [lines]
+  adf_migrate_loc: 0 / 500 [lines]
+  bundler_loc: 0 / 500 [lines]
+  parser_loc: 0 / 300 [lines]
+  cli_entry_loc: 0 / 200 [lines]
