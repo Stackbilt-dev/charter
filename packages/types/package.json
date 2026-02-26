@@ -27,5 +27,8 @@
     "url": "https://github.com/Stackbilt-dev/charter/issues"
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "Apache-2.0"
 }
