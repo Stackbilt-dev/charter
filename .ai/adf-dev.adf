@@ -3,12 +3,16 @@ ADF: 0.1
 🎯 TASK: ADF package development context
 
 📋 CONTEXT:
-  - Source: packages/adf/src/ (types.ts, parser.ts, formatter.ts, patcher.ts, bundler.ts, errors.ts)
+  - Source: packages/adf/src/ (types.ts, parser.ts, formatter.ts, patcher.ts, bundler.ts, errors.ts, validator.ts)
+  - CLI commands: packages/cli/src/commands/adf.ts (init, fmt, patch, bundle, sync, evidence)
   - Tests: packages/adf/src/__tests__/ (vitest)
   - Content types: text, list, map, metric
   - Patch ops: ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION, UPDATE_METRIC
   - Section weight: load-bearing (measurable constraint) or advisory (preference)
   - Canonical key order: TASK, ROLE, CONTEXT, OUTPUT, CONSTRAINTS, RULES, DEFAULT_LOAD, ON_DEMAND, BUDGET, FILES, TOOLS, RISKS, STATE
+  - Lockfile: .adf.lock is a flat JSON map { "file.adf": "sha256-prefix-16" }
+  - Hash algo: crypto.createHash('sha256').update(content).digest('hex').slice(0, 16)
+  - Sync: loadLockFile / hashSource in packages/cli/src/commands/adf.ts
 
 ⚠ CONSTRAINTS [load-bearing]:
   - ADF package has zero runtime dependencies
