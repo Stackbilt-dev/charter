@@ -16,13 +16,16 @@
     "scorecard:generate": "node scripts/generate-scorecard.mjs",
     "scorecard:validate": "node scripts/validate-scorecard.mjs",
     "docs:sync": "node scripts/docs-sync.mjs --write",
-    "docs:check": "node scripts/docs-sync.mjs --check"
+    "docs:check": "node scripts/docs-sync.mjs --check",
+    "charter:detect": "charter setup --detect-only --format json",
+    "charter:setup": "charter setup --preset fullstack --ci github --yes"
   },
   "packageManager": "pnpm@9.15.9",
   "devDependencies": {
     "@types/node": "^25.2.3",
     "typescript": "~5.8.2",
     "vitest": "^4.0.18",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@stackbilt/cli": "0.3.2"
   }
 }
