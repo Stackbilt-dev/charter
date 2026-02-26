@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.4.0] - 2026-02-26
+
+### Added
+- **`charter hook install --pre-commit`**: New flag installs a git pre-commit hook that runs `charter adf evidence --auto-measure --ci` before each commit. Only gates when `.ai/manifest.adf` exists -- no-op otherwise. Uses `npx charter` for consuming repos. Both `--commit-msg` and `--pre-commit` can be passed together. Same skip/overwrite pattern with independent markers per hook type.
+- **Evidence pre-commit gate (this repo)**: `.githooks/pre-commit` now runs ADF evidence checks after typecheck, preventing LOC ceiling breaches from being committed. This is the self-regulating mechanism for unattended agent builds.
+
+### Changed
+- **`adf.ts` split into 4 files**: `adf.ts` (966 LOC) refactored into `adf.ts` (412), `adf-bundle.ts` (153), `adf-sync.ts` (203), and `adf-evidence.ts` (262). Each file is independently tracked by its own METRICS ceiling. No behavioral changes -- purely structural.
+- **METRICS expanded from 4 to 8 entries**: `manifest.adf` and `core.adf` now track `adf_commands_loc`, `adf_bundle_loc`, `adf_sync_loc`, `adf_evidence_loc`, `adf_migrate_loc`, `bundler_loc`, `parser_loc`, `cli_entry_loc` with appropriately sized ceilings.
+- **`hook install` error message updated**: Now accepts `--commit-msg` and/or `--pre-commit` (previously required `--commit-msg` only).
+- 178 tests across 12 test files (unchanged).
+
+## [0.3.4] - 2026-02-26
+
+### Added
+- **`charter adf migrate` command**: Scans existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md, copilot-instructions.md), classifies content using the ADX-002 decision tree, and migrates structured blocks into ADF modules. Replaces originals with thin pointers retaining environment-specific rules. Supports `--dry-run`, `--source`, `--no-backup`, and `--merge-strategy append|dedupe|replace`.
+- **Markdown section parser** (`parseMarkdownSections`): Pure parser that splits markdown on H2 headings and classifies sub-elements as rules (with imperative/advisory/neutral strength detection), code blocks, table rows, or prose. Exported from `@stackbilt/adf`.
+- **Content classifier** (`classifyElement`, `buildMigrationPlan`, `isDuplicateItem`): Deterministic rule-routing decision tree that classifies markdown elements into STAY (env/runtime) or MIGRATE (to ADF CONSTRAINTS/CONTEXT/ADVISORY). Jaccard similarity (0.8 threshold) for deduplication. Exported from `@stackbilt/adf`.
+- **GUIDE section type**: New `GUIDE` decoration (`📖`) added to ADF standard decorations and canonical key order. The rule-routing decision tree in `core.adf` scaffold is now a first-class GUIDE section that survives `adf fmt --write` round-trips.
+
+### Changed
+- **Trigger keyword stemming**: `resolveModules()` now uses prefix matching with a 66% length ratio threshold so `ingest` matches `ingestion`/`ingesting` without false-positives like `React` matching `Reactive`.
+- **Bootstrap overwrite protection** (ADX-004 P0): `charter bootstrap` now detects existing custom ADF content in `.ai/core.adf` and skips scaffold overwrite, suggesting `charter adf migrate` instead. Pointer generation also skips files with custom content.
+- **CORE_SCAFFOLD updated**: Rule-routing decision tree converted from `#` comments (which `adf fmt --write` strips) to a `GUIDE [advisory]` section that persists through parse/format cycles (ADX-004 P4).
+
 ## [0.3.3] - 2026-02-26
 
 ### Added
@@ -278,6 +303,9 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.4.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.4...v0.4.0
+[0.3.4]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.2.0...v0.3.0

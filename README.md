@@ -38,6 +38,9 @@ charter adf patch .ai/state.adf --ops '[{"op":"ADD_BULLET","section":"STATE","va
 # Bundle context for a specific task -- resolves manifest triggers automatically
 charter adf bundle --task "Fix the React login component"
 
+# Migrate existing agent configs (CLAUDE.md, .cursorrules, etc.) into ADF modules
+charter adf migrate --dry-run
+
 # Verify source .adf files haven't drifted from locked hashes
 charter adf sync --check
 
@@ -92,14 +95,18 @@ Here is the actual output from Charter's dogfood run:
   ADF Evidence Report
   ===================
   Modules loaded: core.adf, state.adf
-  Token estimate: ~342
+  Token estimate: ~371
   Token budget: 4000 (9%)
 
   Auto-measured:
-    adf_commands_loc: 835 lines (packages/cli/src/commands/adf.ts)
-    bundler_loc: 389 lines (packages/adf/src/bundler.ts)
+    adf_commands_loc: 413 lines (packages/cli/src/commands/adf.ts)
+    adf_bundle_loc: 154 lines (packages/cli/src/commands/adf-bundle.ts)
+    adf_sync_loc: 204 lines (packages/cli/src/commands/adf-sync.ts)
+    adf_evidence_loc: 263 lines (packages/cli/src/commands/adf-evidence.ts)
+    adf_migrate_loc: 453 lines (packages/cli/src/commands/adf-migrate.ts)
+    bundler_loc: 415 lines (packages/adf/src/bundler.ts)
     parser_loc: 214 lines (packages/adf/src/parser.ts)
-    cli_entry_loc: 142 lines (packages/cli/src/index.ts)
+    cli_entry_loc: 149 lines (packages/cli/src/index.ts)
 
   Section weights:
     Load-bearing: 2
@@ -107,10 +114,14 @@ Here is the actual output from Charter's dogfood run:
     Unweighted: 3
 
   Constraints:
-    [ok] adf_commands_loc: 835 / 900 [lines] -- PASS
-    [ok] bundler_loc: 389 / 500 [lines] -- PASS
+    [ok] adf_commands_loc: 413 / 500 [lines] -- PASS
+    [ok] adf_bundle_loc: 154 / 200 [lines] -- PASS
+    [ok] adf_sync_loc: 204 / 250 [lines] -- PASS
+    [ok] adf_evidence_loc: 263 / 300 [lines] -- PASS
+    [ok] adf_migrate_loc: 453 / 500 [lines] -- PASS
+    [ok] bundler_loc: 415 / 500 [lines] -- PASS
     [ok] parser_loc: 214 / 300 [lines] -- PASS
-    [ok] cli_entry_loc: 142 / 200 [lines] -- PASS
+    [ok] cli_entry_loc: 149 / 200 [lines] -- PASS
 
   Sync: all sources in sync
 
@@ -120,8 +131,9 @@ Here is the actual output from Charter's dogfood run:
 What this shows:
 
 - **Metric ceilings enforce LOC limits on source files.** Each key in the `METRICS` section of an `.adf` module declares a ceiling. The `--auto-measure` flag counts lines live from the source files referenced in the manifest.
-- **Real governance pressure.** `adf_commands_loc` sits at 93% of its 900-line ceiling (835/900). That is a signal to the team that the file is approaching the point where it should be split or refactored.
+- **Self-correcting architecture.** When `adf_commands_loc` hit 93% of its 900-line ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into four focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
 - **CI gating.** Running `charter adf evidence --ci` exits 1 if any ceiling is breached, blocking the merge. Warnings near the boundary surface in the report but do not fail the build.
+- **Pre-commit enforcement.** `charter hook install --pre-commit` installs a git hook that runs evidence checks before every commit. When an agent runs unattended, ceiling breaches block the commit and force a split/refactor.
 - **Available to any repo.** This is the same system you get by running `charter adf init` in your own project.
 
 ## Why Charter
@@ -200,7 +212,8 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter drift [--path <dir>] [--ci]`: run drift scan
 - `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
-- `charter hook install --commit-msg`: install commit-msg trailer normalization hook
+- `charter hook install --commit-msg [--force]`: install commit-msg trailer normalization hook
+- `charter hook install --pre-commit [--force]`: install pre-commit ADF evidence gate (LOC ceiling checks)
 - `charter adf init [--ai-dir <dir>] [--force]`: scaffold `.ai/` context directory with manifest, core, and state modules
 - `charter adf fmt <file> [--check] [--write]`: parse and reformat ADF files to canonical form
 - `charter adf patch <file> --ops <json> | --ops-file <path>`: apply typed delta operations to ADF files
@@ -208,6 +221,7 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter adf sync --check [--ai-dir <dir>]`: verify source .adf files match locked hashes (exit 1 on drift)
 - `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current source hashes
 - `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce structured evidence report
+- `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: ingest existing agent config files and migrate content into ADF modules
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
