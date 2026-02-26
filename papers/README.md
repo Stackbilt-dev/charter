@@ -4,11 +4,12 @@ This directory contains versioned white papers documenting the design rationale,
 quantitative analysis, and architectural decisions behind Charter Kit and the
 Attention-Directed Format (ADF).
 
-## Published Papers
+## Papers
 
 | ID | Title | Version | Date | Status |
 |---|---|---|---|---|
 | CSA-001 | [Context-as-Code](./context-as-code-v1.1.md) | 1.1 | 2026-02-26 | Published |
+| CSA-002 | [Context-as-Code II: Greenfield](./context-as-code-greenfield-v0.1.md) | 0.1 | 2026-02-26 | Draft |
 
 ## Versioning Convention
 
