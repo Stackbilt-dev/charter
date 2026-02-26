@@ -1,5 +1,6 @@
 {
   "name": "@stackbilt/validate",
+  "sideEffects": false,
   "version": "0.3.1",
   "description": "Citation validation, message classification, and governance checks",
   "main": "./dist/index.js",

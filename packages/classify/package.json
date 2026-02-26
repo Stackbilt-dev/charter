@@ -1,5 +1,6 @@
 {
   "name": "@stackbilt/classify",
+  "sideEffects": false,
   "version": "0.3.1",
   "description": "Heuristic change classification (SURFACE/LOCAL/CROSS_CUTTING)",
   "main": "./dist/index.js",
