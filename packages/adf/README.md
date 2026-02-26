@@ -207,6 +207,22 @@ Validate all metric entries against their ceilings. Returns a structured evidenc
 
 Count sections by weight category (`load-bearing`, `advisory`, unweighted). Useful independently from constraint validation.
 
+### `parseMarkdownSections(input: string): MarkdownSection[]`
+
+Parse a markdown string into structured sections. Splits on `## ` (H2) headings; content before the first H2 becomes a preamble section. Within each section, sub-elements are classified as rules (with imperative/advisory/neutral strength detection), code blocks (with language tag), table rows, or prose.
+
+### `classifyElement(element: MarkdownElement, heading: string): ClassificationResult`
+
+Classify a single markdown element into an ADF routing decision. Returns STAY (environment/runtime content that should remain in the vendor file) or MIGRATE (with target section, module, and weight). Uses deterministic heuristics based on NEVER/ALWAYS/MUST patterns, heading context, and element type.
+
+### `buildMigrationPlan(sections: MarkdownSection[], existingAdf?: AdfDocument): MigrationPlan`
+
+Build a complete migration plan from parsed markdown sections. If `existingAdf` is provided, uses Jaccard similarity deduplication to skip items already present in the ADF document. Returns classified items, STAY/MIGRATE split, target modules, and summary counts.
+
+### `isDuplicateItem(existing: string, candidate: string): boolean`
+
+Check if two text items are duplicates using Jaccard word similarity with a 0.8 (80%) threshold.
+
 ## AST Types
 
 ```ts

@@ -163,7 +163,7 @@ export function resolveModules(manifest: Manifest, taskKeywords: string[]): stri
 
   for (const mod of manifest.onDemand) {
     for (const trigger of mod.triggers) {
-      if (lowerKeywords.includes(trigger.toLowerCase())) {
+      if (matchesTrigger(trigger, lowerKeywords)) {
         resolved.add(mod.path);
         break;
       }
@@ -171,6 +171,28 @@ export function resolveModules(manifest: Manifest, taskKeywords: string[]): stri
   }
 
   return [...resolved];
+}
+
+/**
+ * Match a trigger against task keywords with prefix stemming.
+ * Exact match always wins. Prefix match requires:
+ *   - minimum 4 chars on the prefix
+ *   - the prefix must be at least 75% of the longer string's length
+ *     (avoids false positives like React → Reactive)
+ */
+function matchesTrigger(trigger: string, keywords: string[]): boolean {
+  const t = trigger.toLowerCase();
+  for (const k of keywords) {
+    if (k === t) return true;
+    if (t.length >= 4 && k.startsWith(t) && isPrefixStem(t, k)) return true;
+    if (k.length >= 4 && t.startsWith(k) && isPrefixStem(k, t)) return true;
+  }
+  return false;
+}
+
+/** Check if prefix is plausibly a stem of the full word (≥66% length ratio). */
+function isPrefixStem(prefix: string, full: string): boolean {
+  return prefix.length / full.length >= 0.66;
 }
 
 // ============================================================================
@@ -282,9 +304,13 @@ function buildTriggerReport(
 
   for (const mod of manifest.onDemand) {
     for (const trigger of mod.triggers) {
-      const matchedKeywords = lowerKeywords.filter(
-        k => k === trigger.toLowerCase()
-      );
+      const t = trigger.toLowerCase();
+      const matchedKeywords = lowerKeywords.filter(k => {
+        if (k === t) return true;
+        if (t.length >= 4 && k.startsWith(t) && isPrefixStem(t, k)) return true;
+        if (k.length >= 4 && t.startsWith(k) && isPrefixStem(k, t)) return true;
+        return false;
+      });
       const isResolved = resolvedPaths.includes(mod.path);
       const isDefault = defaultLoadSet.has(mod.path);
       matches.push({

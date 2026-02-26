@@ -59,6 +59,7 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   BUDGET: '\u{1F4B0}',
   SYNC: '\u{1F504}',
   CADENCE: '\u{1F4CA}',
+  GUIDE: '\u{1F4D6}',
 };
 
 export const CANONICAL_KEY_ORDER: string[] = [
@@ -77,6 +78,7 @@ export const CANONICAL_KEY_ORDER: string[] = [
   'TOOLS',
   'RISKS',
   'STATE',
+  'GUIDE',
 ];
 
 // ============================================================================
