@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/drift",
   "sideEffects": false,
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Drift scanner \u2014 detects codebase divergence from governance patterns",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
