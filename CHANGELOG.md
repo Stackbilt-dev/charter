@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.3.2] - 2026-02-26
+
+### Added
+- **Lockfile types exported**: `AdfLockfile` and `AdfSyncStatus` interfaces now exported from `@stackbilt/adf` public API, giving agents `.d.ts` visibility into the `.adf.lock` schema without reverse-engineering compiled output.
+- **Lockfile schema documented**: `.adf.lock` format (flat JSON map of `filename → sha256-prefix-16`) documented in the `@stackbilt/adf` README.
+- **`pnpm run dev` watch script**: New `tsc --build --watch` dev script for incremental rebuilds during local development via `tsconfig.build.json`.
+- **Research papers directory**: `papers/` with versioned white papers (CSA-001: Context-as-Code v1.1, CSA-002: Greenfield measurement rubric draft) and Architect v2 integration brief.
+
+### Changed
+- **Build uses `tsconfig.build.json`**: Root build script replaced hardcoded 9-path `tsc --build` invocation with a `tsconfig.build.json` reference file. TypeScript resolves build order from project references automatically.
+- **Publish workflow simplified**: PUBLISHING.md no longer instructs manual `workspace:^` replacement — PNPM handles this at publish time. Publish commands no longer need `--access public` flag.
+- **`publishConfig.access: "public"`** declared in all 9 packages (previously only cli and adf).
+- **`sideEffects: false`** declared in all 9 packages for bundler tree-shaking.
+
 ## [0.3.1] - 2026-02-25
 
 ### Added
@@ -249,6 +263,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.3.2]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/stackbilt-dev/charter-kit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/stackbilt-dev/charter-kit/compare/v0.1.20...v0.2.0
