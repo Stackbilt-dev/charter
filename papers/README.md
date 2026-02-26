@@ -10,6 +10,10 @@ Attention-Directed Format (ADF).
 |---|---|---|---|---|
 | CSA-001 | [Context-as-Code](./context-as-code-v1.1.md) | 1.1 | 2026-02-26 | Published |
 | CSA-002 | [Context-as-Code II: Greenfield](./context-as-code-greenfield-v0.1.md) | 0.1 | 2026-02-26 | Draft |
+| ADX-001 | [Agent DX Feedback: Lockfile Schema Discoverability](./AGENT_DX_FEEDBACK_001.md) | n/a | 2026-02-26 | Draft |
+| ADX-002 | [Agent DX Feedback: ADF Greenfield Bootstrapping — Rule Routing Friction](./AGENT_DX_FEEDBACK_002.md) | n/a | 2026-02-26 | Draft |
+| ADX-003 | [Agent DX Feedback: Install/Setup Automation Friction (Windows + PNPM Workspace)](./AGENT_DX_FEEDBACK_003.md) | n/a | 2026-02-26 | Draft |
+| RM-001 | [ADF vNext Roadmap (Draft): Agent DX-Driven Priorities](./adf-vnext-roadmap-v0.1.md) | 0.1 | 2026-02-26 | Draft |
 
 ## Versioning Convention
 
