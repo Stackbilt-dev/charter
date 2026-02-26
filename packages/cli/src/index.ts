@@ -37,9 +37,11 @@ Usage:
                                    Generate governance audit report
   charter drift [--path <dir>]     Scan files for pattern drift
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
-  charter hook install --commit-msg
+  charter hook install --commit-msg [--force]
                                    Install git commit-msg hook for trailer normalization
-  charter adf <subcommand>         ADF context format tools (init, fmt, patch, bundle, sync, evidence)
+  charter hook install --pre-commit [--force]
+                                   Install git pre-commit hook for ADF evidence gate
+  charter adf <subcommand>         ADF context format tools (init, fmt, patch, bundle, sync, evidence, migrate)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor                   Check CLI + config health
   charter --help                   Show this help

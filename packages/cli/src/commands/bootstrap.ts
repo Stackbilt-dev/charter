@@ -410,7 +410,9 @@ function runAdfInitPhase(
 
     // Create .ai/ scaffolds
     const alreadyExists = fs.existsSync(manifestPath);
-    if (!alreadyExists || force) {
+    const hasCustomContent = alreadyExists && hasCustomAdfContent(aiDir);
+    if (!alreadyExists) {
+      // Greenfield: write scaffolds
       fs.mkdirSync(aiDir, { recursive: true });
       fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
       fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
@@ -418,6 +420,25 @@ function runAdfInitPhase(
       files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf');
 
       // Write .adf.lock
+      const lockData: Record<string, string> = {};
+      for (const mod of ['core.adf', 'state.adf']) {
+        const content = fs.readFileSync(path.join(aiDir, mod), 'utf-8');
+        lockData[mod] = hashContent(content);
+      }
+      fs.writeFileSync(path.join(aiDir, '.adf.lock'), JSON.stringify(lockData, null, 2) + '\n');
+      files.push('.ai/.adf.lock');
+    } else if (hasCustomContent && !force) {
+      // Custom ADF content exists — don't overwrite, suggest migrate
+      warnings.push('.ai/ contains custom ADF content; skipping scaffold overwrite');
+      warnings.push("Run 'charter adf migrate' to consolidate agent configs into ADF");
+    } else if (force) {
+      // Force overwrite
+      fs.mkdirSync(aiDir, { recursive: true });
+      fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
+      fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
+      fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
+      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf');
+
       const lockData: Record<string, string> = {};
       for (const mod of ['core.adf', 'state.adf']) {
         const content = fs.readFileSync(path.join(aiDir, mod), 'utf-8');
@@ -439,7 +460,13 @@ function runAdfInitPhase(
     for (const pf of pointerFiles) {
       const pointerPath = path.resolve(pf.name);
       const exists = fs.existsSync(pointerPath);
-      if (!exists || force) {
+      if (!exists) {
+        fs.writeFileSync(pointerPath, pf.content);
+        pointers.push(pf.label);
+      } else if (exists && !isAlreadyThinPointer(pointerPath)) {
+        // File has custom content — don't overwrite, suggest migrate
+        warnings.push(`${pf.name} has custom content; skipping pointer (use 'charter adf migrate' first)`);
+      } else if (force) {
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
       } else {
@@ -669,4 +696,32 @@ function isValidPreset(value: string | undefined): value is StackPreset {
 
 function hashContent(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
+
+/**
+ * Check if .ai/core.adf has content beyond the scaffold template.
+ */
+function hasCustomAdfContent(aiDir: string): boolean {
+  const coreAdfPath = path.join(aiDir, 'core.adf');
+  if (!fs.existsSync(coreAdfPath)) return false;
+  try {
+    const content = fs.readFileSync(coreAdfPath, 'utf-8');
+    // Check if the file has been modified from default scaffold
+    // A custom file will have different content than the CORE_SCAFFOLD
+    return content.trim() !== CORE_SCAFFOLD.trim();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a file is already a thin ADF pointer.
+ */
+function isAlreadyThinPointer(filePath: string): boolean {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return content.includes('Do not duplicate ADF rules here');
+  } catch {
+    return false;
+  }
 }

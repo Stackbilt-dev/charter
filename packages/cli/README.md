@@ -65,6 +65,7 @@ charter hook install --commit-msg
 charter adf init             # scaffold .ai/ context directory
 charter adf fmt .ai/core.adf # reformat ADF to canonical form
 charter adf bundle --task "fix React component"
+charter adf migrate --dry-run  # preview agent config → ADF migration
 charter adf sync --check     # verify .adf files match locked hashes
 charter adf evidence --auto-measure --format json  # validate metric ceilings
 ```
@@ -134,6 +135,7 @@ npx charter drift --ci --format json
 npx charter audit --format json
 
 # ADF context management
+npx charter adf migrate --dry-run --format json
 npx charter adf evidence --auto-measure --format json --ci
 npx charter adf sync --check --format json
 
@@ -251,13 +253,17 @@ charter classify "update button color"
 
 ### `charter hook`
 
-Install git hooks for commit-time trailer ergonomics.
+Install git hooks for commit-time governance ergonomics.
 
 ```bash
 charter hook install --commit-msg
+charter hook install --pre-commit
 ```
 
-`--force` (or global `--yes`) allows overwrite when a non-Charter `commit-msg` hook already exists.
+- `--commit-msg`: Install a commit-msg hook that normalizes `Governed-By` and `Resolves-Request` trailers using `git interpret-trailers`.
+- `--pre-commit`: Install a pre-commit hook that runs `charter adf evidence --auto-measure --ci` before each commit. Only gates when `.ai/manifest.adf` exists — no-op otherwise. Uses `npx charter` so consuming repos need Charter as a devDependency.
+- `--force` (or global `--yes`) allows overwrite when a non-Charter hook already exists.
+- Both flags can be passed together to install both hooks in one command.
 
 ### `charter adf`
 
@@ -272,6 +278,8 @@ charter adf sync --check [--ai-dir <dir>]
 charter adf sync --write [--ai-dir <dir>]
 charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]
                      [--context '{"key": value}'] [--context-file <path>]
+charter adf migrate [--dry-run] [--source <file>] [--no-backup]
+                    [--merge-strategy append|dedupe|replace] [--ai-dir <dir>]
 ```
 
 - `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, and `state.adf`. Core module includes a 500-line LOC guardrail metric by default.
@@ -281,6 +289,7 @@ charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]
 - `sync --check`: Verify source `.adf` files match their locked hashes. Exits 1 if any source has drifted since last sync.
 - `sync --write`: Update `.adf.lock` with current source hashes.
 - `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail). The governance workflow template runs this automatically on PRs when `.ai/manifest.adf` is present.
+- `migrate`: Scan existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md, copilot-instructions.md), classify content using the ADX-002 decision tree, and migrate into ADF modules. `--dry-run` previews the migration plan without writing files. `--source <file>` targets a single file. `--no-backup` skips `.pre-adf-migrate.bak` creation. `--merge-strategy` controls deduplication: `dedupe` (default, skip items already in ADF), `append` (always add), or `replace`. Environment-specific rules (WSL, PATH, credential helpers) are retained in the thin pointer.
 
 #### Evidence Example (from Charter's own repo)
 
@@ -295,10 +304,14 @@ Produces constraint checks against live source file line counts:
 ```json
 {
   "constraints": [
-    { "metric": "adf_commands_loc", "value": 835, "ceiling": 900, "status": "pass", "source": "context" },
-    { "metric": "bundler_loc", "value": 389, "ceiling": 500, "status": "pass", "source": "context" },
+    { "metric": "adf_commands_loc", "value": 413, "ceiling": 500, "status": "pass", "source": "context" },
+    { "metric": "adf_bundle_loc", "value": 154, "ceiling": 200, "status": "pass", "source": "context" },
+    { "metric": "adf_sync_loc", "value": 204, "ceiling": 250, "status": "pass", "source": "context" },
+    { "metric": "adf_evidence_loc", "value": 263, "ceiling": 300, "status": "pass", "source": "context" },
+    { "metric": "adf_migrate_loc", "value": 453, "ceiling": 500, "status": "pass", "source": "context" },
+    { "metric": "bundler_loc", "value": 415, "ceiling": 500, "status": "pass", "source": "context" },
     { "metric": "parser_loc", "value": 214, "ceiling": 300, "status": "pass", "source": "context" },
-    { "metric": "cli_entry_loc", "value": 142, "ceiling": 200, "status": "pass", "source": "context" }
+    { "metric": "cli_entry_loc", "value": 149, "ceiling": 200, "status": "pass", "source": "context" }
   ],
   "allPassing": true,
   "failCount": 0,

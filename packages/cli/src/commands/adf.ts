@@ -1,24 +1,23 @@
 /**
  * charter adf
  *
- * ADF (Attention-Directed Format) subcommands: init, fmt, patch, bundle, sync.
+ * ADF (Attention-Directed Format) subcommands: init, fmt, patch, bundle, sync, evidence, migrate.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import {
   parseAdf,
   formatAdf,
   applyPatches,
-  parseManifest,
-  resolveModules,
-  bundleModules,
-  validateConstraints,
 } from '@stackbilt/adf';
-import type { PatchOperation, EvidenceResult } from '@stackbilt/adf';
+import type { PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { adfMigrateCommand } from './adf-migrate';
+import { adfBundle } from './adf-bundle';
+import { adfSync } from './adf-sync';
+import { adfEvidence } from './adf-evidence';
 
 // ============================================================================
 // Scaffold Content
@@ -42,35 +41,15 @@ export const MANIFEST_SCAFFOLD = `ADF: 0.1
 
 export const CORE_SCAFFOLD = `ADF: 0.1
 
-# Rule Routing Guide (remove after initial setup)
-# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-# Where does each rule belong?
-#
-# Pure runtime/environment? (OS, line endings, shell)
-#   \u2192 CLAUDE.md (not ADF)
-#
-# Universal architecture constraint? (platform choice, tenant isolation)
-#   \u2192 core.adf CONSTRAINTS [load-bearing]
-#
-# Stack-specific operational rule? (wrangler flags, D1 batching)
-#   \u2192 domain-specific .adf module (backend.adf, frontend.adf)
-#
-# Agent identity/behavior? ("You ARE the X agent", bias toward action)
-#   \u2192 core.adf CONTEXT
-#
-# Language/tooling discipline? (type checks, enum safety)
-#   \u2192 core.adf CONSTRAINTS or dedicated section
-#
-# Section weight guide:
-#   [load-bearing] = violation causes incorrect output
-#   [advisory]     = best practice, not enforced
-#   (no tag)       = informational context
-#
-# Section types (open taxonomy, custom sections allowed):
-#   CONTEXT   \u2014 factual project/agent identity
-#   CONSTRAINTS \u2014 must/never rules
-#   ADVISORY  \u2014 should/prefer guidance
-#   METRICS   \u2014 quantitative ceilings (key: value / ceiling [unit])
+\u{1F4D6} GUIDE [advisory]:
+  - Pure runtime/environment? (OS, line endings) \u2192 CLAUDE.md, not ADF
+  - Universal architecture constraint? \u2192 core.adf CONSTRAINTS [load-bearing]
+  - Stack-specific operational rule? \u2192 domain .adf module (backend.adf, frontend.adf)
+  - Agent identity/behavior? \u2192 core.adf CONTEXT
+  - Language/tooling discipline? \u2192 core.adf CONSTRAINTS or dedicated section
+  - [load-bearing] = violation causes incorrect output
+  - [advisory] = best practice, not enforced
+  - Section types are open: CONTEXT, CONSTRAINTS, ADVISORY, METRICS, custom
 
 \u26A0\uFE0F CONSTRAINTS [load-bearing]:
   - Use Conventional Commits (feat, fix, docs, chore)
@@ -113,8 +92,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfSync(options, restArgs);
     case 'evidence':
       return adfEvidence(options, restArgs);
+    case 'migrate':
+      return adfMigrateCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle, sync, evidence`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle, sync, evidence, migrate`);
   }
 }
 
@@ -129,7 +110,7 @@ interface AdfInitResult {
   pointers?: string[];
 }
 
-// ── Thin pointer file content ──
+// -- Thin pointer file content --
 
 export const POINTER_CLAUDE_MD = `# Project Context
 
@@ -360,557 +341,6 @@ function adfPatch(options: CLIOptions, args: string[]): number {
 }
 
 // ============================================================================
-// adf bundle
-// ============================================================================
-
-function adfBundle(options: CLIOptions, args: string[]): number {
-  const task = getFlag(args, '--task');
-  if (!task) {
-    throw new CLIError('adf bundle requires --task "<prompt>". Usage: charter adf bundle --task "Fix React component"');
-  }
-
-  const aiDir = getFlag(args, '--ai-dir') || '.ai';
-  const manifestPath = path.join(aiDir, 'manifest.adf');
-
-  if (!fs.existsSync(manifestPath)) {
-    throw new CLIError(`manifest.adf not found at ${manifestPath}. Run: charter adf init`);
-  }
-
-  const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
-  const manifestDoc = parseAdf(manifestContent);
-  const manifest = parseManifest(manifestDoc);
-
-  // Tokenize task into keywords (simple word split)
-  const keywords = task
-    .split(/[\s,;:()[\]{}]+/)
-    .filter(w => w.length > 1)
-    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
-
-  const modulePaths = resolveModules(manifest, keywords);
-
-  const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
-
-  try {
-    const result = bundleModules(aiDir, modulePaths, readFile, keywords);
-
-    if (options.format === 'json') {
-      const jsonOut: Record<string, unknown> = {
-        task,
-        keywords,
-        resolvedModules: result.resolvedModules,
-        tokenEstimate: result.tokenEstimate,
-        tokenBudget: result.tokenBudget,
-        tokenUtilization: result.tokenUtilization,
-        perModuleTokens: result.perModuleTokens,
-        triggerMatches: result.triggerMatches,
-      };
-      if (result.unmatchedModules.length > 0) {
-        jsonOut.unmatchedModules = result.unmatchedModules;
-      }
-      if (result.moduleBudgetOverruns.length > 0) {
-        jsonOut.moduleBudgetOverruns = result.moduleBudgetOverruns;
-      }
-      if (result.advisoryOnlyModules.length > 0) {
-        jsonOut.advisoryOnlyModules = result.advisoryOnlyModules;
-      }
-      if (result.manifest.cadence.length > 0) {
-        jsonOut.cadence = result.manifest.cadence;
-      }
-      console.log(JSON.stringify(jsonOut, null, 2));
-    } else {
-      console.log(`  Task: "${task}"`);
-      console.log(`  Keywords: ${keywords.join(', ')}`);
-      console.log(`  Resolved modules: ${result.resolvedModules.join(', ')}`);
-      console.log(`  Token estimate: ~${result.tokenEstimate}`);
-      if (result.tokenBudget !== null) {
-        const pct = result.tokenUtilization !== null
-          ? ` (${(result.tokenUtilization * 100).toFixed(0)}%)`
-          : '';
-        console.log(`  Token budget: ${result.tokenBudget}${pct}`);
-      }
-      console.log('');
-
-      if (result.moduleBudgetOverruns.length > 0) {
-        console.log('  Module budget overruns:');
-        for (const o of result.moduleBudgetOverruns) {
-          console.log(`    [!] ${o.module}: ~${o.tokens} tokens (budget: ${o.budget})`);
-        }
-        console.log('');
-      }
-
-      if (result.triggerMatches.length > 0) {
-        console.log('  Trigger report:');
-        for (const tm of result.triggerMatches) {
-          const icon = tm.matched ? '+' : '-';
-          const kw = tm.matchedKeywords.length > 0 ? ` [${tm.matchedKeywords.join(', ')}]` : '';
-          console.log(`    [${icon}] ${tm.module} (${tm.trigger})${kw}`);
-        }
-        console.log('');
-      }
-
-      if (result.unmatchedModules.length > 0) {
-        console.log('  Unmatched modules (not loaded):');
-        for (const m of result.unmatchedModules) {
-          console.log(`    [-] ${m}`);
-        }
-        console.log('');
-      }
-
-      if (result.advisoryOnlyModules.length > 0) {
-        console.log('  Advisory-only modules:');
-        for (const m of result.advisoryOnlyModules) {
-          console.log(`    [!] ${m}: no load-bearing sections`);
-        }
-        console.log('');
-      }
-
-      if (result.manifest.cadence.length > 0) {
-        console.log('  Cadence schedule:');
-        for (const c of result.manifest.cadence) {
-          console.log(`    ${c.check}: ${c.frequency}`);
-        }
-        console.log('');
-      }
-
-      // Output merged document
-      const output = formatAdf(result.mergedDocument);
-      console.log('  --- Merged Context ---');
-      console.log(output);
-    }
-    return EXIT_CODE.SUCCESS;
-  } catch (e: unknown) {
-    if (e instanceof Error && e.name === 'AdfBundleError') {
-      if (options.format === 'json') {
-        console.log(JSON.stringify({ error: e.message }, null, 2));
-      } else {
-        console.error(`  [error] ${e.message}`);
-      }
-      return EXIT_CODE.RUNTIME_ERROR;
-    }
-    throw e;
-  }
-}
-
-// ============================================================================
-// adf sync
-// ============================================================================
-
-interface SyncStatus {
-  source: string;
-  target: string;
-  sourceHash: string;
-  lockedHash: string | null;
-  inSync: boolean;
-}
-
-interface AdfSyncResult {
-  aiDir: string;
-  lockFile: string;
-  entries: SyncStatus[];
-  allInSync: boolean;
-  written: boolean;
-}
-
-function adfSync(options: CLIOptions, args: string[]): number {
-  // --explain: output lockfile schema documentation and exit
-  if (args.includes('--explain')) {
-    const explanation = {
-      format: '.adf.lock',
-      description: 'Flat JSON map of ADF source files to SHA-256 hash prefixes (16 hex chars)',
-      schema: {
-        type: 'object',
-        pattern: '{ "<filename>.adf": "<sha256-prefix-16>" }',
-        example: {
-          'core.adf': '54d5c9a146d6da3c',
-          'state.adf': 'a1b2c3d4e5f67890',
-        },
-      },
-      hashAlgorithm: 'SHA-256, first 16 hex characters',
-      commands: {
-        check: 'charter adf sync --check \u2014 verify sources match locked hashes',
-        write: 'charter adf sync --write \u2014 update lock with current hashes',
-      },
-      location: '.ai/.adf.lock (relative to AI directory)',
-      purpose: 'Detect when ADF source files have changed since last sync. Used in CI to enforce governance drift checks.',
-    };
-
-    if (options.format === 'json') {
-      console.log(JSON.stringify(explanation, null, 2));
-    } else {
-      console.log('ADF Sync Lock Format (.adf.lock)');
-      console.log('================================\n');
-      console.log('Format: Flat JSON map of source files to hash prefixes\n');
-      console.log('Schema: { "<filename>.adf": "<sha256-prefix-16>" }\n');
-      console.log('Hash: SHA-256, first 16 hex characters\n');
-      console.log('Location: .ai/.adf.lock\n');
-      console.log('Commands:');
-      console.log('  sync --check  Verify sources match locked hashes');
-      console.log('  sync --write  Update lock with current hashes');
-      console.log('  sync --explain  Show this schema documentation\n');
-      console.log('Purpose: Detect ADF source drift. Used in CI governance checks.');
-    }
-    return EXIT_CODE.SUCCESS;
-  }
-
-  const aiDir = getFlag(args, '--ai-dir') || '.ai';
-  const checkMode = args.includes('--check');
-  const writeMode = args.includes('--write');
-
-  if (!checkMode && !writeMode) {
-    throw new CLIError('adf sync requires --check, --write, or --explain. Usage: charter adf sync --check');
-  }
-
-  const manifestPath = path.join(aiDir, 'manifest.adf');
-  if (!fs.existsSync(manifestPath)) {
-    throw new CLIError(`manifest.adf not found at ${manifestPath}. Run: charter adf init`);
-  }
-
-  const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
-  const manifestDoc = parseAdf(manifestContent);
-  const manifest = parseManifest(manifestDoc);
-
-  if (manifest.sync.length === 0) {
-    const result: AdfSyncResult = {
-      aiDir,
-      lockFile: path.join(aiDir, '.adf.lock'),
-      entries: [],
-      allInSync: true,
-      written: false,
-    };
-    if (options.format === 'json') {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.log('  No SYNC entries in manifest. Nothing to check.');
-    }
-    return EXIT_CODE.SUCCESS;
-  }
-
-  const lockFile = path.join(aiDir, '.adf.lock');
-  const locked = loadLockFile(lockFile);
-
-  const entries: SyncStatus[] = [];
-  for (const entry of manifest.sync) {
-    const sourcePath = path.join(aiDir, entry.source);
-    if (!fs.existsSync(sourcePath)) {
-      throw new CLIError(`Sync source not found: ${sourcePath}`);
-    }
-    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-    const sourceHash = hashContent(sourceContent);
-    const lockedHash = locked[entry.source] ?? null;
-
-    entries.push({
-      source: entry.source,
-      target: entry.target,
-      sourceHash,
-      lockedHash,
-      inSync: lockedHash === sourceHash,
-    });
-  }
-
-  const allInSync = entries.every(e => e.inSync);
-
-  if (writeMode) {
-    const newLock: Record<string, string> = {};
-    for (const e of entries) {
-      newLock[e.source] = e.sourceHash;
-    }
-    fs.writeFileSync(lockFile, JSON.stringify(newLock, null, 2) + '\n');
-
-    const result: AdfSyncResult = {
-      aiDir,
-      lockFile,
-      entries,
-      allInSync: true,
-      written: true,
-    };
-    if (options.format === 'json') {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.log(`  [ok] Updated ${lockFile} with ${entries.length} hash${entries.length === 1 ? '' : 'es'}.`);
-    }
-    return EXIT_CODE.SUCCESS;
-  }
-
-  // --check mode
-  const result: AdfSyncResult = {
-    aiDir,
-    lockFile,
-    entries,
-    allInSync,
-    written: false,
-  };
-
-  if (options.format === 'json') {
-    const syncOut: Record<string, unknown> = { ...result };
-    if (!allInSync) {
-      syncOut.nextActions = ['Regenerate targets from source .adf files', 'charter adf sync --write'];
-    }
-    console.log(JSON.stringify(syncOut, null, 2));
-  } else {
-    for (const e of entries) {
-      if (e.inSync) {
-        console.log(`  [ok] ${e.source} -> ${e.target} (in sync)`);
-      } else if (e.lockedHash === null) {
-        console.log(`  [warn] ${e.source} -> ${e.target} (no lock entry — run: charter adf sync --write)`);
-      } else {
-        console.log(`  [fail] ${e.source} -> ${e.target} (source changed since last sync)`);
-      }
-    }
-    if (!allInSync) {
-      console.log('');
-      console.log('  Source .adf files have changed. Regenerate targets and run: charter adf sync --write');
-    }
-  }
-
-  return allInSync ? EXIT_CODE.SUCCESS : EXIT_CODE.POLICY_VIOLATION;
-}
-
-function hashContent(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
-}
-
-function loadLockFile(lockFile: string): Record<string, string> {
-  if (!fs.existsSync(lockFile)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(lockFile, 'utf-8'));
-  } catch {
-    return {};
-  }
-}
-
-// ============================================================================
-// adf evidence
-// ============================================================================
-
-interface AutoMeasurement {
-  metric: string;
-  path: string;
-  lines: number | null;
-  error?: string;
-}
-
-function adfEvidence(options: CLIOptions, args: string[]): number {
-  const task = getFlag(args, '--task');
-  const aiDir = getFlag(args, '--ai-dir') || '.ai';
-  const contextJson = getFlag(args, '--context');
-  const contextFile = getFlag(args, '--context-file');
-  const autoMeasure = args.includes('--auto-measure');
-
-  const manifestPath = path.join(aiDir, 'manifest.adf');
-  if (!fs.existsSync(manifestPath)) {
-    throw new CLIError(`manifest.adf not found at ${manifestPath}. Run: charter adf init`);
-  }
-
-  const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
-  const manifestDoc = parseAdf(manifestContent);
-  const manifest = parseManifest(manifestDoc);
-
-  // Resolve modules
-  let modulePaths: string[];
-  let keywords: string[] = [];
-  if (task) {
-    keywords = task
-      .split(/[\s,;:()[\]{}]+/)
-      .filter(w => w.length > 1)
-      .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
-    modulePaths = resolveModules(manifest, keywords);
-  } else {
-    modulePaths = [...manifest.defaultLoad];
-  }
-
-  const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
-
-  let context: Record<string, number> | undefined;
-  const rawContext = contextFile ? readJsonFlag(contextFile, '--context-file') : contextJson;
-  if (rawContext) {
-    try {
-      const parsed = JSON.parse(rawContext);
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        throw new Error('must be a JSON object');
-      }
-      context = parsed as Record<string, number>;
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new CLIError(`Invalid --context JSON: ${msg}`);
-    }
-  }
-
-  // Auto-measure: count lines in files referenced by manifest METRICS
-  // Manifest keys are UPPERCASE (parser map disambiguation), metric keys are lowercase.
-  const autoMeasured: AutoMeasurement[] = [];
-  if (autoMeasure && manifest.metrics.length > 0) {
-    const measured: Record<string, number> = {};
-    for (const ms of manifest.metrics) {
-      const metricKey = ms.key.toLowerCase();
-      const filePath = path.resolve(ms.path);
-      if (fs.existsSync(filePath)) {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n').length;
-        measured[metricKey] = lines;
-        autoMeasured.push({ metric: metricKey, path: ms.path, lines });
-      } else {
-        autoMeasured.push({ metric: metricKey, path: ms.path, lines: null, error: 'file not found' });
-      }
-    }
-    // Merge: explicit --context wins over auto-measured
-    context = { ...measured, ...context };
-  }
-
-  try {
-    const bundle = bundleModules(aiDir, modulePaths, readFile, keywords);
-    const evidence: EvidenceResult = validateConstraints(bundle.mergedDocument, context);
-
-    // Check sync status
-    const lockFile = path.join(aiDir, '.adf.lock');
-    const locked = loadLockFile(lockFile);
-    const syncEntries: Array<{ source: string; inSync: boolean }> = [];
-    for (const entry of manifest.sync) {
-      const sourcePath = path.join(aiDir, entry.source);
-      if (fs.existsSync(sourcePath)) {
-        const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-        const sourceHash = hashContent(sourceContent);
-        const lockedHash = locked[entry.source] ?? null;
-        syncEntries.push({ source: entry.source, inSync: lockedHash === sourceHash });
-      }
-    }
-    const allInSync = syncEntries.length === 0 || syncEntries.every(e => e.inSync);
-    const staleCount = syncEntries.filter(e => !e.inSync).length;
-
-    if (options.format === 'json') {
-      const jsonOut: Record<string, unknown> = {
-        aiDir,
-        resolvedModules: bundle.resolvedModules,
-        tokenEstimate: bundle.tokenEstimate,
-        tokenBudget: bundle.tokenBudget,
-        tokenUtilization: bundle.tokenUtilization,
-        constraints: evidence.constraints,
-        weightSummary: evidence.weightSummary,
-        allPassing: evidence.allPassing,
-        failCount: evidence.failCount,
-        warnCount: evidence.warnCount,
-        syncStatus: { allInSync, staleCount },
-      };
-      if (task) {
-        jsonOut.task = task;
-        jsonOut.keywords = keywords;
-      }
-      if (bundle.advisoryOnlyModules.length > 0) {
-        jsonOut.advisoryOnlyModules = bundle.advisoryOnlyModules;
-      }
-      if (autoMeasured.length > 0) {
-        jsonOut.autoMeasured = autoMeasured;
-      }
-      // Suggest logical next steps based on results
-      const nextActions: string[] = [];
-      if (!evidence.allPassing) {
-        nextActions.push('Fix failing constraints before merging');
-      }
-      if (!allInSync) {
-        nextActions.push('charter adf sync --write');
-      }
-      if (evidence.warnCount > 0) {
-        nextActions.push('Review metrics at ceiling boundary');
-      }
-      if (nextActions.length > 0) {
-        jsonOut.nextActions = nextActions;
-      }
-      console.log(JSON.stringify(jsonOut, null, 2));
-    } else {
-      console.log('');
-      console.log('  ADF Evidence Report');
-      console.log('  ===================');
-      console.log(`  Modules loaded: ${bundle.resolvedModules.join(', ')}`);
-      console.log(`  Token estimate: ~${bundle.tokenEstimate}`);
-      if (bundle.tokenBudget !== null) {
-        const pct = bundle.tokenUtilization !== null
-          ? ` (${(bundle.tokenUtilization * 100).toFixed(0)}%)`
-          : '';
-        console.log(`  Token budget: ${bundle.tokenBudget}${pct}`);
-      }
-      console.log('');
-
-      // Auto-measured metrics
-      if (autoMeasured.length > 0) {
-        console.log('  Auto-measured:');
-        for (const m of autoMeasured) {
-          if (m.lines !== null) {
-            console.log(`    ${m.metric}: ${m.lines} lines (${m.path})`);
-          } else {
-            console.log(`    ${m.metric}: [file not found] (${m.path})`);
-          }
-        }
-        console.log('');
-      }
-
-      // Weight summary
-      console.log('  Section weights:');
-      console.log(`    Load-bearing: ${evidence.weightSummary.loadBearing}`);
-      console.log(`    Advisory: ${evidence.weightSummary.advisory}`);
-      console.log(`    Unweighted: ${evidence.weightSummary.unweighted}`);
-      console.log('');
-
-      // Advisory-only module warnings
-      if (bundle.advisoryOnlyModules.length > 0) {
-        console.log('  Advisory-only modules:');
-        for (const m of bundle.advisoryOnlyModules) {
-          console.log(`    [!] ${m}: no load-bearing sections`);
-        }
-        console.log('');
-      }
-
-      // Constraints
-      if (evidence.constraints.length > 0) {
-        console.log('  Constraints:');
-        for (const c of evidence.constraints) {
-          const icon = c.status === 'pass' ? 'ok' : c.status === 'warn' ? 'WARN' : 'FAIL';
-          console.log(`    [${icon}] ${c.message}`);
-        }
-      } else {
-        console.log('  Constraints: (none)');
-      }
-      console.log('');
-
-      // Sync status
-      if (syncEntries.length > 0) {
-        if (allInSync) {
-          console.log('  Sync: all sources in sync');
-        } else {
-          console.log(`  Sync: ${staleCount} source${staleCount === 1 ? '' : 's'} out of sync`);
-        }
-      } else {
-        console.log('  Sync: no sync entries configured');
-      }
-      console.log('');
-
-      // Verdict
-      const verdict = evidence.allPassing ? 'PASS' : 'FAIL';
-      console.log(`  Verdict: ${verdict}`);
-      if (evidence.warnCount > 0) {
-        console.log(`  (${evidence.warnCount} warning${evidence.warnCount === 1 ? '' : 's'} — at ceiling boundary)`);
-      }
-      console.log('');
-    }
-
-    // CI mode: exit 1 on constraint failures
-    if (options.ciMode && !evidence.allPassing) {
-      return EXIT_CODE.POLICY_VIOLATION;
-    }
-
-    return EXIT_CODE.SUCCESS;
-  } catch (e: unknown) {
-    if (e instanceof Error && e.name === 'AdfBundleError') {
-      if (options.format === 'json') {
-        console.log(JSON.stringify({ error: e.message }, null, 2));
-      } else {
-        console.error(`  [error] ${e.message}`);
-      }
-      return EXIT_CODE.RUNTIME_ERROR;
-    }
-    throw e;
-  }
-}
-
-// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -968,5 +398,15 @@ function printHelp(): void {
   console.log('      --context: JSON object of external metric overrides (wins over auto).');
   console.log('      --context-file: read --context JSON from a file instead.');
   console.log('      In --ci mode, exit 1 if any constraint fails.');
+  console.log('');
+  console.log('    charter adf migrate [--dry-run] [--source <file>] [--no-backup]');
+  console.log('                        [--merge-strategy append|dedupe|replace] [--ai-dir <dir>]');
+  console.log('      Ingest existing agent config files (CLAUDE.md, .cursorrules, etc.) and');
+  console.log('      migrate their content into structured ADF modules. Replaces originals');
+  console.log('      with thin pointers that retain environment-specific rules.');
+  console.log('      --dry-run: preview migration plan without writing files');
+  console.log('      --source: migrate a single file instead of scanning all agent configs');
+  console.log('      --no-backup: skip creating .pre-adf-migrate.bak backups');
+  console.log('      --merge-strategy: append (always add), dedupe (skip duplicates, default), replace');
   console.log('');
 }
