@@ -109,6 +109,36 @@ export async function doctorCommand(options: CLIOptions): Promise<number> {
           : `Missing or unparseable: ${missingModules.join(', ')}`,
       });
 
+      // Agent config pointer check: flag files with stack rules that should be in .ai/
+      const AGENT_CONFIG_FILES = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
+      const POINTER_MARKERS = ['Do not duplicate ADF rules here', 'Do not duplicate rules from .ai/'];
+      const nonPointerFiles: string[] = [];
+      for (const file of AGENT_CONFIG_FILES) {
+        if (fs.existsSync(file)) {
+          const content = fs.readFileSync(file, 'utf-8');
+          const isPointer = POINTER_MARKERS.some(marker => content.includes(marker));
+          if (!isPointer) {
+            nonPointerFiles.push(file);
+          }
+        }
+      }
+      if (nonPointerFiles.length > 0) {
+        checks.push({
+          name: 'adf agent config',
+          status: 'WARN',
+          details: `${nonPointerFiles.join(', ')} contain${nonPointerFiles.length === 1 ? 's' : ''} stack rules that should live in .ai/. Run: charter adf migrate --dry-run`,
+        });
+      } else {
+        const pointerCount = AGENT_CONFIG_FILES.filter(f => fs.existsSync(f)).length;
+        if (pointerCount > 0) {
+          checks.push({
+            name: 'adf agent config',
+            status: 'PASS',
+            details: `${pointerCount} agent config file(s) are thin pointers to .ai/.`,
+          });
+        }
+      }
+
       // Sync lock status
       if (manifest.sync.length > 0) {
         const lockFile = path.join(aiDir, '.adf.lock');
