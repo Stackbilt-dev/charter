@@ -36,6 +36,14 @@ jobs:
       - name: Drift Scan
         run: npx charter drift --ci --format text
 
+      - name: ADF Wiring & Pointer Integrity
+        run: npx charter doctor --adf-only --ci --format text
+        if: hashFiles('.ai/manifest.adf') != ''
+
+      - name: ADF Evidence
+        run: npx charter adf evidence --auto-measure --ci --format text
+        if: hashFiles('.ai/manifest.adf') != ''
+
       - name: Audit Report
         run: npx charter audit --format json > /tmp/audit.json
         if: always()
