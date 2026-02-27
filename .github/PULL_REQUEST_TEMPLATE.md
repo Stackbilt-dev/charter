@@ -19,6 +19,7 @@
 ## Validation
 
 - [ ] Docs sync check passed (pnpm run docs:check)
+- [ ] ADF verification passed (pnpm run verify:adf)
 
 Run from repo root and paste relevant output:
 
@@ -56,4 +57,3 @@ Closes #
 ## Screenshots / Output Samples (if applicable)
 
 Include command output snippets or screenshots for behavior/UI changes.
-
