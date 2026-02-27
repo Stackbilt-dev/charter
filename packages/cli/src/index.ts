@@ -16,6 +16,8 @@ import { quickstartCommand, whyCommand } from './commands/why';
 import { hookCommand } from './commands/hook';
 import { adfCommand } from './commands/adf';
 import { bootstrapCommand } from './commands/bootstrap';
+import { telemetryCommand } from './commands/telemetry';
+import { recordTelemetryEvent } from './telemetry';
 import packageJson from '../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -42,6 +44,7 @@ Usage:
   charter hook install --pre-commit [--force]
                                    Install git pre-commit hook for ADF evidence gate
   charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate)
+  charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
   charter --help                   Show this help
@@ -82,60 +85,105 @@ export interface CLIOptions {
 }
 
 export async function run(args: string[]): Promise<number> {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(HELP);
-    return EXIT_CODE.SUCCESS;
-  }
+  const start = Date.now();
+  const configPath = getFlag(args, '--config') || '.charter';
+  const rawFormat = getFlag(args, '--format') || 'text';
+  const ciMode = args.includes('--ci');
+  const yes = args.includes('--yes');
 
-  if (args.includes('--version') || args.includes('-v')) {
-    console.log(`charter v${CLI_VERSION}`);
-    return EXIT_CODE.SUCCESS;
-  }
-
-  const format = getFlag(args, '--format') || 'text';
-  if (format !== 'text' && format !== 'json') {
-    throw new CLIError(`Invalid --format value: ${format}. Use text or json.`);
-  }
-
-  const options: CLIOptions = {
-    configPath: getFlag(args, '--config') || '.charter',
-    format,
-    ciMode: args.includes('--ci'),
-    yes: args.includes('--yes'),
+  const writeTelemetry = (exitCode: number, errorName?: string): void => {
+    recordTelemetryEvent(configPath, {
+      args,
+      format: rawFormat,
+      ciMode,
+      durationMs: Date.now() - start,
+      exitCode,
+      errorName,
+    });
   };
 
-  if (args.length === 0 || args[0].startsWith('-')) {
-    return quickstartCommand(options);
-  }
+  try {
+    if (args.includes('--help') || args.includes('-h')) {
+      console.log(HELP);
+      writeTelemetry(EXIT_CODE.SUCCESS);
+      return EXIT_CODE.SUCCESS;
+    }
 
-  const command = args[0];
-  const restArgs = args.slice(1);
+    if (args.includes('--version') || args.includes('-v')) {
+      console.log(`charter v${CLI_VERSION}`);
+      writeTelemetry(EXIT_CODE.SUCCESS);
+      return EXIT_CODE.SUCCESS;
+    }
 
-  switch (command) {
-    case 'bootstrap':
-      return bootstrapCommand(options, restArgs);
-    case 'setup':
-      return setupCommand(options, restArgs);
-    case 'init':
-      return initCommand(options, restArgs);
-    case 'validate':
-      return validateCommand(options, restArgs);
-    case 'audit':
-      return auditCommand(options, restArgs);
-    case 'drift':
-      return driftCommand(options, restArgs);
-    case 'classify':
-      return classifyCommand(options, restArgs);
-    case 'why':
-      return whyCommand(options);
-    case 'doctor':
-      return doctorCommand(options, restArgs);
-    case 'hook':
-      return hookCommand(options, restArgs);
-    case 'adf':
-      return adfCommand(options, restArgs);
-    default:
-      throw new CLIError(`Unknown command: ${command}\n${HELP}`);
+    if (rawFormat !== 'text' && rawFormat !== 'json') {
+      throw new CLIError(`Invalid --format value: ${rawFormat}. Use text or json.`);
+    }
+
+    const options: CLIOptions = {
+      configPath,
+      format: rawFormat,
+      ciMode,
+      yes,
+    };
+
+    let exitCode: number;
+    if (args.length === 0 || args[0].startsWith('-')) {
+      exitCode = await quickstartCommand(options);
+      writeTelemetry(exitCode);
+      return exitCode;
+    }
+
+    const command = args[0];
+    const restArgs = args.slice(1);
+
+    switch (command) {
+      case 'bootstrap':
+        exitCode = await bootstrapCommand(options, restArgs);
+        break;
+      case 'setup':
+        exitCode = await setupCommand(options, restArgs);
+        break;
+      case 'init':
+        exitCode = await initCommand(options, restArgs);
+        break;
+      case 'validate':
+        exitCode = await validateCommand(options, restArgs);
+        break;
+      case 'audit':
+        exitCode = await auditCommand(options, restArgs);
+        break;
+      case 'drift':
+        exitCode = await driftCommand(options, restArgs);
+        break;
+      case 'classify':
+        exitCode = await classifyCommand(options, restArgs);
+        break;
+      case 'why':
+        exitCode = await whyCommand(options);
+        break;
+      case 'doctor':
+        exitCode = await doctorCommand(options, restArgs);
+        break;
+      case 'hook':
+        exitCode = await hookCommand(options, restArgs);
+        break;
+      case 'adf':
+        exitCode = await adfCommand(options, restArgs);
+        break;
+      case 'telemetry':
+        exitCode = await telemetryCommand(options, restArgs);
+        break;
+      default:
+        throw new CLIError(`Unknown command: ${command}\n${HELP}`);
+    }
+
+    writeTelemetry(exitCode);
+    return exitCode;
+  } catch (err: unknown) {
+    const exitCode = err instanceof CLIError ? err.exitCode : EXIT_CODE.RUNTIME_ERROR;
+    const errorName = err instanceof Error ? err.name : 'UnknownError';
+    writeTelemetry(exitCode, errorName);
+    throw err;
   }
 }
 
