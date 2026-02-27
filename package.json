@@ -17,6 +17,10 @@
     "scorecard:validate": "node scripts/validate-scorecard.mjs",
     "docs:sync": "node scripts/docs-sync.mjs --write",
     "docs:check": "node scripts/docs-sync.mjs --check",
+    "docs:oss:sync": "node scripts/docs-sync.mjs --write --config .docsync.oss.json",
+    "docs:oss:check": "node scripts/docs-sync.mjs --check --config .docsync.oss.json",
+    "docs:oss:auto": "node scripts/docs-oss-auto-sync.mjs --config .docsync.oss.json",
+    "docs:oss:auto:dry-run": "node scripts/docs-oss-auto-sync.mjs --config .docsync.oss.json --dry-run --no-push",
     "charter:detect": "charter setup --detect-only --format json",
     "charter:setup": "charter setup --preset fullstack --ci github --yes"
   },
