@@ -4,14 +4,21 @@ import process from 'node:process';
 
 const CHECK_MODE = process.argv.includes('--check');
 const WRITE_MODE = process.argv.includes('--write');
+const CONFIG_FLAG_INDEX = process.argv.indexOf('--config');
+const CONFIG_ARG = CONFIG_FLAG_INDEX >= 0 ? process.argv[CONFIG_FLAG_INDEX + 1] : null;
+
+if (CONFIG_FLAG_INDEX >= 0 && (!CONFIG_ARG || CONFIG_ARG.startsWith('--'))) {
+  console.error('docs-sync: missing value for --config');
+  process.exit(2);
+}
 
 if (!CHECK_MODE && !WRITE_MODE) {
-  console.error('Usage: node scripts/docs-sync.mjs --check|--write');
+  console.error('Usage: node scripts/docs-sync.mjs --check|--write [--config <path>]');
   process.exit(2);
 }
 
 const cwd = process.cwd();
-const configPath = path.join(cwd, '.docsync.json');
+const configPath = CONFIG_ARG ? path.resolve(cwd, CONFIG_ARG) : path.join(cwd, '.docsync.json');
 
 async function readJson(filePath) {
   const raw = await fs.readFile(filePath, 'utf8');
@@ -33,8 +40,12 @@ function blockMarkers(blockId) {
   };
 }
 
+function mappingMode(mapping) {
+  return mapping.targetMode === 'file' ? 'file' : 'block';
+}
+
 async function loadSnippet(source, snippetFile) {
-  const localPath = path.join(cwd, source.localRoot, snippetFile);
+  const localPath = path.resolve(source.localRoot, snippetFile);
   try {
     return await fs.readFile(localPath, 'utf8');
   } catch {
@@ -53,17 +64,39 @@ async function loadSnippet(source, snippetFile) {
 
 async function main() {
   const config = await readJson(configPath);
+  const configDir = path.dirname(configPath);
+  const sourceRoot = path.resolve(configDir, config.source.localRoot);
+  const targetRoot = path.resolve(configDir, config.target?.root ?? '.');
   const failures = [];
   const updates = [];
 
   for (const mapping of config.mappings) {
-    const targetPath = path.join(cwd, mapping.targetFile);
+    const targetPath = path.resolve(targetRoot, mapping.targetFile);
     const targetRaw = await fs.readFile(targetPath, 'utf8');
     const eol = detectEol(targetRaw);
-    const snippetRaw = await loadSnippet(config.source, mapping.snippetFile);
+    const snippetRaw = await loadSnippet({ ...config.source, localRoot: sourceRoot }, mapping.snippetFile);
     const snippet = toEol(snippetRaw.trimEnd(), eol);
-    const { start, end } = blockMarkers(mapping.blockId);
+    const mode = mappingMode(mapping);
 
+    if (mode === 'file') {
+      const desiredFile = `${snippet}${eol}`;
+      if (targetRaw !== desiredFile) {
+        updates.push({ mapping, targetPath });
+        if (WRITE_MODE) {
+          await fs.writeFile(targetPath, desiredFile, 'utf8');
+        } else {
+          failures.push(`${mapping.targetFile}: file drift detected`);
+        }
+      }
+      continue;
+    }
+
+    if (!mapping.blockId) {
+      failures.push(`${mapping.targetFile}: blockId is required for block mappings`);
+      continue;
+    }
+
+    const { start, end } = blockMarkers(mapping.blockId);
     const startIdx = targetRaw.indexOf(start);
     if (startIdx === -1) {
       failures.push(`${mapping.targetFile}: missing start marker for ${mapping.blockId}`);
