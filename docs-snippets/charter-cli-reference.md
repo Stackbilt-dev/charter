@@ -117,7 +117,7 @@ ADF (Attention-Directed Format) is Charter's modular AI context compiler. These 
 
 ### charter adf init
 
-Scaffolds `.ai/` directory with `manifest.adf`, `core.adf`, and `state.adf` modules. The scaffolded `core.adf` includes a `[load-bearing]` CONSTRAINTS section and a `METRICS [load-bearing]` section with starter LOC ceilings.
+Scaffolds `.ai/` directory with `manifest.adf`, `core.adf`, `state.adf`, and starter `frontend.adf`/`backend.adf` modules. The scaffolded `core.adf` includes a `[load-bearing]` CONSTRAINTS section and a `METRICS [load-bearing]` section with starter LOC ceilings.
 
 ```bash
 npx charter adf init
@@ -132,6 +132,7 @@ Parses and reformats ADF files to canonical form. Enforces emoji decorations, ca
 ```bash
 npx charter adf fmt .ai/core.adf --write   # reformat in-place
 npx charter adf fmt .ai/core.adf --check   # CI: exit 1 if not canonical
+npx charter adf fmt --explain              # canonical section ordering
 ```
 
 ### charter adf patch
@@ -145,6 +146,15 @@ npx charter adf patch .ai/state.adf --ops-file patches.json
 
 **Operations:** `ADD_BULLET`, `REPLACE_BULLET`, `REMOVE_BULLET`, `ADD_SECTION`, `REPLACE_SECTION`, `REMOVE_SECTION`, `UPDATE_METRIC`.
 
+### charter adf create
+
+Creates a module file and registers it in `manifest.adf` under `ON_DEMAND` or `DEFAULT_LOAD`.
+
+```bash
+npx charter adf create arcana.adf --triggers "reading,spread,card"
+npx charter adf create governance.adf --load default
+```
+
 ### charter adf bundle
 
 Resolves manifest modules for a given task and outputs merged context with token estimate. Only loads modules whose trigger keywords match the task.
@@ -154,7 +164,7 @@ npx charter adf bundle --task "Fix the React login component"
 npx charter adf bundle --task "Add REST endpoint" --format json
 ```
 
-JSON output includes `triggerMatches` (with `matchedKeywords` and `loadReason`), `unmatchedModules`, `tokenEstimate`, `tokenBudget`, `tokenUtilization`, and `perModuleTokens`.
+JSON output includes `triggerMatches` (with `matchedKeywords` and `loadReason`), `unmatchedModules`, `missingModules`, `tokenEstimate`, `tokenBudget`, `tokenUtilization`, and `perModuleTokens`.
 
 ### charter adf sync
 
@@ -185,6 +195,17 @@ npx charter adf evidence --context-file metrics.json
 **CI mode:** exits 1 on any constraint failure. Warnings (at boundary) surface in the report but do not fail the build.
 
 Output includes constraint results, weight summary (load-bearing / advisory / unweighted), sync status, advisory-only warnings, and a `nextActions` array.
+
+### ADF Automation Gate
+
+For deterministic LM-agent enforcement, run:
+
+```bash
+npx charter doctor --adf-only --ci --format json
+npx charter adf evidence --auto-measure --ci --format json
+```
+
+`doctor --adf-only` validates thin-pointer routing, required manifest wiring, and module parseability. `adf evidence --ci` validates measurable ceilings.
 
 ## Global Flags
 

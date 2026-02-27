@@ -132,8 +132,8 @@ What this shows:
 
 - **Metric ceilings enforce LOC limits on source files.** Each key in the `METRICS` section of an `.adf` module declares a ceiling. The `--auto-measure` flag counts lines live from the source files referenced in the manifest.
 - **Self-correcting architecture.** When `adf_commands_loc` hit 93% of its 900-line ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into four focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
-- **CI gating.** Running `charter adf evidence --ci` exits 1 if any ceiling is breached, blocking the merge. Warnings near the boundary surface in the report but do not fail the build.
-- **Pre-commit enforcement.** `charter hook install --pre-commit` installs a git hook that runs evidence checks before every commit. When an agent runs unattended, ceiling breaches block the commit and force a split/refactor.
+- **CI gating.** Generated governance workflows run `charter doctor --adf-only --ci` and `charter adf evidence --auto-measure --ci` when `.ai/manifest.adf` is present, blocking merges on ADF wiring violations or ceiling breaches.
+- **Pre-commit enforcement.** `charter hook install --pre-commit` installs a git hook that enforces `doctor --adf-only` + ADF evidence checks (or `pnpm run verify:adf` when present). When an agent runs unattended, wiring/ceiling violations block the commit.
 - **Available to any repo.** This is the same system you get by running `charter adf init` in your own project.
 
 ## Why Charter
@@ -207,16 +207,18 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter`: show repo risk/value snapshot and recommended next action
 - `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]`: detect stack and scaffold `.charter/` baseline
 - `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
-- `charter doctor`: validate environment/config state
+- `charter doctor [--adf-only]`: validate environment/config state (`--adf-only` runs strict ADF wiring checks)
 - `charter validate [--ci] [--range <revset>]`: validate commit governance and citations
 - `charter drift [--path <dir>] [--ci]`: run drift scan
 - `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
 - `charter hook install --commit-msg [--force]`: install commit-msg trailer normalization hook
-- `charter hook install --pre-commit [--force]`: install pre-commit ADF evidence gate (LOC ceiling checks)
-- `charter adf init [--ai-dir <dir>] [--force]`: scaffold `.ai/` context directory with manifest, core, and state modules
+- `charter hook install --pre-commit [--force]`: install pre-commit ADF routing + evidence gate (`doctor --adf-only` + `adf evidence`)
+- `charter adf init [--ai-dir <dir>] [--force]`: scaffold `.ai/` context directory with manifest, core, state, and starter on-demand modules
 - `charter adf fmt <file> [--check] [--write]`: parse and reformat ADF files to canonical form
+- `charter adf fmt --explain`: show canonical formatter section ordering
 - `charter adf patch <file> --ops <json> | --ops-file <path>`: apply typed delta operations to ADF files
+- `charter adf create <module> [--triggers "a,b,c"] [--load default|on-demand]`: create/register a module in one step
 - `charter adf bundle --task "<prompt>" [--ai-dir <dir>]`: resolve manifest modules and output merged context with trigger observability
 - `charter adf sync --check [--ai-dir <dir>]`: verify source .adf files match locked hashes (exit 1 on drift)
 - `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current source hashes
@@ -239,7 +241,7 @@ Audit policy scoring note:
 
 - Reusable template in this repo: `.github/workflows/governance.yml`
 - Generated in target repos by `charter setup --ci github`: `.github/workflows/charter-governance.yml`
-- The governance workflow runs `validate`, `drift`, `adf evidence --auto-measure --ci`, and `audit` on every PR. The evidence step gates on metric ceiling breaches when `.ai/manifest.adf` is present.
+- The governance workflow runs `validate`, `drift`, ADF wiring integrity (`doctor --adf-only --ci`), ADF ceiling evidence (`adf evidence --auto-measure --ci`), and `audit` on every PR.
 
 ## Workspace Layout
 

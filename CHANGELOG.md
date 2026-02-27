@@ -8,6 +8,15 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Added
 - **`charter doctor` agent config pointer check**: When `.ai/manifest.adf` exists, doctor now scans for agent config files (CLAUDE.md, .cursorrules, agents.md, AGENTS.md, GEMINI.md, copilot-instructions.md) that contain stack rules instead of thin pointers. Flags them with `[warn]` and suggests `charter adf migrate --dry-run`. Recognizes both pointer marker phrasings.
+- **`charter doctor --adf-only` mode**: New mode runs strict ADF wiring validation only (manifest, required default-load wiring, module parseability, thin pointer integrity, sync lock status) for clean CI/pre-commit gating in repos that may not use `.charter/` policy artifacts.
+- **ADF governance workflow hardening**: `setup --ci github` workflow template now includes `ADF Wiring & Pointer Integrity` (`doctor --adf-only --ci`) and `ADF Evidence` (`adf evidence --auto-measure --ci`) steps when `.ai/manifest.adf` is present.
+- **Setup script sync expanded**: `setup` now also syncs `verify:adf`, `charter:doctor`, and `charter:adf:bundle` scripts (in addition to detect/setup), so post-setup agent loops have first-class commands for ongoing governance.
+
+### Changed
+- **Pre-commit gate upgraded**: `charter hook install --pre-commit` now prefers `pnpm run verify:adf` when available and otherwise enforces `doctor --adf-only --ci` + `adf evidence --auto-measure --ci`. This shifts enforcement from ceiling-only to full ADF routing + ceiling integrity.
+- **`adf init` scaffolding upgraded**: now creates starter `frontend.adf` and `backend.adf` module stubs to avoid fatal missing-module experiences on first bundle.
+- **`adf bundle` missing on-demand behavior**: missing ON_DEMAND module files are now reported as warnings (`missingModules` in JSON) instead of hard failures; missing DEFAULT_LOAD modules remain hard errors.
+- **`adf sync --write` empty-sync behavior clarified**: when manifest has no `SYNC` entries, `--write` now writes an empty `.adf.lock` and reports tracked source semantics explicitly.
 
 ## [0.4.0] - 2026-02-26
 
