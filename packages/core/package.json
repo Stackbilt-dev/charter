@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/core",
   "sideEffects": false,
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Core schemas, sanitization, and error handling for Charter Kit",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
