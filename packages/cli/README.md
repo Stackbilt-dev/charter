@@ -68,6 +68,7 @@ charter adf bundle --task "fix React component"
 charter adf migrate --dry-run  # preview agent config → ADF migration
 charter adf sync --check     # verify .adf files match locked hashes
 charter adf evidence --auto-measure --format json  # validate metric ceilings
+charter telemetry report --period 24h --format json  # passive local usage summary
 ```
 
 ## Human Onboarding (Copy/Paste)
@@ -138,6 +139,7 @@ npx charter audit --format json
 npx charter adf migrate --dry-run --format json
 npx charter adf evidence --auto-measure --format json --ci
 npx charter adf sync --check --format json
+npx charter telemetry report --period 24h --format json
 
 # recurring maintenance
 npx charter doctor --format json
@@ -294,6 +296,18 @@ charter adf migrate [--dry-run] [--source <file>] [--no-backup]
 - `sync --write`: Update `.adf.lock` with current source hashes.
 - `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail). The governance workflow template runs this automatically on PRs when `.ai/manifest.adf` is present.
 - `migrate`: Scan existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md, copilot-instructions.md), classify content using the ADX-002 decision tree, and migrate into ADF modules. `--dry-run` previews the migration plan without writing files. `--source <file>` targets a single file. `--no-backup` skips `.pre-adf-migrate.bak` creation. `--merge-strategy` controls deduplication: `dedupe` (default, skip items already in ADF), `append` (always add), or `replace`. Environment-specific rules (WSL, PATH, credential helpers) are retained in the thin pointer.
+
+### `charter telemetry`
+
+Passive local observability for Charter/ADF usage. Every CLI run appends command metadata (timestamp, command path, flags, duration, exit code) to `.charter/telemetry/events.ndjson`.
+
+```bash
+charter telemetry report --period 24h
+charter telemetry report --period 7d --format json
+```
+
+- `report`: aggregates events over a time window (`--period` supports `s|m|h|d`, for example `30m`, `24h`, `7d`).
+- Privacy: command metadata only. No prompt body, source code, or file contents are captured.
 
 #### Evidence Example (from Charter's own repo)
 
