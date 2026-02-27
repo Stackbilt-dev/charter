@@ -46,6 +46,7 @@ charter adf sync --check
 
 # Validate metric constraints and produce a structured evidence report
 charter adf evidence --auto-measure --format json
+charter telemetry report --period 24h --format json
 ```
 
 ### Format Example
@@ -183,6 +184,7 @@ charter audit --format json
 charter adf bundle --task "describe the task" --format json
 charter adf evidence --auto-measure --format json --ci
 charter adf sync --check --format json
+charter telemetry report --period 24h --format json
 ```
 
 Agent contract:
@@ -224,6 +226,7 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current source hashes
 - `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce structured evidence report
 - `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: ingest existing agent config files and migrate content into ADF modules
+- `charter telemetry report [--period <30m|24h|7d>]`: summarize passive local CLI telemetry from `.charter/telemetry/events.ndjson`
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.

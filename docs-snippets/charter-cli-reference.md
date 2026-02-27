@@ -207,6 +207,18 @@ npx charter adf evidence --auto-measure --ci --format json
 
 `doctor --adf-only` validates thin-pointer routing, required manifest wiring, and module parseability. `adf evidence --ci` validates measurable ceilings.
 
+### charter telemetry report
+
+Summarizes passive local Charter usage telemetry from `.charter/telemetry/events.ndjson`.
+
+```bash
+npx charter telemetry report --period 24h
+npx charter telemetry report --period 7d --format json
+```
+
+- Captured automatically on each CLI run: timestamp, command path, flags, duration, exit code.
+- No prompt/code content capture; metadata only.
+
 ## Global Flags
 
 | Flag | Effect |
