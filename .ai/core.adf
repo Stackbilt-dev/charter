@@ -7,15 +7,21 @@ ADF: 0.1
   - Package flow: types <- git, classify, validate, drift, ci <- cli
   - ADF package is zero-dependency and self-contained
   - Conventional Commits: feat(scope):, fix(scope):, docs:, chore:
+  - .charter/ holds governance config: config.json, patterns/*.json, policies/*.md
+  - CLI command handlers in packages/cli/src/commands/, config in src/config.ts
 
 ⚠ CONSTRAINTS [load-bearing]:
   - TypeScript strict mode, ES2022 target, CommonJS output
   - 2-space indent, semicolons, single quotes, kebab-case filenames
   - Pure functions in library packages; side effects only in CLI command handlers
+  - Import across packages via @stackbilt/* aliases (tsconfig.base.json)
   - All commands must support --format json for stable machine-readable output
   - Exit codes: 0 success, 1 policy violation, 2 runtime/usage error
-  - Commits via scripts/smart-commit.sh only
+  - Commits via scripts/smart-commit.sh only (never raw git add/commit)
+  - Run scripts/smart-commit.sh --dry-run first to preview grouped commits
+  - Validation gates: pnpm run typecheck, pnpm run build, pnpm run test
   - Use pnpm exec tsc instead of npx tsc in WSL
+  - Bias toward action over clarification; implement rather than ask when task is clear
 
 📊 METRICS [load-bearing]:
   adf_commands_loc: 0 / 500 [lines]

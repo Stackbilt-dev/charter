@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "localRoot": "./docs-snippets"
+  },
+  "target": {
+    "root": "../stackbilt_docs_v2/src/content/docs"
+  },
+  "mappings": [
+    {
+      "blockId": "charter-oss-ecosystem",
+      "snippetFile": "charter-oss-ecosystem.md",
+      "targetFile": "ecosystem.md"
+    },
+    {
+      "targetMode": "file",
+      "snippetFile": "charter-cli-reference.md",
+      "targetFile": "cli-reference.md"
+    },
+    {
+      "targetMode": "file",
+      "snippetFile": "charter-getting-started.md",
+      "targetFile": "getting-started.md"
+    },
+    {
+      "targetMode": "file",
+      "snippetFile": "charter-ci-integration.md",
+      "targetFile": "ci-integration.md"
+    }
+  ]
+}
