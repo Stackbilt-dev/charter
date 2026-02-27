@@ -24,7 +24,7 @@ ADF: 0.1
   - Bias toward action over clarification; implement rather than ask when task is clear
 
 📊 METRICS [load-bearing]:
-  adf_commands_loc: 0 / 500 [lines]
+  adf_commands_loc: 0 / 650 [lines]
   adf_bundle_loc: 0 / 200 [lines]
   adf_sync_loc: 0 / 250 [lines]
   adf_evidence_loc: 0 / 300 [lines]
