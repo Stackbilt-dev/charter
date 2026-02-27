@@ -1,5 +1,7 @@
 # Charter Kit
 
+[![npm version](https://img.shields.io/npm/v/@stackbilt/cli?label=charter&color=5F7FFF&style=for-the-badge)](https://www.npmjs.com/package/@stackbilt/cli)
+
 ![Charter Kit hero](./stackbilt-charter-2.png)
 
 > **ADF is currently running its inaugural full-SDLC cycle to gather real-world data for iterative improvement. Updates coming soon and regularly.**
