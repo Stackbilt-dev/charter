@@ -13,7 +13,7 @@ import {
   bundleModules,
   validateConstraints,
 } from '@stackbilt/adf';
-import type { EvidenceResult } from '@stackbilt/adf';
+import type { AdfDocument, EvidenceResult } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { hashContent, loadLockFile } from './adf-sync';
@@ -25,12 +25,23 @@ interface AutoMeasurement {
   error?: string;
 }
 
+interface StaleBaselineWarning {
+  metric: string;
+  baseline: number;
+  current: number;
+  delta: number;
+  ratio: number;
+  recommendedCeiling: number;
+  rationaleRequired: boolean;
+}
+
 export function adfEvidence(options: CLIOptions, args: string[]): number {
   const task = getFlag(args, '--task');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const contextJson = getFlag(args, '--context');
   const contextFile = getFlag(args, '--context-file');
   const autoMeasure = args.includes('--auto-measure');
+  const staleThreshold = parseStaleThreshold(getFlag(args, '--stale-threshold') || '1.2');
 
   const manifestPath = path.join(aiDir, 'manifest.adf');
   if (!fs.existsSync(manifestPath)) {
@@ -95,6 +106,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   try {
     const bundle = bundleModules(aiDir, modulePaths, readFile, keywords);
     const evidence: EvidenceResult = validateConstraints(bundle.mergedDocument, context);
+    const staleBaselines = detectStaleBaselines(bundle.mergedDocument, context, staleThreshold);
 
     // Check sync status
     const lockFile = path.join(aiDir, '.adf.lock');
@@ -124,6 +136,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
         allPassing: evidence.allPassing,
         failCount: evidence.failCount,
         warnCount: evidence.warnCount,
+        staleBaselineCount: staleBaselines.length,
         syncStatus: { allInSync, staleCount },
       };
       if (task) {
@@ -136,6 +149,9 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
       if (autoMeasured.length > 0) {
         jsonOut.autoMeasured = autoMeasured;
       }
+      if (staleBaselines.length > 0) {
+        jsonOut.staleBaselines = staleBaselines;
+      }
       // Suggest logical next steps based on results
       const nextActions: string[] = [];
       if (!evidence.allPassing) {
@@ -146,6 +162,9 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
       }
       if (evidence.warnCount > 0) {
         nextActions.push('Review metrics at ceiling boundary');
+      }
+      if (staleBaselines.length > 0) {
+        nextActions.push('charter adf metrics recalibrate --headroom 15 --reason "<rationale>" --dry-run');
       }
       if (nextActions.length > 0) {
         jsonOut.nextActions = nextActions;
@@ -174,6 +193,14 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
           } else {
             console.log(`    ${m.metric}: [file not found] (${m.path})`);
           }
+        }
+        console.log('');
+      }
+
+      if (staleBaselines.length > 0) {
+        console.log('  Stale baseline warnings:');
+        for (const s of staleBaselines) {
+          console.log(`    [warn] ${s.metric}: baseline ${s.baseline}, current ${s.current}, delta ${s.delta}, recommended ceiling ${s.recommendedCeiling} (rationale required)`);
         }
         console.log('');
       }
@@ -259,4 +286,42 @@ function readJsonFlag(filePath: string, flagName: string): string {
     throw new CLIError(`File not found for ${flagName}: ${filePath}`);
   }
   return fs.readFileSync(filePath, 'utf-8');
+}
+
+function parseStaleThreshold(raw: string): number {
+  const parsed = parseFloat(raw);
+  if (!Number.isFinite(parsed) || parsed < 1.0 || parsed > 10) {
+    throw new CLIError(`Invalid --stale-threshold value: ${raw}. Use a number between 1.0 and 10.0.`);
+  }
+  return parsed;
+}
+
+function detectStaleBaselines(
+  doc: AdfDocument,
+  context: Record<string, number> | undefined,
+  staleThreshold: number
+): StaleBaselineWarning[] {
+  if (!context) return [];
+  const warnings: StaleBaselineWarning[] = [];
+  for (const section of doc.sections) {
+    if (section.key !== 'METRICS' || section.content.type !== 'metric') continue;
+    for (const entry of section.content.entries) {
+      if (entry.value <= 0) continue;
+      const key = entry.key.toLowerCase();
+      const current = context[key];
+      if (!Number.isFinite(current)) continue;
+      const ratio = current / entry.value;
+      if (ratio < staleThreshold) continue;
+      warnings.push({
+        metric: key,
+        baseline: entry.value,
+        current,
+        delta: current - entry.value,
+        ratio: Number(ratio.toFixed(2)),
+        recommendedCeiling: Math.ceil(current * 1.15),
+        rationaleRequired: true,
+      });
+    }
+  }
+  return warnings;
 }

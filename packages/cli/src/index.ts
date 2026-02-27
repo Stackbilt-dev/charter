@@ -43,7 +43,7 @@ Usage:
                                    Install git commit-msg hook for trailer normalization
   charter hook install --pre-commit [--force]
                                    Install git pre-commit hook for ADF evidence gate
-  charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate)
+  charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
