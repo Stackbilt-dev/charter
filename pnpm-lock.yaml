@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@stackbilt/cli':
-        specifier: 0.3.2
-        version: 0.3.2
+        specifier: 0.4.1
+        version: 0.4.1
       '@types/node':
         specifier: ^25.2.3
         version: 25.2.3
@@ -374,37 +374,37 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@stackbilt/adf@0.3.2':
-    resolution: {integrity: sha512-tY7fjR8xs311VTr+Q9FJU7jmk/KSbhpB0uJbzFln9RsAShElJb5Q1LiPNoFs3jSwbN5wjCuFlS6DdCRqRNxBow==}
+  '@stackbilt/adf@0.4.1':
+    resolution: {integrity: sha512-Q/JX6Skfulzr7wkyCnMos0DGmRWaXqcj5nGma2s48k7VazMlMADodG0DsRfUcB/9jK1ugX5vZg3m1fH0hWnmwg==}
     engines: {node: '>=18.0.0'}
 
-  '@stackbilt/classify@0.3.2':
-    resolution: {integrity: sha512-c/6h3jGAwW0B3AbNSt8nztTvS12oJ8/R7K48DFCU9nLLQ55dH3dx9MmOg7mDg0BWnwrcGivOh2N8uQIkYItuog==}
+  '@stackbilt/classify@0.4.1':
+    resolution: {integrity: sha512-0oYxg7kgwWSVQ52ad4vigWVE5A4/uU86k8IeYcbwlKwqNCz6Yi/IKg6tGSxDUyQW0M9u7J0p8tEUI3SahGuXzA==}
     engines: {node: '>=18.0.0'}
 
-  '@stackbilt/cli@0.3.2':
-    resolution: {integrity: sha512-2xNFuO6VqIQC1Cy6gm4K/6NOPNPZcPZOPYQhUy+bGYKjtLr0bnZ/qBmOVKvcmIRzTRmF5x08rsJAZgkq4tOeZg==}
+  '@stackbilt/cli@0.4.1':
+    resolution: {integrity: sha512-bm4C3yVA1kgg739YOKIjFADh3X/CcaBVI7sksbbKYhofMeWBZIL/+kSvHLJqciD4dyHX5UwjHHXQG7rwXzM/mw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
-  '@stackbilt/core@0.3.2':
-    resolution: {integrity: sha512-TM8T+cJyZpOyKcEbr5dmDAQOGakixKWt/8YtyHuKT620WGeJoDw4XTWWk2CA8Y8vmQ+RUxG/h+5QVyLcaUu75Q==}
+  '@stackbilt/core@0.4.1':
+    resolution: {integrity: sha512-lG9dSudaWexLTp6uAGXKtvDqSsrvSh1mc4912WA/dySs2oxy2wImhnyFYptpRzDZEW0vLiXqJDxg0NBHtFFE2Q==}
     engines: {node: '>=18.0.0'}
 
-  '@stackbilt/drift@0.3.2':
-    resolution: {integrity: sha512-+ofMoqfei8QN4vFMOhPprHNiTFThNWUsDywhEFyGSvjAW4/G5H2sS/gf3GYhbtxuu4GjFnLkrL4gqYF/dORBZg==}
+  '@stackbilt/drift@0.4.1':
+    resolution: {integrity: sha512-14GqymUZObYNADxPiJD8hfdIQc7Y+JonfMUNqGGQFNu4CNmPbU5XHxgE6YgTyfUXMd9Xd3HIlNlbdO1f9N66tA==}
     engines: {node: '>=18.0.0'}
 
-  '@stackbilt/git@0.3.2':
-    resolution: {integrity: sha512-9lS/9NVDKPkolQYXP8GecBxANGsnf+Hs7agOozMghNWfejMx8YTAsb5GXPYCy4nIIQe7O38lfAVUlR6TitmziA==}
+  '@stackbilt/git@0.4.1':
+    resolution: {integrity: sha512-osxI6hGL5qd9wQVBQgVni3WtlndwyUO7WOY+be8GceXMF7j0/9SHTzCeRsfN964UtvhaZ9iHLV8DE0QcFuRZ3w==}
     engines: {node: '>=18.0.0'}
 
-  '@stackbilt/types@0.3.2':
-    resolution: {integrity: sha512-a9ZM+jpNCI/LYMdsLLAHLoHGugIWhHER4dwiDeWYB8wnzmj/qB1NwlURpPJrofh5RcqIdCmYoXQUMqLWBbD9rQ==}
+  '@stackbilt/types@0.4.1':
+    resolution: {integrity: sha512-e0oAg1eHAIhlwHiUU3aBd90OSjXNwsj4FHwbt/eZxRMH68b4g5RY9GjSvAh6NUbX44yno2jt+dqSBOYENzoz2w==}
     engines: {node: '>=18.0.0'}
 
-  '@stackbilt/validate@0.3.2':
-    resolution: {integrity: sha512-rhFU1rxJprjv7jXLwmpVfBTh5KNr5g8F+YfDzVIuPTVkX7apO2D1BVw1o+22ymL4d7YQtlemwZbPRnU+PrZs1Q==}
+  '@stackbilt/validate@0.4.1':
+    resolution: {integrity: sha512-YEQu1UUFXQub6/juOpwyQrC0tg0ZPzPeRgU924ade9JSkXXapnTo7EBZaP2y8s4CRPq3pG4nJVMdLP8TnArSyA==}
     engines: {node: '>=18.0.0'}
 
   '@standard-schema/spec@1.1.0':
@@ -793,39 +793,39 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.57.1':
     optional: true
 
-  '@stackbilt/adf@0.3.2': {}
+  '@stackbilt/adf@0.4.1': {}
 
-  '@stackbilt/classify@0.3.2':
+  '@stackbilt/classify@0.4.1':
     dependencies:
-      '@stackbilt/types': 0.3.2
+      '@stackbilt/types': 0.4.1
 
-  '@stackbilt/cli@0.3.2':
+  '@stackbilt/cli@0.4.1':
     dependencies:
-      '@stackbilt/adf': 0.3.2
-      '@stackbilt/classify': 0.3.2
-      '@stackbilt/core': 0.3.2
-      '@stackbilt/drift': 0.3.2
-      '@stackbilt/git': 0.3.2
-      '@stackbilt/types': 0.3.2
-      '@stackbilt/validate': 0.3.2
+      '@stackbilt/adf': 0.4.1
+      '@stackbilt/classify': 0.4.1
+      '@stackbilt/core': 0.4.1
+      '@stackbilt/drift': 0.4.1
+      '@stackbilt/git': 0.4.1
+      '@stackbilt/types': 0.4.1
+      '@stackbilt/validate': 0.4.1
 
-  '@stackbilt/core@0.3.2':
+  '@stackbilt/core@0.4.1':
     dependencies:
       zod: 3.25.76
 
-  '@stackbilt/drift@0.3.2':
+  '@stackbilt/drift@0.4.1':
     dependencies:
-      '@stackbilt/types': 0.3.2
+      '@stackbilt/types': 0.4.1
 
-  '@stackbilt/git@0.3.2':
+  '@stackbilt/git@0.4.1':
     dependencies:
-      '@stackbilt/types': 0.3.2
+      '@stackbilt/types': 0.4.1
 
-  '@stackbilt/types@0.3.2': {}
+  '@stackbilt/types@0.4.1': {}
 
-  '@stackbilt/validate@0.3.2':
+  '@stackbilt/validate@0.4.1':
     dependencies:
-      '@stackbilt/types': 0.3.2
+      '@stackbilt/types': 0.4.1
 
   '@standard-schema/spec@1.1.0': {}
 
