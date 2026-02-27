@@ -41,9 +41,9 @@ Usage:
                                    Install git commit-msg hook for trailer normalization
   charter hook install --pre-commit [--force]
                                    Install git pre-commit hook for ADF evidence gate
-  charter adf <subcommand>         ADF context format tools (init, fmt, patch, bundle, sync, evidence, migrate)
+  charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate)
   charter why                      Explain why teams adopt Charter and expected ROI
-  charter doctor                   Check CLI + config health
+  charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
   charter --help                   Show this help
   charter --version                Show version
 
@@ -129,7 +129,7 @@ export async function run(args: string[]): Promise<number> {
     case 'why':
       return whyCommand(options);
     case 'doctor':
-      return doctorCommand(options);
+      return doctorCommand(options, restArgs);
     case 'hook':
       return hookCommand(options, restArgs);
     case 'adf':

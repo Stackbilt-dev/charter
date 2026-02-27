@@ -10,6 +10,7 @@ import {
   parseAdf,
   formatAdf,
   applyPatches,
+  CANONICAL_KEY_ORDER,
 } from '@stackbilt/adf';
 import type { PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -66,6 +67,18 @@ export const STATE_SCAFFOLD = `ADF: 0.1
   NEXT: Configure on-demand modules for your stack
 `;
 
+export const FRONTEND_SCAFFOLD = `ADF: 0.1
+\u{1F4CB} CONTEXT:
+  - Frontend module scaffold
+  - Add framework-specific constraints and operational rules
+`;
+
+export const BACKEND_SCAFFOLD = `ADF: 0.1
+\u{1F4CB} CONTEXT:
+  - Backend module scaffold
+  - Add service/API/database constraints and operational rules
+`;
+
 // ============================================================================
 // Dispatcher
 // ============================================================================
@@ -86,6 +99,8 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfFmt(options, restArgs);
     case 'patch':
       return adfPatch(options, restArgs);
+    case 'create':
+      return adfCreate(options, restArgs);
     case 'bundle':
       return adfBundle(options, restArgs);
     case 'sync':
@@ -95,7 +110,7 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
     case 'migrate':
       return adfMigrateCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, bundle, sync, evidence, migrate`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, bundle, sync, evidence, migrate`);
   }
 }
 
@@ -165,11 +180,13 @@ function adfInit(options: CLIOptions, args: string[]): number {
   fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
 
   const result: AdfInitResult = {
     created: true,
     aiDir,
-    files: ['manifest.adf', 'core.adf', 'state.adf'],
+    files: ['manifest.adf', 'core.adf', 'state.adf', 'frontend.adf', 'backend.adf'],
   };
 
   // --emit-pointers: generate thin pointer files that redirect to .ai/
@@ -210,6 +227,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
       ...result,
       nextActions: [
         'Edit core.adf with your universal repo rules',
+        'Edit frontend.adf and backend.adf stubs or replace with your domain modules',
         'charter adf fmt .ai/core.adf --check',
         'charter adf bundle --task "<prompt>"',
       ],
@@ -224,7 +242,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
     console.log('');
     console.log('  Next steps:');
     console.log('    1. Edit core.adf with your universal repo rules');
-    console.log('    2. Add on-demand modules (e.g. frontend.adf, backend.adf)');
+    console.log('    2. Edit frontend.adf/backend.adf stubs or replace with domain modules');
     console.log('    3. Run: charter adf fmt .ai/core.adf --check');
   }
 
@@ -236,6 +254,24 @@ function adfInit(options: CLIOptions, args: string[]): number {
 // ============================================================================
 
 function adfFmt(options: CLIOptions, args: string[]): number {
+  if (args.includes('--explain')) {
+    const payload = {
+      canonicalSectionOrder: CANONICAL_KEY_ORDER,
+      note: 'Known sections are sorted in this order; unknown sections keep insertion order after known sections.',
+    };
+    if (options.format === 'json') {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log('  Canonical ADF section order:');
+      for (const key of CANONICAL_KEY_ORDER) {
+        console.log(`    - ${key}`);
+      }
+      console.log('');
+      console.log('  Unknown section keys are preserved after known keys.');
+    }
+    return EXIT_CODE.SUCCESS;
+  }
+
   const filePath = args.find(a => !a.startsWith('-'));
   if (!filePath) {
     throw new CLIError('adf fmt requires a file path. Usage: charter adf fmt <file> [--check] [--write]');
@@ -341,6 +377,100 @@ function adfPatch(options: CLIOptions, args: string[]): number {
 }
 
 // ============================================================================
+// adf create
+// ============================================================================
+
+function adfCreate(options: CLIOptions, args: string[]): number {
+  const moduleArg = args.find(a => !a.startsWith('-'));
+  if (!moduleArg) {
+    throw new CLIError('adf create requires a module path. Usage: charter adf create <module> [--triggers "a,b"] [--load default|on-demand]');
+  }
+
+  const aiDir = getFlag(args, '--ai-dir') || '.ai';
+  const force = options.yes || args.includes('--force');
+  const load = (getFlag(args, '--load') || 'on-demand').toLowerCase();
+  if (load !== 'default' && load !== 'on-demand') {
+    throw new CLIError(`Invalid --load value: ${load}. Use default or on-demand.`);
+  }
+
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  if (!fs.existsSync(manifestPath)) {
+    throw new CLIError(`manifest.adf not found at ${manifestPath}. Run: charter adf init`);
+  }
+
+  const modulePath = moduleArg.endsWith('.adf') ? moduleArg : `${moduleArg}.adf`;
+  const moduleRelPath = modulePath.replace(/\\/g, '/');
+  const moduleAbsPath = path.join(aiDir, moduleRelPath);
+  fs.mkdirSync(path.dirname(moduleAbsPath), { recursive: true });
+
+  let fileCreated = false;
+  if (!fs.existsSync(moduleAbsPath) || force) {
+    fs.writeFileSync(moduleAbsPath, buildModuleScaffold(moduleRelPath));
+    fileCreated = true;
+  }
+
+  const manifestDoc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
+  const sectionKey = load === 'default' ? 'DEFAULT_LOAD' : 'ON_DEMAND';
+  const triggers = parseTriggers(getFlag(args, '--triggers'));
+  const manifestEntry = load === 'on-demand' && triggers.length > 0
+    ? `${moduleRelPath} (Triggers on: ${triggers.join(', ')})`
+    : moduleRelPath;
+
+  let section = manifestDoc.sections.find(s => s.key === sectionKey);
+  if (!section) {
+    section = {
+      key: sectionKey,
+      decoration: null,
+      content: { type: 'list', items: [] },
+    };
+    manifestDoc.sections.push(section);
+  }
+  if (section.content.type !== 'list') {
+    throw new CLIError(`${sectionKey} must be a list section in manifest.adf`);
+  }
+
+  const existingIdx = section.content.items.findIndex(item => parseModulePathFromEntry(item) === moduleRelPath);
+  let manifestUpdated = false;
+  if (existingIdx === -1) {
+    section.content.items.push(manifestEntry);
+    manifestUpdated = true;
+  } else if (section.content.items[existingIdx] !== manifestEntry) {
+    section.content.items[existingIdx] = manifestEntry;
+    manifestUpdated = true;
+  }
+
+  if (manifestUpdated) {
+    fs.writeFileSync(manifestPath, formatAdf(manifestDoc));
+  }
+
+  const output = {
+    aiDir,
+    module: moduleRelPath,
+    fileCreated,
+    manifestUpdated,
+    loadPolicy: load === 'default' ? 'DEFAULT_LOAD' : 'ON_DEMAND',
+    triggers,
+  };
+
+  if (options.format === 'json') {
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    if (fileCreated) {
+      console.log(`  [ok] Created ${path.join(aiDir, moduleRelPath)}`);
+    } else {
+      console.log(`  [ok] Reused existing ${path.join(aiDir, moduleRelPath)}`);
+    }
+    if (manifestUpdated) {
+      console.log(`  [ok] Registered ${moduleRelPath} in ${sectionKey}`);
+    } else {
+      console.log(`  [ok] ${moduleRelPath} already registered in ${sectionKey}`);
+    }
+  }
+
+  return EXIT_CODE.SUCCESS;
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -377,8 +507,15 @@ function printHelp(): void {
   console.log('    charter adf patch <file> --ops <json> | --ops-file <path>');
   console.log('      Apply ADF_PATCH operations to a file.');
   console.log('');
+  console.log('    charter adf create <module> [--ai-dir <dir>] [--triggers "a,b,c"] [--load default|on-demand] [--force]');
+  console.log('      Create a module file and register it in manifest DEFAULT_LOAD or ON_DEMAND.');
+  console.log('      --triggers: comma-separated trigger keywords (for ON_DEMAND entries).');
+  console.log('');
   console.log('    charter adf bundle --task "<prompt>" [--ai-dir <dir>]');
   console.log('      Resolve manifest modules for a task and output merged context.');
+  console.log('');
+  console.log('    charter adf fmt --explain');
+  console.log('      Show canonical section ordering used by the formatter.');
   console.log('');
   console.log('    charter adf sync --check [--ai-dir <dir>]');
   console.log('      Verify source .adf files match their locked hashes.');
@@ -409,4 +546,29 @@ function printHelp(): void {
   console.log('      --no-backup: skip creating .pre-adf-migrate.bak backups');
   console.log('      --merge-strategy: append (always add), dedupe (skip duplicates, default), replace');
   console.log('');
+}
+
+function parseTriggers(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map(v => v.trim())
+    .filter(v => v.length > 0);
+}
+
+function parseModulePathFromEntry(entry: string): string {
+  const withoutBudget = entry.replace(/\s*\[budget\s*:\s*\d+\]\s*$/i, '').trim();
+  const triggerMatch = withoutBudget.match(/^(.+?)\s*\(Triggers?\s+on\s*:\s*.+\)\s*$/i);
+  return triggerMatch ? triggerMatch[1].trim() : withoutBudget;
+}
+
+function buildModuleScaffold(modulePath: string): string {
+  const name = path.basename(modulePath, '.adf');
+  return `ADF: 0.1
+\u{1F3AF} TASK: ${name} module
+
+\u{1F4CB} CONTEXT:
+  - Module scaffold
+  - Add project-specific rules and constraints
+`;
 }

@@ -86,17 +86,32 @@ export function adfSync(options: CLIOptions, args: string[]): number {
   const manifest = parseManifest(manifestDoc);
 
   if (manifest.sync.length === 0) {
+    const lockFile = path.join(aiDir, '.adf.lock');
+    let written = false;
+    if (writeMode) {
+      fs.writeFileSync(lockFile, '{}\n');
+      written = true;
+    }
     const result: AdfSyncResult = {
       aiDir,
-      lockFile: path.join(aiDir, '.adf.lock'),
+      lockFile,
       entries: [],
       allInSync: true,
-      written: false,
+      written,
     };
     if (options.format === 'json') {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify({
+        ...result,
+        trackedSources: 0,
+        note: 'No SYNC entries declared in manifest; lock tracks only manifest SYNC sources.',
+      }, null, 2));
     } else {
-      console.log('  No SYNC entries in manifest. Nothing to check.');
+      if (writeMode) {
+        console.log(`  [ok] Wrote empty lock file at ${lockFile} (no SYNC entries declared).`);
+      } else {
+        console.log('  No SYNC entries in manifest. Nothing to check.');
+        console.log('  SYNC only tracks manifest entries in the SYNC section.');
+      }
     }
     return EXIT_CODE.SUCCESS;
   }

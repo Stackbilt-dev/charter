@@ -43,12 +43,22 @@ set -eu
 # ADF evidence gate: check LOC ceilings if manifest exists
 if [ -f ".ai/manifest.adf" ]; then
   echo '[pre-commit] Running ADF evidence check...'
-  npx charter adf evidence --auto-measure --ci || {
-    echo ''
-    echo '[pre-commit] ADF evidence FAILED — LOC ceiling breached.'
-    echo '  Run: npx charter adf evidence --auto-measure'
-    exit 1
-  }
+  if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then
+    pnpm run verify:adf || {
+      echo ''
+      echo '[pre-commit] ADF verification FAILED.'
+      echo '  Run: pnpm run verify:adf'
+      exit 1
+    }
+  else
+    npx charter doctor --adf-only --ci --format text && npx charter adf evidence --auto-measure --ci || {
+      echo ''
+      echo '[pre-commit] ADF verification FAILED.'
+      echo '  Run: npx charter doctor --adf-only --ci --format text'
+      echo '   && npx charter adf evidence --auto-measure --ci'
+      exit 1
+    }
+  fi
 fi
 `;
 
@@ -211,6 +221,8 @@ function printHelp(): void {
   console.log('  Resolves-Request trailers using git interpret-trailers.');
   console.log('');
   console.log('  --pre-commit: Install a git pre-commit hook that runs ADF evidence checks');
-  console.log('  (LOC ceiling validation) before each commit. Only gates when .ai/manifest.adf exists.');
+  console.log('  (LOC ceiling validation) before each commit. Uses `pnpm run verify:adf` when available,');
+  console.log('  otherwise falls back to `npx charter adf evidence --auto-measure --ci`.');
+  console.log('  Only gates when .ai/manifest.adf exists.');
   console.log('');
 }

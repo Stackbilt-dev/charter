@@ -177,7 +177,7 @@ charter setup --preset fullstack --ci github --yes
 ```
 
 Detection output includes `detected.sources` in JSON mode so agents can verify which manifests were scanned before applying a baseline.
-Setup also adds optional root scripts when missing: `charter:detect` and `charter:setup`.
+Setup also adds optional root scripts when missing: `charter:detect`, `charter:setup`, `verify:adf`, `charter:doctor`, and `charter:adf:bundle`.
 Setup JSON now includes `mutationPlan` and `appliedMutations` so side effects are explicit before/after apply.
 Setup baseline mutation metadata now includes `configHashBefore`, `configHashAfter`, and `writesPerformed`.
 
@@ -188,6 +188,7 @@ Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|b
 ### `charter doctor`
 
 Validate CLI installation, `.charter/` config, and ADF readiness (manifest existence, module parseability, sync lock status).
+Use `charter doctor --adf-only --ci` for strict ADF wiring gates in automation.
 
 ### `charter validate`
 
@@ -261,7 +262,7 @@ charter hook install --pre-commit
 ```
 
 - `--commit-msg`: Install a commit-msg hook that normalizes `Governed-By` and `Resolves-Request` trailers using `git interpret-trailers`.
-- `--pre-commit`: Install a pre-commit hook that runs `charter adf evidence --auto-measure --ci` before each commit. Only gates when `.ai/manifest.adf` exists — no-op otherwise. Uses `npx charter` so consuming repos need Charter as a devDependency.
+- `--pre-commit`: Install a pre-commit hook that enforces ADF routing with `charter doctor --adf-only --ci` and validates ceilings with `charter adf evidence --auto-measure --ci` (or `pnpm run verify:adf` when that script exists). Only gates when `.ai/manifest.adf` exists — no-op otherwise.
 - `--force` (or global `--yes`) allows overwrite when a non-Charter hook already exists.
 - Both flags can be passed together to install both hooks in one command.
 
@@ -273,6 +274,7 @@ ADF (Attention-Directed Format) context management. Replaces monolithic `.cursor
 charter adf init [--ai-dir <dir>] [--force]
 charter adf fmt <file> [--check] [--write]
 charter adf patch <file> --ops '<json>' | --ops-file <path>
+charter adf create <module> [--triggers "a,b,c"] [--load default|on-demand] [--ai-dir <dir>] [--force]
 charter adf bundle --task "Fix React component" [--ai-dir <dir>]
 charter adf sync --check [--ai-dir <dir>]
 charter adf sync --write [--ai-dir <dir>]
@@ -282,10 +284,12 @@ charter adf migrate [--dry-run] [--source <file>] [--no-backup]
                     [--merge-strategy append|dedupe|replace] [--ai-dir <dir>]
 ```
 
-- `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, and `state.adf`. Core module includes a 500-line LOC guardrail metric by default.
+- `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, `state.adf`, and starter `frontend.adf`/`backend.adf` on-demand module stubs. Core module includes a 500-line LOC guardrail metric by default.
 - `fmt`: Parse and reformat to canonical ADF. `--check` exits 1 if not canonical. `--write` reformats in place. Default prints to stdout.
+- `fmt --explain`: Print canonical section ordering used by the formatter.
 - `patch`: Apply typed delta operations (ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET, ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION, UPDATE_METRIC). Accepts `--ops <json>` inline or `--ops-file <path>` from a file.
-- `bundle`: Read `manifest.adf`, resolve ON_DEMAND modules via keyword matching against the task, and output merged context with token estimate, trigger observability (matched keywords, load reasons), unmatched modules, and advisory-only warnings.
+- `create`: Create an ADF module file and register it in `manifest.adf` under `DEFAULT_LOAD` or `ON_DEMAND` in one command.
+- `bundle`: Read `manifest.adf`, resolve ON_DEMAND modules via keyword matching against the task, and output merged context with token estimate, trigger observability (matched keywords, load reasons), unmatched modules, and advisory-only warnings. Missing ON_DEMAND files are warnings in output (`missingModules` in JSON), while missing DEFAULT_LOAD files still fail.
 - `sync --check`: Verify source `.adf` files match their locked hashes. Exits 1 if any source has drifted since last sync.
 - `sync --write`: Update `.adf.lock` with current source hashes.
 - `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail). The governance workflow template runs this automatically on PRs when `.ai/manifest.adf` is present.

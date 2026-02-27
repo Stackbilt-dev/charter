@@ -21,8 +21,9 @@ interface DoctorResult {
   }>;
 }
 
-export async function doctorCommand(options: CLIOptions): Promise<number> {
+export async function doctorCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const checks: DoctorResult['checks'] = [];
+  const adfOnly = args.includes('--adf-only');
   const configFile = path.join(options.configPath, 'config.json');
   const inGitRepo = isGitRepo();
 
@@ -32,36 +33,38 @@ export async function doctorCommand(options: CLIOptions): Promise<number> {
     details: inGitRepo ? 'Repository detected.' : 'Not inside a git repository.',
   });
 
-  const hasConfig = fs.existsSync(configFile);
-  checks.push({
-    name: 'config file',
-    status: hasConfig ? 'PASS' : 'WARN',
-    details: hasConfig ? `${configFile} exists.` : `${configFile} not found. Run charter setup.`,
-  });
+  if (!adfOnly) {
+    const hasConfig = fs.existsSync(configFile);
+    checks.push({
+      name: 'config file',
+      status: hasConfig ? 'PASS' : 'WARN',
+      details: hasConfig ? `${configFile} exists.` : `${configFile} not found. Run charter setup.`,
+    });
 
-  if (hasConfig) {
-    checks.push(validateJSONConfig(configFile));
+    if (hasConfig) {
+      checks.push(validateJSONConfig(configFile));
+    }
+
+    const patterns = loadPatterns(options.configPath);
+    checks.push({
+      name: 'patterns',
+      status: patterns.length > 0 ? 'PASS' : 'WARN',
+      details: patterns.length > 0
+        ? `${patterns.length} pattern(s) loaded.`
+        : 'No patterns found in .charter/patterns/*.json.',
+    });
+
+    const policyDir = path.join(options.configPath, 'policies');
+    const policyCount = fs.existsSync(policyDir)
+      ? fs.readdirSync(policyDir).filter((f) => f.endsWith('.md')).length
+      : 0;
+
+    checks.push({
+      name: 'policy docs',
+      status: policyCount > 0 ? 'PASS' : 'WARN',
+      details: policyCount > 0 ? `${policyCount} markdown policy file(s).` : 'No policy markdown files found.',
+    });
   }
-
-  const patterns = loadPatterns(options.configPath);
-  checks.push({
-    name: 'patterns',
-    status: patterns.length > 0 ? 'PASS' : 'WARN',
-    details: patterns.length > 0
-      ? `${patterns.length} pattern(s) loaded.`
-      : 'No patterns found in .charter/patterns/*.json.',
-  });
-
-  const policyDir = path.join(options.configPath, 'policies');
-  const policyCount = fs.existsSync(policyDir)
-    ? fs.readdirSync(policyDir).filter((f) => f.endsWith('.md')).length
-    : 0;
-
-  checks.push({
-    name: 'policy docs',
-    status: policyCount > 0 ? 'PASS' : 'WARN',
-    details: policyCount > 0 ? `${policyCount} markdown policy file(s).` : 'No policy markdown files found.',
-  });
 
   // ADF readiness checks
   const aiDir = '.ai';
@@ -86,6 +89,17 @@ export async function doctorCommand(options: CLIOptions): Promise<number> {
         details: `Parsed: ${manifest.defaultLoad.length} default-load, ${manifest.onDemand.length} on-demand module(s).`,
       });
 
+      // Required baseline wiring for a standard ADF repo
+      const requiredDefaultModules = ['core.adf', 'state.adf'];
+      const missingRequired = requiredDefaultModules.filter(mod => !manifest.defaultLoad.includes(mod));
+      checks.push({
+        name: 'adf required wiring',
+        status: missingRequired.length === 0 ? 'PASS' : 'WARN',
+        details: missingRequired.length === 0
+          ? 'Required default-load modules present (core.adf, state.adf).'
+          : `Missing from DEFAULT_LOAD: ${missingRequired.join(', ')}`,
+      });
+
       // Check that all defaultLoad modules exist and parse
       const missingModules: string[] = [];
       for (const mod of manifest.defaultLoad) {
@@ -107,6 +121,29 @@ export async function doctorCommand(options: CLIOptions): Promise<number> {
         details: missingModules.length === 0
           ? `All ${manifest.defaultLoad.length} default-load module(s) present and parseable.`
           : `Missing or unparseable: ${missingModules.join(', ')}`,
+      });
+
+      // Check that on-demand modules exist and parse (missing modules are warnings)
+      const onDemandPaths = [...new Set(manifest.onDemand.map(m => m.path))];
+      const onDemandIssues: string[] = [];
+      for (const mod of onDemandPaths) {
+        const modPath = path.join(aiDir, mod);
+        if (!fs.existsSync(modPath)) {
+          onDemandIssues.push(`${mod} (missing)`);
+          continue;
+        }
+        try {
+          parseAdf(fs.readFileSync(modPath, 'utf-8'));
+        } catch {
+          onDemandIssues.push(`${mod} (parse error)`);
+        }
+      }
+      checks.push({
+        name: 'adf on-demand modules',
+        status: onDemandIssues.length === 0 ? 'PASS' : 'WARN',
+        details: onDemandIssues.length === 0
+          ? `All ${onDemandPaths.length} on-demand module(s) present and parseable.`
+          : `Missing or unparseable: ${onDemandIssues.join(', ')}`,
       });
 
       // Agent config pointer check: flag files with stack rules that should be in .ai/

@@ -40,16 +40,37 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
     .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
 
   const modulePaths = resolveModules(manifest, keywords);
+  const defaultLoad = new Set(manifest.defaultLoad);
+  const missingModules: Array<{ module: string; loadPolicy: 'DEFAULT' | 'ON_DEMAND'; reason: string }> = [];
+  const loadableModulePaths: string[] = [];
+
+  for (const modulePath of modulePaths) {
+    const fullPath = path.join(aiDir, modulePath);
+    if (!fs.existsSync(fullPath)) {
+      const loadPolicy = defaultLoad.has(modulePath) ? 'DEFAULT' : 'ON_DEMAND';
+      if (loadPolicy === 'DEFAULT') {
+        throw new CLIError(`Default module not found: ${modulePath} (${fullPath})`);
+      }
+      missingModules.push({
+        module: modulePath,
+        loadPolicy,
+        reason: 'module file not found',
+      });
+      continue;
+    }
+    loadableModulePaths.push(modulePath);
+  }
 
   const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
 
   try {
-    const result = bundleModules(aiDir, modulePaths, readFile, keywords);
+    const result = bundleModules(aiDir, loadableModulePaths, readFile, keywords);
 
     if (options.format === 'json') {
       const jsonOut: Record<string, unknown> = {
         task,
         keywords,
+        attemptedModules: modulePaths,
         resolvedModules: result.resolvedModules,
         tokenEstimate: result.tokenEstimate,
         tokenBudget: result.tokenBudget,
@@ -57,6 +78,9 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
         perModuleTokens: result.perModuleTokens,
         triggerMatches: result.triggerMatches,
       };
+      if (missingModules.length > 0) {
+        jsonOut.missingModules = missingModules;
+      }
       if (result.unmatchedModules.length > 0) {
         jsonOut.unmatchedModules = result.unmatchedModules;
       }
@@ -74,6 +98,12 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
       console.log(`  Task: "${task}"`);
       console.log(`  Keywords: ${keywords.join(', ')}`);
       console.log(`  Resolved modules: ${result.resolvedModules.join(', ')}`);
+      if (missingModules.length > 0) {
+        console.log('  Missing on-demand modules:');
+        for (const missing of missingModules) {
+          console.log(`    [warn] ${missing.module} (${missing.reason})`);
+        }
+      }
       console.log(`  Token estimate: ~${result.tokenEstimate}`);
       if (result.tokenBudget !== null) {
         const pct = result.tokenUtilization !== null
@@ -133,10 +163,11 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
     return EXIT_CODE.SUCCESS;
   } catch (e: unknown) {
     if (e instanceof Error && e.name === 'AdfBundleError') {
+      const errorCode = e.message.includes('Module not found') ? 'ADF_MODULE_NOT_FOUND' : 'ADF_BUNDLE_ERROR';
       if (options.format === 'json') {
-        console.log(JSON.stringify({ error: e.message }, null, 2));
+        console.log(JSON.stringify({ error: e.message, errorCode }, null, 2));
       } else {
-        console.error(`  [error] ${e.message}`);
+        console.error(`  [error:${errorCode}] ${e.message}`);
       }
       return EXIT_CODE.RUNTIME_ERROR;
     }

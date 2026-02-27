@@ -68,6 +68,14 @@ ${installStep}
       - name: Drift Scan
         run: npx charter drift --ci --format text
 
+      - name: ADF Wiring & Pointer Integrity
+        run: npx charter doctor --adf-only --ci --format text
+        if: hashFiles('.ai/manifest.adf') != ''
+
+      - name: ADF Evidence
+        run: npx charter adf evidence --auto-measure --ci --format text
+        if: hashFiles('.ai/manifest.adf') != ''
+
       - name: Audit Report
         run: npx charter audit --format json > /tmp/audit.json
         if: always()
@@ -878,6 +886,9 @@ export function syncPackageManifest(
     const depUpdated: string[] = [];
     const detectCommand = 'charter setup --detect-only --format json';
     const setupCommand = `charter setup --preset ${selectedPreset} --ci github --yes`;
+    const verifyAdfCommand = 'charter doctor --adf-only --ci --format json && charter adf evidence --auto-measure --ci --format json';
+    const doctorCommand = 'charter doctor --format json';
+    const bundleCommand = 'charter adf bundle --task "describe task" --format json';
     const pinnedCliVersion = CLI_VERSION;
 
     if (!scripts['charter:detect']) {
@@ -893,6 +904,27 @@ export function syncPackageManifest(
     } else if (scripts['charter:setup'] !== setupCommand) {
       scripts['charter:setup'] = setupCommand;
       updatedEntries.push('charter:setup');
+    }
+    if (!scripts['verify:adf']) {
+      scripts['verify:adf'] = verifyAdfCommand;
+      added.push('verify:adf');
+    } else if (scripts['verify:adf'] !== verifyAdfCommand) {
+      scripts['verify:adf'] = verifyAdfCommand;
+      updatedEntries.push('verify:adf');
+    }
+    if (!scripts['charter:doctor']) {
+      scripts['charter:doctor'] = doctorCommand;
+      added.push('charter:doctor');
+    } else if (scripts['charter:doctor'] !== doctorCommand) {
+      scripts['charter:doctor'] = doctorCommand;
+      updatedEntries.push('charter:doctor');
+    }
+    if (!scripts['charter:adf:bundle']) {
+      scripts['charter:adf:bundle'] = bundleCommand;
+      added.push('charter:adf:bundle');
+    } else if (scripts['charter:adf:bundle'] !== bundleCommand) {
+      scripts['charter:adf:bundle'] = bundleCommand;
+      updatedEntries.push('charter:adf:bundle');
     }
 
     if (syncDependencies) {
