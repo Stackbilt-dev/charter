@@ -46,6 +46,7 @@ charter adf sync --check
 
 # Validate metric constraints and produce a structured evidence report
 charter adf evidence --auto-measure --format json
+charter adf metrics recalibrate --headroom 15 --reason "Added new built modules after scope expansion" --dry-run
 charter telemetry report --period 24h --format json
 ```
 
@@ -225,6 +226,7 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 - `charter adf sync --check [--ai-dir <dir>]`: verify source .adf files match locked hashes (exit 1 on drift)
 - `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current source hashes
 - `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce structured evidence report
+- `charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]`: recalibrate metric baselines/ceilings from current LOC and record budget rationale
 - `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: ingest existing agent config files and migrate content into ADF modules
 - `charter telemetry report [--period <30m|24h|7d>]`: summarize passive local CLI telemetry from `.charter/telemetry/events.ndjson`
 - `charter why`: explain adoption rationale and expected payoff

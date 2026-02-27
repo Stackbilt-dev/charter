@@ -195,6 +195,19 @@ npx charter adf evidence --context-file metrics.json
 **CI mode:** exits 1 on any constraint failure. Warnings (at boundary) surface in the report but do not fail the build.
 
 Output includes constraint results, weight summary (load-bearing / advisory / unweighted), sync status, advisory-only warnings, and a `nextActions` array.
+When stale baselines are detected, JSON output includes `staleBaselines` entries with `baseline`, `current`, `delta`, `recommendedCeiling`, and `rationaleRequired`.
+
+### charter adf metrics recalibrate
+
+Re-measures LOC from manifest metric sources and recalibrates metric values/ceilings using a configurable headroom policy.
+
+```bash
+npx charter adf metrics recalibrate --headroom 15 --reason "Added new built modules after scope increase" --dry-run
+npx charter adf metrics recalibrate --headroom 20 --auto-rationale
+```
+
+- Writes metric rationale entries into a `BUDGET_RATIONALES` section.
+- `--reason` (or `--auto-rationale`) is required for recalibration updates.
 
 ### ADF Automation Gate
 
