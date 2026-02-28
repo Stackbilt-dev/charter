@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { parseAllTrailers, assessCommitRisk } from '@stackbilt/git';
 import type { GitCommit } from '@stackbilt/types';
+import { runGit, isGitRepo, hasCommits, parseCommitMetadata, parseChangedFilesByCommit } from '../git-helpers';
 
 interface SnapshotResult {
   inGitRepo: boolean;
@@ -132,27 +132,10 @@ function getSnapshot(configPath: string): SnapshotResult {
   };
 }
 
-function isGitRepo(): boolean {
-  try {
-    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function getRecentCommits(count: number): GitCommit[] {
   try {
-    const metadataLog = execFileSync('git', ['log', `-${count}`, '--format=%H%x1f%an%x1f%aI%x1f%B%x1e'], {
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const filesLog = execFileSync('git', ['log', `-${count}`, '--name-only', '--format=%H'], {
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    const metadataLog = runGit(['log', `-${count}`, '--format=%H%x1f%an%x1f%aI%x1f%B%x1e']);
+    const filesLog = runGit(['log', `-${count}`, '--name-only', '--format=%H']);
 
     const filesBySha = parseChangedFilesByCommit(filesLog);
     return parseCommitMetadata(metadataLog).map((commit) => ({
@@ -161,62 +144,5 @@ function getRecentCommits(count: number): GitCommit[] {
     }));
   } catch {
     return [];
-  }
-}
-
-function parseCommitMetadata(logOutput: string): Array<Omit<GitCommit, 'files_changed'>> {
-  const commits: Array<Omit<GitCommit, 'files_changed'>> = [];
-
-  for (const rawRecord of logOutput.split('\x1e')) {
-    const record = rawRecord.trim();
-    if (!record) continue;
-
-    const [sha = '', author = '', timestamp = '', ...messageParts] = record.split('\x1f');
-    if (!sha) continue;
-
-    commits.push({
-      sha: sha.trim(),
-      author: author.trim(),
-      timestamp: timestamp.trim(),
-      message: messageParts.join('\x1f').replace(/\r\n/g, '\n').replace(/\n+$/, ''),
-    });
-  }
-
-  return commits;
-}
-
-function parseChangedFilesByCommit(logOutput: string): Map<string, string[]> {
-  const filesBySha = new Map<string, string[]>();
-  let currentSha = '';
-
-  for (const rawLine of logOutput.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    if (/^[a-f0-9]{40}$/i.test(line)) {
-      currentSha = line;
-      if (!filesBySha.has(currentSha)) {
-        filesBySha.set(currentSha, []);
-      }
-      continue;
-    }
-
-    if (!currentSha) continue;
-    const files = filesBySha.get(currentSha);
-    if (!files || files.includes(line)) continue;
-    files.push(line);
-  }
-
-  return filesBySha;
-}
-
-function hasCommits(): boolean {
-  try {
-    execFileSync('git', ['rev-parse', '--verify', 'HEAD'], {
-      stdio: 'ignore',
-    });
-    return true;
-  } catch {
-    return false;
   }
 }

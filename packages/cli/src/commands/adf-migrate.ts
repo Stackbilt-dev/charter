@@ -21,7 +21,7 @@ import type { AdfDocument, PatchOperation, MigrationItem } from '@stackbilt/adf'
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD } from './adf';
+import { POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD, POINTER_MARKERS } from './adf';
 
 // ============================================================================
 // Constants
@@ -35,7 +35,6 @@ const AGENT_CONFIG_FILES = [
   'copilot-instructions.md',
 ];
 
-const THIN_POINTER_MARKER = 'Do not duplicate ADF rules here';
 
 const POINTER_TEMPLATES: Record<string, string> = {
   'CLAUDE.md': POINTER_CLAUDE_MD,
@@ -144,7 +143,7 @@ function migrateSource(
   const content = fs.readFileSync(fullPath, 'utf-8');
 
   // Skip if already a thin pointer
-  if (content.includes(THIN_POINTER_MARKER)) {
+  if (POINTER_MARKERS.some(marker => content.includes(marker))) {
     return {
       source: sourcePath,
       skipped: true,
@@ -291,8 +290,17 @@ function applyMigrationToModule(
         content: { type: 'list', items: listItems },
         weight,
       });
+    } else if (existingSection.content.type === 'text') {
+      // Text sections can't receive ADD_BULLET — convert to list via REPLACE_SECTION
+      const existingText = existingSection.content.value.trim();
+      const newItems = items.map(i => formatItemForAdf(i));
+      ops.push({
+        op: 'REPLACE_SECTION',
+        key: sectionKey,
+        content: { type: 'list', items: existingText ? [existingText, ...newItems] : newItems },
+      });
     } else {
-      // Add individual bullets to existing section
+      // Add individual bullets to existing list/map section
       for (const item of items) {
         const formatted = formatItemForAdf(item);
 
