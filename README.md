@@ -97,18 +97,18 @@ Here is the actual output from Charter's dogfood run:
   ADF Evidence Report
   ===================
   Modules loaded: core.adf, state.adf
-  Token estimate: ~371
-  Token budget: 4000 (9%)
+  Token estimate: ~494
+  Token budget: 4000 (12%)
 
   Auto-measured:
-    adf_commands_loc: 413 lines (packages/cli/src/commands/adf.ts)
-    adf_bundle_loc: 154 lines (packages/cli/src/commands/adf-bundle.ts)
-    adf_sync_loc: 204 lines (packages/cli/src/commands/adf-sync.ts)
-    adf_evidence_loc: 263 lines (packages/cli/src/commands/adf-evidence.ts)
-    adf_migrate_loc: 453 lines (packages/cli/src/commands/adf-migrate.ts)
-    bundler_loc: 415 lines (packages/adf/src/bundler.ts)
+    adf_commands_loc: 577 lines (packages/cli/src/commands/adf.ts)
+    adf_bundle_loc: 175 lines (packages/cli/src/commands/adf-bundle.ts)
+    adf_sync_loc: 213 lines (packages/cli/src/commands/adf-sync.ts)
+    adf_evidence_loc: 312 lines (packages/cli/src/commands/adf-evidence.ts)
+    adf_migrate_loc: 455 lines (packages/cli/src/commands/adf-migrate.ts)
+    bundler_loc: 413 lines (packages/adf/src/bundler.ts)
     parser_loc: 214 lines (packages/adf/src/parser.ts)
-    cli_entry_loc: 149 lines (packages/cli/src/index.ts)
+    cli_entry_loc: 191 lines (packages/cli/src/index.ts)
 
   Section weights:
     Load-bearing: 2
@@ -116,14 +116,14 @@ Here is the actual output from Charter's dogfood run:
     Unweighted: 3
 
   Constraints:
-    [ok] adf_commands_loc: 413 / 500 [lines] -- PASS
-    [ok] adf_bundle_loc: 154 / 200 [lines] -- PASS
-    [ok] adf_sync_loc: 204 / 250 [lines] -- PASS
-    [ok] adf_evidence_loc: 263 / 300 [lines] -- PASS
-    [ok] adf_migrate_loc: 453 / 500 [lines] -- PASS
-    [ok] bundler_loc: 415 / 500 [lines] -- PASS
+    [ok] adf_commands_loc: 577 / 650 [lines] -- PASS
+    [ok] adf_bundle_loc: 175 / 200 [lines] -- PASS
+    [ok] adf_sync_loc: 213 / 250 [lines] -- PASS
+    [ok] adf_evidence_loc: 312 / 380 [lines] -- PASS
+    [ok] adf_migrate_loc: 455 / 500 [lines] -- PASS
+    [ok] bundler_loc: 413 / 500 [lines] -- PASS
     [ok] parser_loc: 214 / 300 [lines] -- PASS
-    [ok] cli_entry_loc: 149 / 200 [lines] -- PASS
+    [ok] cli_entry_loc: 191 / 200 [lines] -- PASS
 
   Sync: all sources in sync
 
@@ -133,7 +133,7 @@ Here is the actual output from Charter's dogfood run:
 What this shows:
 
 - **Metric ceilings enforce LOC limits on source files.** Each key in the `METRICS` section of an `.adf` module declares a ceiling. The `--auto-measure` flag counts lines live from the source files referenced in the manifest.
-- **Self-correcting architecture.** When `adf_commands_loc` hit 93% of its 900-line ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into four focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
+- **Self-correcting architecture.** When `adf_commands_loc` approached its ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`, `adf-migrate.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
 - **CI gating.** Generated governance workflows run `charter doctor --adf-only --ci` and `charter adf evidence --auto-measure --ci` when `.ai/manifest.adf` is present, blocking merges on ADF wiring violations or ceiling breaches.
 - **Pre-commit enforcement.** `charter hook install --pre-commit` installs a git hook that enforces `doctor --adf-only` + ADF evidence checks (or `pnpm run verify:adf` when present). When an agent runs unattended, wiring/ceiling violations block the commit.
 - **Available to any repo.** This is the same system you get by running `charter adf init` in your own project.
@@ -163,7 +163,8 @@ For pnpm workspaces use `pnpm add -Dw @stackbilt/cli`. For a global install use 
 
 ```bash
 charter                              # Repo risk/value snapshot
-charter setup --ci github            # Apply governance baseline
+charter bootstrap --ci github        # One-command onboarding (detect + setup + ADF + install + doctor)
+charter setup --ci github            # Apply governance baseline (or use bootstrap)
 charter doctor                       # Validate environment/config
 charter validate                     # Check commit governance
 charter drift                        # Scan for stack drift
@@ -205,9 +206,14 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 
 </details>
 
+## Cross-Platform Support
+
+Charter v0.5.0 works across WSL, PowerShell, CMD, macOS, and Linux. All git operations use a unified invocation layer with cross-platform PATH resolution. Line endings are normalized via `.gitattributes` (LF for source, CRLF for `.bat`/`.cmd`/`.ps1`).
+
 ## Command Reference
 
 - `charter`: show repo risk/value snapshot and recommended next action
+- `charter bootstrap [--ci github] [--preset <name>] [--yes] [--skip-install] [--skip-doctor]`: one-command onboarding (detect + setup + ADF + install + doctor)
 - `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]`: detect stack and scaffold `.charter/` baseline
 - `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
 - `charter doctor [--adf-only]`: validate environment/config state (`--adf-only` runs strict ADF wiring checks)
