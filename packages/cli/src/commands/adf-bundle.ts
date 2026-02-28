@@ -15,6 +15,7 @@ import {
 } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag, tokenizeTask } from '../flags';
 
 export function adfBundle(options: CLIOptions, args: string[]): number {
   const task = getFlag(args, '--task');
@@ -33,11 +34,7 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
   const manifestDoc = parseAdf(manifestContent);
   const manifest = parseManifest(manifestDoc);
 
-  // Tokenize task into keywords (simple word split)
-  const keywords = task
-    .split(/[\s,;:()[\]{}]+/)
-    .filter(w => w.length > 1)
-    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
+  const keywords = tokenizeTask(task);
 
   const modulePaths = resolveModules(manifest, keywords);
   const defaultLoad = new Set(manifest.defaultLoad);
@@ -64,7 +61,7 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
   const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
 
   try {
-    const result = bundleModules(aiDir, loadableModulePaths, readFile, keywords);
+    const result = bundleModules(aiDir, loadableModulePaths, readFile, keywords, manifest);
 
     if (options.format === 'json') {
       const jsonOut: Record<string, unknown> = {
@@ -175,10 +172,3 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
   }
 }
 
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}

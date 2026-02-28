@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 import type { CliTelemetryEvent } from '../telemetry';
 
 interface TelemetryReport {
@@ -170,14 +171,6 @@ function parsePeriod(value: string): number {
   };
 
   return amount * unitMs[unit];
-}
-
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
 }
 
 function printHelp(): void {

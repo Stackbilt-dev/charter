@@ -16,6 +16,7 @@ import {
 import type { AdfDocument, EvidenceResult } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag, readFlagFile, tokenizeTask } from '../flags';
 import { hashContent, loadLockFile } from './adf-sync';
 
 interface AutoMeasurement {
@@ -56,10 +57,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   let modulePaths: string[];
   let keywords: string[] = [];
   if (task) {
-    keywords = task
-      .split(/[\s,;:()[\]{}]+/)
-      .filter(w => w.length > 1)
-      .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
+    keywords = tokenizeTask(task);
     modulePaths = resolveModules(manifest, keywords);
   } else {
     modulePaths = [...manifest.defaultLoad];
@@ -68,7 +66,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
 
   let context: Record<string, number> | undefined;
-  const rawContext = contextFile ? readJsonFlag(contextFile, '--context-file') : contextJson;
+  const rawContext = contextFile ? readFlagFile(contextFile, '--context-file') : contextJson;
   if (rawContext) {
     try {
       const parsed = JSON.parse(rawContext);
@@ -104,7 +102,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   }
 
   try {
-    const bundle = bundleModules(aiDir, modulePaths, readFile, keywords);
+    const bundle = bundleModules(aiDir, modulePaths, readFile, keywords, manifest);
     const evidence: EvidenceResult = validateConstraints(bundle.mergedDocument, context);
     const staleBaselines = detectStaleBaselines(bundle.mergedDocument, context, staleThreshold);
 
@@ -273,20 +271,6 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   }
 }
 
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}
-
-function readJsonFlag(filePath: string, flagName: string): string {
-  if (!fs.existsSync(filePath)) {
-    throw new CLIError(`File not found for ${flagName}: ${filePath}`);
-  }
-  return fs.readFileSync(filePath, 'utf-8');
-}
 
 function parseStaleThreshold(raw: string): number {
   const parsed = parseFloat(raw);

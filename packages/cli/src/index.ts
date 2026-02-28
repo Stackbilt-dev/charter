@@ -18,6 +18,7 @@ import { adfCommand } from './commands/adf';
 import { bootstrapCommand } from './commands/bootstrap';
 import { telemetryCommand } from './commands/telemetry';
 import { recordTelemetryEvent } from './telemetry';
+import { getFlag } from './flags';
 import packageJson from '../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -187,10 +188,3 @@ export async function run(args: string[]): Promise<number> {
   }
 }
 
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}

@@ -11,6 +11,7 @@ import * as crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 import { initializeCharter, type StackPreset } from './init';
 import {
   detectStack,
@@ -681,14 +682,6 @@ function runDoctorPhase(
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}
 
 function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';

@@ -10,6 +10,7 @@ import { formatAdf, parseAdf, parseManifest } from '@stackbilt/adf';
 import type { AdfDocument } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 
 interface MetricUpdate {
   metric: string;
@@ -238,13 +239,6 @@ function buildAutoRationale(headroomPercent: number, metricCount: number): strin
   return `Recalibrated ${metricCount} metric baseline(s) on ${date} using +${headroomPercent}% headroom from current measured LOC.`;
 }
 
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}
 
 function printHelp(): void {
   console.log('');

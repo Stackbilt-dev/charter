@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 import { getDefaultConfigJSON } from '../config';
 
 export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack';
@@ -302,14 +303,6 @@ function writeIfChanged(targetPath: string, content: string): boolean {
 
 function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
-}
-
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
 }
 
 function buildPatternTemplate(

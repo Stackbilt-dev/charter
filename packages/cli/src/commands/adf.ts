@@ -15,6 +15,7 @@ import {
 import type { PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag, readFlagFile } from '../flags';
 import { adfMigrateCommand } from './adf-migrate';
 import { adfBundle } from './adf-bundle';
 import { adfSync } from './adf-sync';
@@ -339,7 +340,7 @@ function adfPatch(options: CLIOptions, args: string[]): number {
     throw new CLIError(`File not found: ${filePath}`);
   }
 
-  const rawOps = opsFile ? readJsonFlag(opsFile, '--ops-file') : opsJson!;
+  const rawOps = opsFile ? readFlagFile(opsFile, '--ops-file') : opsJson!;
 
   let ops: PatchOperation[];
   try {
@@ -477,20 +478,6 @@ function adfCreate(options: CLIOptions, args: string[]): number {
 // Helpers
 // ============================================================================
 
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}
-
-function readJsonFlag(filePath: string, flagName: string): string {
-  if (!fs.existsSync(filePath)) {
-    throw new CLIError(`File not found for ${flagName}: ${filePath}`);
-  }
-  return fs.readFileSync(filePath, 'utf-8');
-}
 
 function printHelp(): void {
   console.log('');

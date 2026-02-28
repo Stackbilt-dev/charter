@@ -20,6 +20,7 @@ import {
 import type { AdfDocument, PatchOperation, MigrationItem } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 import { POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD } from './adf';
 
 // ============================================================================
@@ -443,10 +444,3 @@ function printTextResult(result: SourceMigrationResult, dryRun: boolean): void {
 // Helpers
 // ============================================================================
 
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
-}

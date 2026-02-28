@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import type { CLIOptions } from '../index';
 import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 import { initializeCharter, type StackPreset } from './init';
 import packageJson from '../../package.json';
 
@@ -832,14 +833,6 @@ export function applyManagedFile(targetPath: string, content: string, force: boo
 
   fs.writeFileSync(absolute, content);
   return { created: false, updated: true };
-}
-
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx !== -1 && idx + 1 < args.length) {
-    return args[idx + 1];
-  }
-  return undefined;
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
