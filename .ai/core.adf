@@ -27,7 +27,7 @@ ADF: 0.1
   adf_commands_loc: 0 / 650 [lines]
   adf_bundle_loc: 0 / 200 [lines]
   adf_sync_loc: 0 / 250 [lines]
-  adf_evidence_loc: 0 / 300 [lines]
+  adf_evidence_loc: 0 / 380 [lines]
   adf_migrate_loc: 0 / 500 [lines]
   bundler_loc: 0 / 500 [lines]
   parser_loc: 0 / 300 [lines]

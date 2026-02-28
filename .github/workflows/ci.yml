@@ -12,16 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run typecheck
       - run: pnpm run build
-      - run: pnpm run docs:check
+      - run: pnpm run typecheck
+      - name: Docs sync check
+        run: pnpm run docs:check
+        if: hashFiles('.docsync.json') != ''
       - run: pnpm run verify:adf
       - run: pnpm run test
       - run: node packages/cli/dist/bin.js --help

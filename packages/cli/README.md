@@ -282,6 +282,7 @@ charter adf sync --check [--ai-dir <dir>]
 charter adf sync --write [--ai-dir <dir>]
 charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]
                      [--context '{"key": value}'] [--context-file <path>]
+charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]
 charter adf migrate [--dry-run] [--source <file>] [--no-backup]
                     [--merge-strategy append|dedupe|replace] [--ai-dir <dir>]
 ```
@@ -294,7 +295,8 @@ charter adf migrate [--dry-run] [--source <file>] [--no-backup]
 - `bundle`: Read `manifest.adf`, resolve ON_DEMAND modules via keyword matching against the task, and output merged context with token estimate, trigger observability (matched keywords, load reasons), unmatched modules, and advisory-only warnings. Missing ON_DEMAND files are warnings in output (`missingModules` in JSON), while missing DEFAULT_LOAD files still fail.
 - `sync --check`: Verify source `.adf` files match their locked hashes. Exits 1 if any source has drifted since last sync.
 - `sync --write`: Update `.adf.lock` with current source hashes.
-- `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail). The governance workflow template runs this automatically on PRs when `.ai/manifest.adf` is present.
+- `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail). Also reports stale-baseline warnings (baseline vs current delta + recommended ceiling) when baseline values drift significantly. The governance workflow template runs this automatically on PRs when `.ai/manifest.adf` is present.
+- `metrics recalibrate`: Re-measure current LOC from manifest metric sources, propose and apply new ceilings using configurable headroom, and append rationale records to `BUDGET_RATIONALES`. Requires explicit rationale (`--reason`) unless `--auto-rationale` is used.
 - `migrate`: Scan existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md, copilot-instructions.md), classify content using the ADX-002 decision tree, and migrate into ADF modules. `--dry-run` previews the migration plan without writing files. `--source <file>` targets a single file. `--no-backup` skips `.pre-adf-migrate.bak` creation. `--merge-strategy` controls deduplication: `dedupe` (default, skip items already in ADF), `append` (always add), or `replace`. Environment-specific rules (WSL, PATH, credential helpers) are retained in the thin pointer.
 
 ### `charter telemetry`

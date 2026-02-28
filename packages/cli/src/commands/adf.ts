@@ -19,6 +19,7 @@ import { adfMigrateCommand } from './adf-migrate';
 import { adfBundle } from './adf-bundle';
 import { adfSync } from './adf-sync';
 import { adfEvidence } from './adf-evidence';
+import { adfMetricsCommand } from './adf-metrics';
 
 // ============================================================================
 // Scaffold Content
@@ -109,8 +110,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfEvidence(options, restArgs);
     case 'migrate':
       return adfMigrateCommand(options, restArgs);
+    case 'metrics':
+      return adfMetricsCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, bundle, sync, evidence, migrate`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, bundle, sync, evidence, migrate, metrics`);
   }
 }
 
@@ -545,6 +548,9 @@ function printHelp(): void {
   console.log('      --source: migrate a single file instead of scanning all agent configs');
   console.log('      --no-backup: skip creating .pre-adf-migrate.bak backups');
   console.log('      --merge-strategy: append (always add), dedupe (skip duplicates, default), replace');
+  console.log('');
+  console.log('    charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]');
+  console.log('      Recalibrate metric baselines/ceilings from current LOC with required rationale.');
   console.log('');
 }
 

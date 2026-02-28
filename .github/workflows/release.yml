@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (for backfill), e.g. v0.4.2'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          TAG="${{ inputs.tag }}"
+        else
+          TAG="${GITHUB_REF_NAME}"
+        fi
+
+        if [[ -z "${TAG}" ]]; then
+          echo "Tag could not be resolved." >&2
+          exit 1
+        fi
+
+        echo "value=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag format: ${TAG}. Expected v<major>.<minor>.<patch>" >&2
+            exit 1
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            PKG_VERSION="$(node -p "require('./packages/cli/package.json').version")"
+            EXPECTED_TAG="v${PKG_VERSION}"
+
+            if [[ "${TAG}" != "${EXPECTED_TAG}" ]]; then
+              echo "Tag/version mismatch on push: got ${TAG}, expected ${EXPECTED_TAG}" >&2
+              exit 1
+            fi
+          else
+            if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+              echo "Tag not found in repository: ${TAG}" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Build release notes from CHANGELOG
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          VERSION="${TAG#v}"
+
+          awk -v version="${VERSION}" '
+            BEGIN { in_section=0 }
+            $0 ~ "^## \\[" version "\\]" { in_section=1; print; next }
+            in_section && $0 ~ "^## \\[" { exit }
+            in_section { print }
+          ' CHANGELOG.md > release_notes.md
+
+          if [[ ! -s release_notes.md ]]; then
+            echo "## ${TAG}" > release_notes.md
+            echo >> release_notes.md
+            echo "See CHANGELOG.md for release details." >> release_notes.md
+          fi
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: ${{ steps.tag.outputs.value }}
+          body_path: release_notes.md
+          generate_release_notes: true

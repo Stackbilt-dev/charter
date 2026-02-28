@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- **`charter adf metrics recalibrate`**: New subcommand to re-measure LOC from manifest metric sources, propose new ceilings with configurable headroom, and update metric baselines/ceilings with required rationale (`--reason` or `--auto-rationale`).
+- **Budget rationale trail**: Recalibration writes `BUDGET_RATIONALES` map entries so metric-cap changes carry explicit context for later review.
+
+### Changed
+- **Stale baseline detection in evidence**: `charter adf evidence` now detects stale metric baselines (current vs baseline drift), emits structured `staleBaselines` warnings (baseline/current/delta/recommendedCeiling/rationaleRequired), and suggests recalibration actions.
+
 ## [0.4.2] - 2026-02-27
 
 ### Added

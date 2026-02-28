@@ -13,3 +13,6 @@ AGENTS.md
 CLAUDE.md
 plans/
 governance/
+
+# local telemetry artifacts
+.charter/telemetry/
