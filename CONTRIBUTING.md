@@ -5,8 +5,8 @@ Thanks for contributing. This repo is a PNPM workspace for offline governance to
 ## Development Setup
 
 ```bash
-git clone https://github.com/stackbilt-dev/charter-kit.git
-cd charter-kit
+git clone https://github.com/stackbilt-dev/charter.git
+cd charter
 pnpm install
 pnpm run build
 ```
