@@ -174,23 +174,25 @@ export function resolveModules(manifest: Manifest, taskKeywords: string[]): stri
 }
 
 /**
- * Match a trigger against task keywords with prefix stemming.
- * Exact match always wins. Prefix match requires:
- *   - minimum 4 chars on the prefix
- *   - the prefix must be at least 75% of the longer string's length
- *     (avoids false positives like React → Reactive)
+ * Check if a single trigger matches a single keyword via exact or prefix stemming.
+ * Prefix match requires minimum 4 chars and >=66% length ratio.
  */
-function matchesTrigger(trigger: string, keywords: string[]): boolean {
-  const t = trigger.toLowerCase();
-  for (const k of keywords) {
-    if (k === t) return true;
-    if (t.length >= 4 && k.startsWith(t) && isPrefixStem(t, k)) return true;
-    if (k.length >= 4 && t.startsWith(k) && isPrefixStem(k, t)) return true;
-  }
+function isKeywordMatch(trigger: string, keyword: string): boolean {
+  if (keyword === trigger) return true;
+  if (trigger.length >= 4 && keyword.startsWith(trigger) && isPrefixStem(trigger, keyword)) return true;
+  if (keyword.length >= 4 && trigger.startsWith(keyword) && isPrefixStem(keyword, trigger)) return true;
   return false;
 }
 
-/** Check if prefix is plausibly a stem of the full word (≥66% length ratio). */
+/**
+ * Match a trigger against task keywords with prefix stemming.
+ */
+function matchesTrigger(trigger: string, keywords: string[]): boolean {
+  const t = trigger.toLowerCase();
+  return keywords.some(k => isKeywordMatch(t, k));
+}
+
+/** Check if prefix is plausibly a stem of the full word (>=66% length ratio). */
 function isPrefixStem(prefix: string, full: string): boolean {
   return prefix.length / full.length >= 0.66;
 }
@@ -211,8 +213,9 @@ export function bundleModules(
   modulePaths: string[],
   readFile: (p: string) => string,
   taskKeywords: string[] = [],
+  preloadedManifest?: Manifest,
 ): BundleResult {
-  const manifest = loadAndParseManifest(basePath, readFile);
+  const manifest = preloadedManifest ?? loadAndParseManifest(basePath, readFile);
   const triggerMatches = buildTriggerReport(manifest, modulePaths, taskKeywords);
 
   const documents: AdfDocument[] = [];
@@ -305,12 +308,7 @@ function buildTriggerReport(
   for (const mod of manifest.onDemand) {
     for (const trigger of mod.triggers) {
       const t = trigger.toLowerCase();
-      const matchedKeywords = lowerKeywords.filter(k => {
-        if (k === t) return true;
-        if (t.length >= 4 && k.startsWith(t) && isPrefixStem(t, k)) return true;
-        if (k.length >= 4 && t.startsWith(k) && isPrefixStem(k, t)) return true;
-        return false;
-      });
+      const matchedKeywords = lowerKeywords.filter(k => isKeywordMatch(t, k));
       const isResolved = resolvedPaths.includes(mod.path);
       const isDefault = defaultLoadSet.has(mod.path);
       matches.push({

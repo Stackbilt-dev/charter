@@ -73,11 +73,8 @@ function formatBody(content: AdfContent): string[] {
   switch (content.type) {
     case 'text': {
       if (content.value === '' || !content.value.includes('\n')) {
-        // Single-line text is inlined in header — no body
-        if (content.value !== '') return [];
         return [];
       }
-      // Multi-line text: indent each line
       return content.value.split('\n').map(line => `  ${line}`);
     }
     case 'list': {
