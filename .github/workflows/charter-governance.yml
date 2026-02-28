@@ -33,6 +33,7 @@ jobs:
 
       - name: Drift Scan
         run: npx charter drift --ci --format text
+        if: hashFiles('.charter/patterns/*.json') != ''
 
       - name: ADF Wiring & Pointer Integrity
         run: npx charter doctor --adf-only --ci --format text

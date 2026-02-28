@@ -19,7 +19,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run typecheck
-      - run: pnpm run docs:check
+      - name: Docs sync check
+        run: pnpm run docs:check
+        if: hashFiles('.docsync.json') != ''
       - run: pnpm run verify:adf
       - run: pnpm run test
       - run: node packages/cli/dist/bin.js --help
