@@ -235,6 +235,38 @@ describe('applyPatches', () => {
 
   // --- Weight in ADD_SECTION ---
 
+  // --- ADD_BULLET on text section (F3 fix) ---
+
+  it('ADD_BULLET: converts text section to list and appends', () => {
+    const result = applyPatches(makeDoc(), [
+      { op: 'ADD_BULLET', section: 'TASK', value: 'New item' },
+    ]);
+    const sec = result.sections.find(s => s.key === 'TASK')!;
+    expect(sec.content.type).toBe('list');
+    if (sec.content.type === 'list') {
+      expect(sec.content.items).toEqual(['Build feature', 'New item']);
+    }
+  });
+
+  it('ADD_BULLET: converts empty text section to list', () => {
+    const doc: AdfDocument = {
+      version: '0.1',
+      sections: [
+        { key: 'CONTEXT', decoration: null, content: { type: 'text', value: '' } },
+      ],
+    };
+    const result = applyPatches(doc, [
+      { op: 'ADD_BULLET', section: 'CONTEXT', value: 'First item' },
+    ]);
+    const sec = result.sections.find(s => s.key === 'CONTEXT')!;
+    expect(sec.content.type).toBe('list');
+    if (sec.content.type === 'list') {
+      expect(sec.content.items).toEqual(['First item']);
+    }
+  });
+
+  // --- Weight in ADD_SECTION ---
+
   it('ADD_SECTION: preserves weight annotation', () => {
     const result = applyPatches(makeDoc(), [
       {

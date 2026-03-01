@@ -4,9 +4,13 @@ feedback-id: ADX-002
 date: 2026-02-26
 source: "Claude Opus 4.6 (Anthropic) bootstrapping smart_revenue_recovery_adf"
 severity: medium
+bucket: onboarding
+status: shipped
 related:
   - CSA-002 (greenfield measurement — this IS the subject project)
   - ADX-001 (complements: ADX-001 showed cost without ADF; this shows cost of setting up ADF)
+tracked-issues: []
+tracked-prs: []
 ---
 
 # Agent DX Feedback: ADF Greenfield Bootstrapping — Rule Routing Friction

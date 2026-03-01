@@ -4,13 +4,14 @@
  * Prints environment and configuration diagnostics for humans and agents.
  */
 
-import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
+import { isGitRepo } from '../git-helpers';
+import { POINTER_MARKERS } from './adf';
 
 interface DoctorResult {
   status: 'PASS' | 'WARN';
@@ -148,7 +149,6 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
 
       // Agent config pointer check: flag files with stack rules that should be in .ai/
       const AGENT_CONFIG_FILES = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
-      const POINTER_MARKERS = ['Do not duplicate ADF rules here', 'Do not duplicate rules from .ai/'];
       const nonPointerFiles: string[] = [];
       for (const file of AGENT_CONFIG_FILES) {
         if (fs.existsSync(file)) {
@@ -220,16 +220,6 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
   return EXIT_CODE.SUCCESS;
 }
 
-function isGitRepo(): boolean {
-  try {
-    execSync('git rev-parse --is-inside-work-tree', {
-      stdio: 'ignore',
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function validateJSONConfig(configFile: string): DoctorResult['checks'][number] {
   try {

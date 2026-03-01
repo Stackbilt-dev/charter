@@ -129,6 +129,15 @@ interface AdfInitResult {
   pointers?: string[];
 }
 
+// -- Thin pointer detection markers --
+
+/** Strings that identify an agent config file as a thin pointer to .ai/. */
+export const POINTER_MARKERS = [
+  'Do not duplicate ADF rules here',
+  'Do not duplicate rules from .ai/',
+  'Do not add stack rules here',
+];
+
 // -- Thin pointer file content --
 
 export const POINTER_CLAUDE_MD = `# Project Context

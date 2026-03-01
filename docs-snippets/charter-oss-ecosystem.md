@@ -14,3 +14,5 @@ npx charter adf init    # scaffold .ai/ context directory
 **ADF commands:** `adf init`, `adf fmt`, `adf patch`, `adf bundle`, `adf sync`, `adf evidence`.
 
 For quantitative analysis of ADF's impact on autonomous system architecture, see the [Context-as-Code white paper](https://github.com/stackbilt-dev/charter/blob/main/papers/context-as-code-v1.1.md).
+
+For iterative UX findings and versioned improvement plans, see the [`papers/` index](https://github.com/stackbilt-dev/charter/blob/main/papers/README.md).
