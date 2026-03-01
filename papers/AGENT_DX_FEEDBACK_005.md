@@ -4,10 +4,14 @@ feedback-id: ADX-005
 date: 2026-02-28
 source: "Claude Opus 4.6 (Anthropic) UX walkthrough of charter CLI"
 severity: medium
+bucket: output-ergonomics
+status: triaged
 related:
   - ADX-004 (bootstrap overwrite hazard)
   - ADX-003 (install automation friction)
   - ADX-002 (onboarding friction baseline)
+tracked-issues: []
+tracked-prs: []
 ---
 
 # Agent DX Feedback: charter CLI UX — Bootstrap, Migrate, Doctor, and Output Ergonomics

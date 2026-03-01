@@ -8,6 +8,27 @@
 
 Charter is a local-first governance toolkit with a built-in AI context compiler. It ships **ADF (Attention-Directed Format)** -- a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files -- alongside offline governance checks for commit trailers, risk scoring, drift detection, and change classification.
 
+<!-- DOCSYNC:BEGIN:ecosystem-coordination -->
+## Charter: Local Enforcement + ADF Context Compiler
+
+Charter runs in your terminal and CI pipeline. It validates commit trailers, scores drift against your blessed stack, and blocks merges on violations. Zero SaaS dependency - all checks are deterministic and local.
+
+Charter also ships **ADF (Attention-Directed Format)** - a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files with compiled, trigger-routed `.ai/` modules. ADF treats LLM context as a compiled language: emoji-decorated semantic keys, typed patch operations, manifest-driven progressive disclosure, and metric ceilings with CI evidence gating.
+
+```bash
+npm install --save-dev @stackbilt/cli
+npx charter setup --preset fullstack --ci github --yes
+npx charter adf init    # scaffold .ai/ context directory
+```
+
+**Governance commands:** `validate`, `drift`, `audit`, `classify`, `hook install`.
+**ADF commands:** `adf init`, `adf fmt`, `adf patch`, `adf bundle`, `adf sync`, `adf evidence`.
+
+For quantitative analysis of ADF's impact on autonomous system architecture, see the [Context-as-Code white paper](https://github.com/stackbilt-dev/charter/blob/main/papers/context-as-code-v1.1.md).
+
+For iterative UX findings and versioned improvement plans, see the [`papers/` index](https://github.com/stackbilt-dev/charter/blob/main/papers/README.md).
+<!-- DOCSYNC:END:ecosystem-coordination -->
+
 ## ADF: Attention-Directed Format
 
 ADF treats LLM context as a compiled language. Instead of dumping flat markdown into a context window, ADF uses emoji-decorated semantic keys, a strict AST, and a module system with progressive disclosure -- so agents load only the context they need for the current task.
@@ -278,12 +299,14 @@ packages/
 
 ## Research & White Papers
 
-The [`papers/`](./papers/) directory contains versioned white papers documenting
-ADF design rationale and quantitative analysis.
+The [`papers/`](./papers/) directory is the curated narrative layer for Charter's
+iterative process:
 
-| Paper | Description |
+| Entry Point | Purpose |
 |---|---|
-| [Context-as-Code v1.1](./papers/context-as-code-v1.1.md) | Quantifies ADF impact on a PRD-driven AI Orchestration Engine v2 SDLC: 80% token reduction, 0% LOC-limit violations across 33 modules. |
+| [Papers Index](./papers/README.md) | Canonical overview of research papers, UX feedback, and release planning docs. |
+| [UX Feedback Index](./papers/ux-feedback/README.md) | Journey-bucketed ADX findings (Onboarding, Daily Use, Reliability/Trust, Output Ergonomics, Automation/CI). |
+| [Release Plans Index](./papers/releases/README.md) | Versioned plans that map selected feedback to implementation outcomes. |
 
 ## Release Docs
 

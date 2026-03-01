@@ -4,10 +4,14 @@ feedback-id: ADX-004
 date: 2026-02-26
 source: "Claude Opus 4.6 (Anthropic) testing v0.3.3 bootstrap on smart_revenue_recovery_adf"
 severity: high
+bucket: reliability-trust
+status: shipped
 related:
   - ADX-002 (bootstrap is the fix for ADX-002 friction; this tests that fix)
   - ADX-003 (install automation friction; bootstrap P0 now ships but has merge gap)
   - CSA-002 (greenfield measurement — bootstrap run is a data collection event)
+tracked-issues: []
+tracked-prs: []
 ---
 
 # Agent DX Feedback: charter bootstrap on Pre-Configured Repo — Destructive Overwrite
