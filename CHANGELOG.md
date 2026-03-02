@@ -6,12 +6,28 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-02
+
 ### Added
 - **`charter adf metrics recalibrate`**: New subcommand to re-measure LOC from manifest metric sources, propose new ceilings with configurable headroom, and update metric baselines/ceilings with required rationale (`--reason` or `--auto-rationale`).
 - **Budget rationale trail**: Recalibration writes `BUDGET_RATIONALES` map entries so metric-cap changes carry explicit context for later review.
+- **Cross-platform git helpers**: Unified `git-helpers.ts` module with `shell: true` for WSL/CMD/PowerShell PATH resolution, replacing ~6 duplicated `runGit` implementations across commands.
+- **EPERM/EACCES retry hint**: Bootstrap install step now suggests `--force` or elevated permissions when write failures occur (ADX-005 F5).
+- **No-HEAD guard in audit**: `hasCommits()` check prevents hard errors when auditing repos with no commits (ADX-005 F6).
+- **ADX-005 feedback paper**: `papers/AGENT_DX_FEEDBACK_005.md` documenting 8 findings from end-to-end charter CLI UX walkthrough.
+- **Papers directory restructure**: UX feedback buckets (`papers/ux-feedback/`), release planning templates (`papers/releases/`), and feedback paper template (`papers/templates/`).
+- **Papers lint script**: `scripts/papers-lint.mjs` for validating paper frontmatter and cross-references.
+- **Custom `/commit` skill**: Claude Code slash command for intelligent, organized multi-group committing (`.claude/skills/commit/SKILL.md`).
+
+### Fixed
+- **Cross-platform git invocation** (ADX-005 F2): Hook install no longer reports "not inside git repo" on WSL/PowerShell due to PATH resolution failures.
+- **`adf migrate` prose sections** (ADX-005 F3): Patcher `ADD_BULLET` on text sections now converts to list; migrate detects text sections and uses `REPLACE_SECTION` instead.
+- **Doctor thin pointer false positive** (ADX-005 F4): `.cursorrules` thin pointers now recognized via shared `POINTER_MARKERS` constant.
 
 ### Changed
 - **Stale baseline detection in evidence**: `charter adf evidence` now detects stale metric baselines (current vs baseline drift), emits structured `staleBaselines` warnings (baseline/current/delta/recommendedCeiling/rationaleRequired), and suggests recalibration actions.
+- **README updated**: Cross-platform support section, bootstrap command in Getting Started, refreshed dogfood evidence snapshot.
+- All packages bumped from 0.4.2 to 0.5.0.
 
 ## [0.4.2] - 2026-02-27
 
@@ -331,6 +347,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.5.0]: https://github.com/stackbilt-dev/charter/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/stackbilt-dev/charter/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/stackbilt-dev/charter/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/stackbilt-dev/charter/compare/v0.3.4...v0.4.0
