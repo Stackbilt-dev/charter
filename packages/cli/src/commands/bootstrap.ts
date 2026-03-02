@@ -28,6 +28,8 @@ import {
   MANIFEST_SCAFFOLD,
   CORE_SCAFFOLD,
   STATE_SCAFFOLD,
+  FRONTEND_SCAFFOLD,
+  BACKEND_SCAFFOLD,
   POINTER_CLAUDE_MD,
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
@@ -420,12 +422,14 @@ function runAdfInitPhase(
     const alreadyExists = fs.existsSync(manifestPath);
     const hasCustomContent = alreadyExists && hasCustomAdfContent(aiDir);
     if (!alreadyExists) {
-      // Greenfield: write scaffolds
+      // Greenfield: write scaffolds (including on-demand module stubs)
       fs.mkdirSync(aiDir, { recursive: true });
       fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
       fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
       fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf');
+      fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+      fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/frontend.adf', '.ai/backend.adf');
 
       // Write .adf.lock
       const lockData: Record<string, string> = {};
@@ -440,12 +444,14 @@ function runAdfInitPhase(
       warnings.push('.ai/ contains custom ADF content; skipping scaffold overwrite');
       warnings.push("Run 'charter adf migrate' to consolidate agent configs into ADF");
     } else if (force) {
-      // Force overwrite
+      // Force overwrite (including on-demand module stubs)
       fs.mkdirSync(aiDir, { recursive: true });
       fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
       fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
       fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf');
+      fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+      fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/frontend.adf', '.ai/backend.adf');
 
       const lockData: Record<string, string> = {};
       for (const mod of ['core.adf', 'state.adf']) {
