@@ -11,6 +11,7 @@ This index groups ADX feedback by journey stage so viewers can quickly see where
 | ADX-003 | [Install/Setup Automation Friction (Windows + PNPM Workspace)](../AGENT_DX_FEEDBACK_003.md) | Automation and CI | High | Planned |
 | ADX-004 | [Bootstrap on Pre-Configured Repo - Destructive Overwrite](../AGENT_DX_FEEDBACK_004.md) | Reliability and Trust | High | Shipped |
 | ADX-005 | [CLI UX - Bootstrap, Migrate, Doctor, and Output Ergonomics](../AGENT_DX_FEEDBACK_005.md) | Output Ergonomics | Medium | Triaged |
+| ADX-007 | [ADF architecture cohesion and enforcement boundaries](../AGENT_DX_FEEDBACK_007.md) | Reliability and Trust | Medium | Triaged |
 
 ## Buckets
 
