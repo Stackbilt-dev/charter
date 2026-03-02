@@ -4,10 +4,14 @@ feedback-id: ADX-003
 date: 2026-02-26
 source: "Codex (OpenAI) configuring digitalcsa-kit with @stackbilt/cli v0.3.2"
 severity: high
+bucket: automation-ci
+status: planned
 related:
   - RM-001 (ADF vNext Roadmap draft)
   - ADX-001 (runtime discoverability friction)
   - ADX-002 (ADF bootstrapping/routing friction)
+tracked-issues: []
+tracked-prs: []
 ---
 
 # Agent DX Feedback: Install/Setup Automation Friction (Windows + PNPM Workspace)

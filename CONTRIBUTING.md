@@ -81,6 +81,14 @@ Stays in CSA Cloud:
 Use GitHub Issues for bugs/features. Include Node.js version, OS, and `charter --version` output.
 For security issues, follow `SECURITY.md`.
 
+## Papers Workflow
+
+- GitHub Issues/PRs are the canonical tracker for active engineering work.
+- `papers/` is a curated narrative layer (feedback, research, release plans), not a full mirror of all links.
+- New `AGENT_DX_FEEDBACK_*.md` files must include frontmatter keys required by `scripts/papers-lint.mjs`:
+  `feedback-id`, `date`, `source`, `severity`, `bucket`, `status`, `tracked-issues`, `tracked-prs`.
+- Release plans under `papers/releases/*-plan.md` must include the release-plan frontmatter schema validated by `scripts/papers-lint.mjs`.
+
 ## License
 
 By contributing, you agree that contributions are licensed under Apache License 2.0.

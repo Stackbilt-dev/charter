@@ -4,11 +4,11 @@
  * Installs git hooks for commit-time governance ergonomics.
  */
 
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
+import { runGit, isGitRepo } from '../git-helpers';
 
 interface HookInstallResult {
   status: 'INSTALLED' | 'SKIPPED';
@@ -186,19 +186,9 @@ function getGitConfig(key: string): string {
 }
 
 function ensureGitRepo(): void {
-  try {
-    runGit(['rev-parse', '--is-inside-work-tree']);
-  } catch {
+  if (!isGitRepo()) {
     throw new CLIError('Not inside a git repository.');
   }
-}
-
-function runGit(args: string[]): string {
-  return execFileSync('git', args, {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    maxBuffer: 10 * 1024 * 1024,
-  });
 }
 
 function setExecutableBit(targetPath: string): void {

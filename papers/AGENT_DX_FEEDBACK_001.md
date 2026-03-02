@@ -4,9 +4,13 @@ feedback-id: ADX-001
 date: 2026-02-26
 source: "Codex (OpenAI) working on edgestack_v2"
 severity: high
+bucket: daily-use
+status: shipped
 related:
   - CSA-002 (evidence of the problem ADF solves)
   - ARCHITECT_V2_INTEGRATION_BRIEF (scaffold should prevent this)
+tracked-issues: []
+tracked-prs: []
 ---
 
 # Agent DX Feedback: Codex Lockfile Archaeology

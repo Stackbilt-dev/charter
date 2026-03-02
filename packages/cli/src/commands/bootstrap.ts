@@ -12,6 +12,8 @@ import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
+import { isGitRepo } from '../git-helpers';
+import { POINTER_MARKERS } from './adf';
 import { initializeCharter, type StackPreset } from './init';
 import {
   detectStack,
@@ -158,7 +160,12 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
         console.log('  Done');
       } else {
         console.log(`  Failed: ${installResult.step.details.error}`);
-        console.log('  (non-fatal: run install manually)');
+        for (const w of installResult.step.warnings) {
+          if (w.startsWith('Hint:') || w.startsWith('Retry')) {
+            console.log(`  ${w}`);
+          }
+        }
+        console.log('  (non-fatal)');
       }
     }
     console.log('');
@@ -539,7 +546,12 @@ function runInstallPhase(
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    const isPermError = msg.includes('EPERM') || msg.includes('EACCES') || msg.includes('permission denied');
     warnings.push(`Install failed: ${msg}`);
+    if (isPermError) {
+      warnings.push(`Hint: permission error detected. Retry outside the sandbox or with elevated privileges: ${command}`);
+    }
+    warnings.push(`Retry manually: ${command}`);
     return {
       step: {
         name: 'install',
@@ -583,13 +595,7 @@ function runDoctorPhase(
 
   try {
     // Git repository check
-    let inGitRepo = false;
-    try {
-      execSync('git rev-parse --is-inside-work-tree', { stdio: 'ignore' });
-      inGitRepo = true;
-    } catch {
-      // not in a git repo
-    }
+    const inGitRepo = isGitRepo();
     checks.push({
       name: 'Git repository',
       status: inGitRepo ? 'PASS' : 'WARN',
@@ -713,7 +719,7 @@ function hasCustomAdfContent(aiDir: string): boolean {
 function isAlreadyThinPointer(filePath: string): boolean {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    return content.includes('Do not duplicate ADF rules here');
+    return POINTER_MARKERS.some(marker => content.includes(marker));
   } catch {
     return false;
   }

@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/validate",
   "sideEffects": false,
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Citation validation, message classification, and governance checks",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -8,6 +8,27 @@
 
 Charter is a local-first governance toolkit with a built-in AI context compiler. It ships **ADF (Attention-Directed Format)** -- a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files -- alongside offline governance checks for commit trailers, risk scoring, drift detection, and change classification.
 
+<!-- DOCSYNC:BEGIN:ecosystem-coordination -->
+## Charter: Local Enforcement + ADF Context Compiler
+
+Charter runs in your terminal and CI pipeline. It validates commit trailers, scores drift against your blessed stack, and blocks merges on violations. Zero SaaS dependency - all checks are deterministic and local.
+
+Charter also ships **ADF (Attention-Directed Format)** - a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files with compiled, trigger-routed `.ai/` modules. ADF treats LLM context as a compiled language: emoji-decorated semantic keys, typed patch operations, manifest-driven progressive disclosure, and metric ceilings with CI evidence gating.
+
+```bash
+npm install --save-dev @stackbilt/cli
+npx charter setup --preset fullstack --ci github --yes
+npx charter adf init    # scaffold .ai/ context directory
+```
+
+**Governance commands:** `validate`, `drift`, `audit`, `classify`, `hook install`.
+**ADF commands:** `adf init`, `adf fmt`, `adf patch`, `adf bundle`, `adf sync`, `adf evidence`.
+
+For quantitative analysis of ADF's impact on autonomous system architecture, see the [Context-as-Code white paper](https://github.com/stackbilt-dev/charter/blob/main/papers/context-as-code-v1.1.md).
+
+For iterative UX findings and versioned improvement plans, see the [`papers/` index](https://github.com/stackbilt-dev/charter/blob/main/papers/README.md).
+<!-- DOCSYNC:END:ecosystem-coordination -->
+
 ## ADF: Attention-Directed Format
 
 ADF treats LLM context as a compiled language. Instead of dumping flat markdown into a context window, ADF uses emoji-decorated semantic keys, a strict AST, and a module system with progressive disclosure -- so agents load only the context they need for the current task.
@@ -97,18 +118,18 @@ Here is the actual output from Charter's dogfood run:
   ADF Evidence Report
   ===================
   Modules loaded: core.adf, state.adf
-  Token estimate: ~371
-  Token budget: 4000 (9%)
+  Token estimate: ~494
+  Token budget: 4000 (12%)
 
   Auto-measured:
-    adf_commands_loc: 413 lines (packages/cli/src/commands/adf.ts)
-    adf_bundle_loc: 154 lines (packages/cli/src/commands/adf-bundle.ts)
-    adf_sync_loc: 204 lines (packages/cli/src/commands/adf-sync.ts)
-    adf_evidence_loc: 263 lines (packages/cli/src/commands/adf-evidence.ts)
-    adf_migrate_loc: 453 lines (packages/cli/src/commands/adf-migrate.ts)
-    bundler_loc: 415 lines (packages/adf/src/bundler.ts)
+    adf_commands_loc: 577 lines (packages/cli/src/commands/adf.ts)
+    adf_bundle_loc: 175 lines (packages/cli/src/commands/adf-bundle.ts)
+    adf_sync_loc: 213 lines (packages/cli/src/commands/adf-sync.ts)
+    adf_evidence_loc: 312 lines (packages/cli/src/commands/adf-evidence.ts)
+    adf_migrate_loc: 455 lines (packages/cli/src/commands/adf-migrate.ts)
+    bundler_loc: 413 lines (packages/adf/src/bundler.ts)
     parser_loc: 214 lines (packages/adf/src/parser.ts)
-    cli_entry_loc: 149 lines (packages/cli/src/index.ts)
+    cli_entry_loc: 191 lines (packages/cli/src/index.ts)
 
   Section weights:
     Load-bearing: 2
@@ -116,14 +137,14 @@ Here is the actual output from Charter's dogfood run:
     Unweighted: 3
 
   Constraints:
-    [ok] adf_commands_loc: 413 / 500 [lines] -- PASS
-    [ok] adf_bundle_loc: 154 / 200 [lines] -- PASS
-    [ok] adf_sync_loc: 204 / 250 [lines] -- PASS
-    [ok] adf_evidence_loc: 263 / 300 [lines] -- PASS
-    [ok] adf_migrate_loc: 453 / 500 [lines] -- PASS
-    [ok] bundler_loc: 415 / 500 [lines] -- PASS
+    [ok] adf_commands_loc: 577 / 650 [lines] -- PASS
+    [ok] adf_bundle_loc: 175 / 200 [lines] -- PASS
+    [ok] adf_sync_loc: 213 / 250 [lines] -- PASS
+    [ok] adf_evidence_loc: 312 / 380 [lines] -- PASS
+    [ok] adf_migrate_loc: 455 / 500 [lines] -- PASS
+    [ok] bundler_loc: 413 / 500 [lines] -- PASS
     [ok] parser_loc: 214 / 300 [lines] -- PASS
-    [ok] cli_entry_loc: 149 / 200 [lines] -- PASS
+    [ok] cli_entry_loc: 191 / 200 [lines] -- PASS
 
   Sync: all sources in sync
 
@@ -133,7 +154,7 @@ Here is the actual output from Charter's dogfood run:
 What this shows:
 
 - **Metric ceilings enforce LOC limits on source files.** Each key in the `METRICS` section of an `.adf` module declares a ceiling. The `--auto-measure` flag counts lines live from the source files referenced in the manifest.
-- **Self-correcting architecture.** When `adf_commands_loc` hit 93% of its 900-line ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into four focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
+- **Self-correcting architecture.** When `adf_commands_loc` approached its ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`, `adf-migrate.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
 - **CI gating.** Generated governance workflows run `charter doctor --adf-only --ci` and `charter adf evidence --auto-measure --ci` when `.ai/manifest.adf` is present, blocking merges on ADF wiring violations or ceiling breaches.
 - **Pre-commit enforcement.** `charter hook install --pre-commit` installs a git hook that enforces `doctor --adf-only` + ADF evidence checks (or `pnpm run verify:adf` when present). When an agent runs unattended, wiring/ceiling violations block the commit.
 - **Available to any repo.** This is the same system you get by running `charter adf init` in your own project.
@@ -163,7 +184,8 @@ For pnpm workspaces use `pnpm add -Dw @stackbilt/cli`. For a global install use 
 
 ```bash
 charter                              # Repo risk/value snapshot
-charter setup --ci github            # Apply governance baseline
+charter bootstrap --ci github        # One-command onboarding (detect + setup + ADF + install + doctor)
+charter setup --ci github            # Apply governance baseline (or use bootstrap)
 charter doctor                       # Validate environment/config
 charter validate                     # Check commit governance
 charter drift                        # Scan for stack drift
@@ -205,9 +227,14 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 
 </details>
 
+## Cross-Platform Support
+
+Charter v0.5.0 works across WSL, PowerShell, CMD, macOS, and Linux. All git operations use a unified invocation layer with cross-platform PATH resolution. Line endings are normalized via `.gitattributes` (LF for source, CRLF for `.bat`/`.cmd`/`.ps1`).
+
 ## Command Reference
 
 - `charter`: show repo risk/value snapshot and recommended next action
+- `charter bootstrap [--ci github] [--preset <name>] [--yes] [--skip-install] [--skip-doctor]`: one-command onboarding (detect + setup + ADF + install + doctor)
 - `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]`: detect stack and scaffold `.charter/` baseline
 - `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
 - `charter doctor [--adf-only]`: validate environment/config state (`--adf-only` runs strict ADF wiring checks)
@@ -272,12 +299,14 @@ packages/
 
 ## Research & White Papers
 
-The [`papers/`](./papers/) directory contains versioned white papers documenting
-ADF design rationale and quantitative analysis.
+The [`papers/`](./papers/) directory is the curated narrative layer for Charter's
+iterative process:
 
-| Paper | Description |
+| Entry Point | Purpose |
 |---|---|
-| [Context-as-Code v1.1](./papers/context-as-code-v1.1.md) | Quantifies ADF impact on a PRD-driven AI Orchestration Engine v2 SDLC: 80% token reduction, 0% LOC-limit violations across 33 modules. |
+| [Papers Index](./papers/README.md) | Canonical overview of research papers, UX feedback, and release planning docs. |
+| [UX Feedback Index](./papers/ux-feedback/README.md) | Journey-bucketed ADX findings (Onboarding, Daily Use, Reliability/Trust, Output Ergonomics, Automation/CI). |
+| [Release Plans Index](./papers/releases/README.md) | Versioned plans that map selected feedback to implementation outcomes. |
 
 ## Release Docs
 

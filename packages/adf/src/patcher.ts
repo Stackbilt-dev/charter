@@ -5,7 +5,7 @@
  * Throws AdfPatchError with context on any invalid operation.
  */
 
-import type { AdfDocument, AdfSection, PatchOperation } from './types';
+import type { AdfContent, AdfDocument, AdfSection, PatchOperation } from './types';
 import { AdfPatchError } from './errors';
 
 export function applyPatches(doc: AdfDocument, ops: PatchOperation[]): AdfDocument {
@@ -62,9 +62,14 @@ function addBullet(doc: AdfDocument, sectionKey: string, value: string): AdfDocu
     } else {
       section.content.entries.push({ key: value.trim(), value: '' });
     }
+  } else if (section.content.type === 'text') {
+    // Convert text section to list, preserving existing prose as first item
+    const existing = section.content.value.trim();
+    const items = existing ? [existing, value] : [value];
+    (section as { content: AdfContent }).content = { type: 'list', items };
   } else {
     throw new AdfPatchError(
-      `Cannot ADD_BULLET to ${section.content.type} section "${sectionKey}". Section must be list or map.`,
+      `Cannot ADD_BULLET to ${section.content.type} section "${sectionKey}". Section must be list, map, or text.`,
       'ADD_BULLET',
       sectionKey
     );
