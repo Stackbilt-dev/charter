@@ -176,7 +176,18 @@ Do not duplicate rules from .ai/ modules into this file or other agent config fi
 function adfInit(options: CLIOptions, args: string[]): number {
   const force = options.yes || args.includes('--force');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
+  const moduleFlag = getFlag(args, '--module');
   const manifestPath = path.join(aiDir, 'manifest.adf');
+
+  // --module: additive single-module creation — delegate to adf create
+  if (moduleFlag) {
+    if (!fs.existsSync(manifestPath)) {
+      throw new CLIError(
+        `manifest.adf not found at ${manifestPath}. Run 'charter adf init' first to scaffold .ai/.`
+      );
+    }
+    return adfCreate(options, [moduleFlag, '--ai-dir', aiDir]);
+  }
 
   if (fs.existsSync(manifestPath) && !force) {
     const result: AdfInitResult = { created: false, aiDir, files: [] };
@@ -185,6 +196,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
     } else {
       console.log(`  .ai/ already exists at ${aiDir}/`);
       console.log('  Use --force (or --yes) to overwrite.');
+      console.log('  To add a single module: charter adf init --module <name>');
     }
     return EXIT_CODE.SUCCESS;
   }
@@ -495,6 +507,7 @@ function printHelp(): void {
   console.log('  Usage:');
   console.log('    charter adf init [--ai-dir <dir>] [--force] [--emit-pointers]');
   console.log('      Scaffold .ai/ directory with manifest, core, and state modules.');
+  console.log('      --module <name>: add a single module to an existing .ai/ (additive, no overwrite)');
   console.log('      --emit-pointers: also generate thin pointer files (CLAUDE.md, .cursorrules, agents.md)');
   console.log('');
   console.log('    charter adf fmt <file> [--check] [--write]');
