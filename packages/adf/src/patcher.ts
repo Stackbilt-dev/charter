@@ -3,10 +3,17 @@
  *
  * Immutable: returns a new document; the original is never mutated.
  * Throws AdfPatchError with context on any invalid operation.
+ *
+ * Operation dispatch uses a keyed handler map instead of a switch so
+ * adding a new op type requires only one map entry and one handler.
  */
 
-import type { AdfContent, AdfDocument, AdfSection, PatchOperation } from './types';
+import type { AdfContent, AdfDocument, AdfMapEntry, AdfSection, PatchOperation } from './types';
 import { AdfPatchError } from './errors';
+
+// ============================================================================
+// Dispatch
+// ============================================================================
 
 export function applyPatches(doc: AdfDocument, ops: PatchOperation[]): AdfDocument {
   // Deep clone for immutability
@@ -19,24 +26,24 @@ export function applyPatches(doc: AdfDocument, ops: PatchOperation[]): AdfDocume
   return result;
 }
 
+const handlers: Record<PatchOperation['op'], (doc: AdfDocument, op: never) => AdfDocument> = {
+  ADD_BULLET: (doc, op: { section: string; value: string }) => addBullet(doc, op.section, op.value),
+  REPLACE_BULLET: (doc, op: { section: string; index: number; value: string }) => replaceBullet(doc, op.section, op.index, op.value),
+  REMOVE_BULLET: (doc, op: { section: string; index: number }) => removeBullet(doc, op.section, op.index),
+  ADD_SECTION: (doc, op: { key: string; decoration?: string | null; content: AdfContent; weight?: 'load-bearing' | 'advisory' }) => addSection(doc, op.key, op.decoration ?? null, op.content, op.weight),
+  REPLACE_SECTION: (doc, op: { key: string; content: AdfContent }) => replaceSection(doc, op.key, op.content),
+  REMOVE_SECTION: (doc, op: { key: string }) => removeSection(doc, op.key),
+  UPDATE_METRIC: (doc, op: { section: string; key: string; value: number }) => updateMetric(doc, op.section, op.key, op.value),
+};
+
 function applyOne(doc: AdfDocument, op: PatchOperation): AdfDocument {
-  switch (op.op) {
-    case 'ADD_BULLET':
-      return addBullet(doc, op.section, op.value);
-    case 'REPLACE_BULLET':
-      return replaceBullet(doc, op.section, op.index, op.value);
-    case 'REMOVE_BULLET':
-      return removeBullet(doc, op.section, op.index);
-    case 'ADD_SECTION':
-      return addSection(doc, op.key, op.decoration ?? null, op.content, op.weight);
-    case 'REPLACE_SECTION':
-      return replaceSection(doc, op.key, op.content);
-    case 'REMOVE_SECTION':
-      return removeSection(doc, op.key);
-    case 'UPDATE_METRIC':
-      return updateMetric(doc, op.section, op.key, op.value);
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (handlers[op.op] as any)(doc, op);
 }
+
+// ============================================================================
+// Shared Helpers
+// ============================================================================
 
 function findSection(doc: AdfDocument, key: string, opName: string): AdfSection {
   const section = doc.sections.find(s => s.key === key);
@@ -46,24 +53,40 @@ function findSection(doc: AdfDocument, key: string, opName: string): AdfSection 
   return section;
 }
 
+function checkBounds(length: number, index: number, opName: string, sectionKey: string, label: string): void {
+  if (index < 0 || index >= length) {
+    throw new AdfPatchError(
+      `Index ${index} out of bounds (section "${sectionKey}" has ${length} ${label})`,
+      opName,
+      sectionKey,
+      index
+    );
+  }
+}
+
+function parseColonEntry(value: string): AdfMapEntry {
+  const colonIndex = value.indexOf(':');
+  if (colonIndex > 0) {
+    return {
+      key: value.slice(0, colonIndex).trim(),
+      value: value.slice(colonIndex + 1).trim(),
+    };
+  }
+  return { key: value.trim(), value: '' };
+}
+
+// ============================================================================
+// Operation Handlers
+// ============================================================================
+
 function addBullet(doc: AdfDocument, sectionKey: string, value: string): AdfDocument {
   const section = findSection(doc, sectionKey, 'ADD_BULLET');
 
   if (section.content.type === 'list') {
     section.content.items.push(value);
   } else if (section.content.type === 'map') {
-    // Parse "KEY: value" or treat as key with empty value
-    const colonIndex = value.indexOf(':');
-    if (colonIndex > 0) {
-      section.content.entries.push({
-        key: value.slice(0, colonIndex).trim(),
-        value: value.slice(colonIndex + 1).trim(),
-      });
-    } else {
-      section.content.entries.push({ key: value.trim(), value: '' });
-    }
+    section.content.entries.push(parseColonEntry(value));
   } else if (section.content.type === 'text') {
-    // Convert text section to list, preserving existing prose as first item
     const existing = section.content.value.trim();
     const items = existing ? [existing, value] : [value];
     (section as { content: AdfContent }).content = { type: 'list', items };
@@ -82,33 +105,11 @@ function replaceBullet(doc: AdfDocument, sectionKey: string, index: number, valu
   const section = findSection(doc, sectionKey, 'REPLACE_BULLET');
 
   if (section.content.type === 'list') {
-    if (index < 0 || index >= section.content.items.length) {
-      throw new AdfPatchError(
-        `Index ${index} out of bounds (section "${sectionKey}" has ${section.content.items.length} items)`,
-        'REPLACE_BULLET',
-        sectionKey,
-        index
-      );
-    }
+    checkBounds(section.content.items.length, index, 'REPLACE_BULLET', sectionKey, 'items');
     section.content.items[index] = value;
   } else if (section.content.type === 'map') {
-    if (index < 0 || index >= section.content.entries.length) {
-      throw new AdfPatchError(
-        `Index ${index} out of bounds (section "${sectionKey}" has ${section.content.entries.length} entries)`,
-        'REPLACE_BULLET',
-        sectionKey,
-        index
-      );
-    }
-    const colonIndex = value.indexOf(':');
-    if (colonIndex > 0) {
-      section.content.entries[index] = {
-        key: value.slice(0, colonIndex).trim(),
-        value: value.slice(colonIndex + 1).trim(),
-      };
-    } else {
-      section.content.entries[index] = { key: value.trim(), value: '' };
-    }
+    checkBounds(section.content.entries.length, index, 'REPLACE_BULLET', sectionKey, 'entries');
+    section.content.entries[index] = parseColonEntry(value);
   } else {
     throw new AdfPatchError(
       `Cannot REPLACE_BULLET in ${section.content.type} section "${sectionKey}". Section must be list or map.`,
@@ -124,24 +125,10 @@ function removeBullet(doc: AdfDocument, sectionKey: string, index: number): AdfD
   const section = findSection(doc, sectionKey, 'REMOVE_BULLET');
 
   if (section.content.type === 'list') {
-    if (index < 0 || index >= section.content.items.length) {
-      throw new AdfPatchError(
-        `Index ${index} out of bounds (section "${sectionKey}" has ${section.content.items.length} items)`,
-        'REMOVE_BULLET',
-        sectionKey,
-        index
-      );
-    }
+    checkBounds(section.content.items.length, index, 'REMOVE_BULLET', sectionKey, 'items');
     section.content.items.splice(index, 1);
   } else if (section.content.type === 'map') {
-    if (index < 0 || index >= section.content.entries.length) {
-      throw new AdfPatchError(
-        `Index ${index} out of bounds (section "${sectionKey}" has ${section.content.entries.length} entries)`,
-        'REMOVE_BULLET',
-        sectionKey,
-        index
-      );
-    }
+    checkBounds(section.content.entries.length, index, 'REMOVE_BULLET', sectionKey, 'entries');
     section.content.entries.splice(index, 1);
   } else {
     throw new AdfPatchError(
@@ -158,7 +145,7 @@ function addSection(
   doc: AdfDocument,
   key: string,
   decoration: string | null,
-  content: import('./types').AdfContent,
+  content: AdfContent,
   weight?: 'load-bearing' | 'advisory'
 ): AdfDocument {
   const existing = doc.sections.find(s => s.key === key);
@@ -177,7 +164,7 @@ function addSection(
 function replaceSection(
   doc: AdfDocument,
   key: string,
-  content: import('./types').AdfContent
+  content: AdfContent
 ): AdfDocument {
   const section = findSection(doc, key, 'REPLACE_SECTION');
   section.content = content;
