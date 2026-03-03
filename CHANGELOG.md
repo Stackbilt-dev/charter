@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-03
+
 ### Added
 - **Content-based module routing for migrate** ([#6](https://github.com/Stackbilt-dev/charter/issues/6), [#15](https://github.com/Stackbilt-dev/charter/pull/15)): `adf migrate` now routes rules to on-demand modules by matching content against manifest trigger keywords, not just markdown headings. Rules mentioning "React" under a generic "Conventions" heading now correctly route to `frontend.adf` instead of falling through to `core.adf`. New `TriggerMap` type (`Record<string, string[]>`) exported from `@stackbilt/adf`.
 - **`docs` stack preset** ([#3](https://github.com/Stackbilt-dev/charter/issues/3), [#16](https://github.com/Stackbilt-dev/charter/pull/16)): New `--preset docs` for documentation-only and planning-heavy workspaces. `setup` auto-detects docs workspaces via directory signals (`docs/`, `ADR/`, `adrs/`, `decisions/`, `papers/`, `rfcs/`) or when root files are predominantly markdown (>=50%). Bootstrap scaffolds `decisions.adf` and `planning.adf` modules with governance-focused patterns instead of irrelevant frontend/backend scaffolds.
