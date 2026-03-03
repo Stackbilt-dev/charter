@@ -186,7 +186,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   }
 
   if (presetFlag && !isValidPreset(presetFlag)) {
-    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack.`);
+    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack|docs.`);
   }
 
   const contexts = loadPackageContexts();
@@ -565,6 +565,25 @@ export function detectStack(contexts: PackageContext[]): DetectionResult {
       warnings,
     };
   }
+  // Docs/planning workspace detection — no code frameworks, documentation-heavy
+  const hasDocsDirs = hasAnyPath(['docs', 'ADR', 'adrs', 'decisions', 'papers', 'rfcs']);
+  const mostlyMarkdown = checkMostlyMarkdown();
+  if (!hasFrontend && !hasBackend && !hasWorker && (hasDocsDirs || mostlyMarkdown)) {
+    return {
+      runtime: dedupRuntime,
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
+      signals,
+      mixedStack: false,
+      confidence: hasDocsDirs ? 'HIGH' : 'MEDIUM',
+      suggestedPreset: 'docs' as StackPreset,
+      warnings,
+    };
+  }
+
   return {
     runtime: dedupRuntime,
     frameworks: dedup(frameworks),
@@ -774,6 +793,17 @@ function hasAnyPath(paths: string[]): boolean {
   return paths.some((p) => fs.existsSync(path.resolve(p)));
 }
 
+function checkMostlyMarkdown(): boolean {
+  try {
+    const entries = fs.readdirSync(process.cwd());
+    const visible = entries.filter(e => !e.startsWith('.'));
+    const mdFiles = visible.filter(e => e.endsWith('.md'));
+    return visible.length > 0 && mdFiles.length / visible.length >= 0.5;
+  } catch {
+    return false;
+  }
+}
+
 function pick(set: Set<string>, candidates: string[]): string[] {
   return candidates.filter((c) => set.has(c));
 }
@@ -836,7 +866,7 @@ export function applyManagedFile(targetPath: string, content: string, force: boo
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
-  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
 }
 
 export function syncPackageManifest(

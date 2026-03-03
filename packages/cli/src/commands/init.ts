@@ -11,7 +11,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { getDefaultConfigJSON } from '../config';
 
-export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack';
+export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack' | 'docs';
 
 const PATTERN_TEMPLATES: Record<StackPreset, unknown[]> = {
   worker: [
@@ -155,6 +155,32 @@ const PATTERN_TEMPLATES: Record<StackPreset, unknown[]> = {
       blessed_solution: 'Centralized authn/authz and secret management policy',
       rationale: 'Consistent controls across frontend/backend surfaces',
       anti_patterns: 'Avoid mixed auth patterns across services and clients',
+      status: 'ACTIVE',
+    },
+  ],
+  docs: [
+    {
+      name: 'Documentation Standards',
+      category: 'GOVERNANCE',
+      blessed_solution: 'Markdown-first authoring with ADR/RFC conventions',
+      rationale: 'Consistent documentation structure across contributors',
+      anti_patterns: 'Avoid undocumented decisions or ad-hoc wiki pages',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Decision Records',
+      category: 'GOVERNANCE',
+      blessed_solution: 'Lightweight ADR format in docs/ or decisions/',
+      rationale: 'Preserves architectural rationale over time',
+      anti_patterns: 'Avoid verbal-only decisions without written records',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Review Process',
+      category: 'GOVERNANCE',
+      blessed_solution: 'PR-based review for documentation changes',
+      rationale: 'Tracks authorship and enables async review',
+      anti_patterns: 'Avoid direct pushes to main for substantive doc changes',
       status: 'ACTIVE',
     },
   ],
@@ -302,7 +328,7 @@ function writeIfChanged(targetPath: string, content: string): boolean {
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
-  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
 }
 
 function buildPatternTemplate(
