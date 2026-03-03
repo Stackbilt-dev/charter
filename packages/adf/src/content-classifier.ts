@@ -18,6 +18,9 @@ export type AdfTargetSection = 'CONSTRAINTS' | 'CONTEXT' | 'ADVISORY';
 
 export type WeightTag = 'load-bearing' | 'advisory';
 
+/** Module path → lowercase trigger keywords for content-based routing. */
+export type TriggerMap = Record<string, string[]>;
+
 export interface ClassificationResult {
   decision: RouteDecision;
   targetSection: AdfTargetSection;
@@ -86,6 +89,26 @@ function headingToModule(heading: string): string {
   return 'core.adf';
 }
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Content-based fallback routing. When heading-based routing returns core.adf,
+ * scan element content against ON_DEMAND trigger keywords from the manifest.
+ */
+function contentToModule(text: string, triggerMap: TriggerMap): string {
+  const lower = text.toLowerCase();
+  for (const [module, triggers] of Object.entries(triggerMap)) {
+    for (const trigger of triggers) {
+      if (new RegExp(`\\b${escapeRegex(trigger)}\\b`, 'i').test(lower)) {
+        return module;
+      }
+    }
+  }
+  return 'core.adf';
+}
+
 // ============================================================================
 // Element Classification
 // ============================================================================
@@ -93,9 +116,19 @@ function headingToModule(heading: string): string {
 /**
  * Classify a single markdown element into an ADF routing decision.
  */
-export function classifyElement(element: MarkdownElement, heading: string): ClassificationResult {
+export function classifyElement(
+  element: MarkdownElement,
+  heading: string,
+  triggerMap?: TriggerMap,
+): ClassificationResult {
   const text = element.content;
-  const module = headingToModule(heading);
+  let module = headingToModule(heading);
+
+  // Content-based fallback: when heading routes to core.adf, check element
+  // content against ON_DEMAND trigger keywords from the manifest.
+  if (module === 'core.adf' && triggerMap) {
+    module = contentToModule(text, triggerMap);
+  }
 
   // Check STAY patterns first
   if (matchesStayPattern(text)) {
@@ -256,7 +289,8 @@ function tokenize(text: string): string[] {
  */
 export function buildMigrationPlan(
   sections: MarkdownSection[],
-  existingAdf?: AdfDocument
+  existingAdf?: AdfDocument,
+  triggerMap?: TriggerMap,
 ): MigrationPlan {
   const items: MigrationItem[] = [];
 
@@ -276,7 +310,7 @@ export function buildMigrationPlan(
 
   for (const section of sections) {
     for (const element of section.elements) {
-      const classification = classifyElement(element, section.heading);
+      const classification = classifyElement(element, section.heading, triggerMap);
 
       // Dedup against existing ADF
       if (classification.decision === 'MIGRATE' && existingItems.size > 0) {
