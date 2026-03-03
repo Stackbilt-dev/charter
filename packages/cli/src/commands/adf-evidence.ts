@@ -11,9 +11,9 @@ import {
   parseManifest,
   resolveModules,
   bundleModules,
-  validateConstraints,
+  evaluateEvidence,
 } from '@stackbilt/adf';
-import type { AdfDocument, EvidenceResult } from '@stackbilt/adf';
+import type { EvidenceReport } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, readFlagFile, tokenizeTask } from '../flags';
@@ -24,16 +24,6 @@ interface AutoMeasurement {
   path: string;
   lines: number | null;
   error?: string;
-}
-
-interface StaleBaselineWarning {
-  metric: string;
-  baseline: number;
-  current: number;
-  delta: number;
-  ratio: number;
-  recommendedCeiling: number;
-  rationaleRequired: boolean;
 }
 
 export function adfEvidence(options: CLIOptions, args: string[]): number {
@@ -103,8 +93,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
 
   try {
     const bundle = bundleModules(aiDir, modulePaths, readFile, keywords, manifest);
-    const evidence: EvidenceResult = validateConstraints(bundle.mergedDocument, context);
-    const staleBaselines = detectStaleBaselines(bundle.mergedDocument, context, staleThreshold);
+    const report: EvidenceReport = evaluateEvidence(bundle, context, staleThreshold);
 
     // Check sync status
     const lockFile = path.join(aiDir, '.adf.lock');
@@ -126,42 +115,42 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
       const jsonOut: Record<string, unknown> = {
         aiDir,
         resolvedModules: bundle.resolvedModules,
-        tokenEstimate: bundle.tokenEstimate,
-        tokenBudget: bundle.tokenBudget,
-        tokenUtilization: bundle.tokenUtilization,
-        constraints: evidence.constraints,
-        weightSummary: evidence.weightSummary,
-        allPassing: evidence.allPassing,
-        failCount: evidence.failCount,
-        warnCount: evidence.warnCount,
-        staleBaselineCount: staleBaselines.length,
+        tokenEstimate: report.tokenEstimate,
+        tokenBudget: report.tokenBudget,
+        tokenUtilization: report.tokenUtilization,
+        constraints: report.constraints,
+        weightSummary: report.weightSummary,
+        allPassing: report.allPassing,
+        failCount: report.failCount,
+        warnCount: report.warnCount,
+        staleBaselineCount: report.staleBaselines.length,
         syncStatus: { allInSync, staleCount },
       };
       if (task) {
         jsonOut.task = task;
         jsonOut.keywords = keywords;
       }
-      if (bundle.advisoryOnlyModules.length > 0) {
-        jsonOut.advisoryOnlyModules = bundle.advisoryOnlyModules;
+      if (report.advisoryOnlyModules.length > 0) {
+        jsonOut.advisoryOnlyModules = report.advisoryOnlyModules;
       }
       if (autoMeasured.length > 0) {
         jsonOut.autoMeasured = autoMeasured;
       }
-      if (staleBaselines.length > 0) {
-        jsonOut.staleBaselines = staleBaselines;
+      if (report.staleBaselines.length > 0) {
+        jsonOut.staleBaselines = report.staleBaselines;
       }
       // Suggest logical next steps based on results
       const nextActions: string[] = [];
-      if (!evidence.allPassing) {
+      if (!report.allPassing) {
         nextActions.push('Fix failing constraints before merging');
       }
       if (!allInSync) {
         nextActions.push('charter adf sync --write');
       }
-      if (evidence.warnCount > 0) {
+      if (report.warnCount > 0) {
         nextActions.push('Review metrics at ceiling boundary');
       }
-      if (staleBaselines.length > 0) {
+      if (report.staleBaselines.length > 0) {
         nextActions.push('charter adf metrics recalibrate --headroom 15 --reason "<rationale>" --dry-run');
       }
       if (nextActions.length > 0) {
@@ -173,12 +162,12 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
       console.log('  ADF Evidence Report');
       console.log('  ===================');
       console.log(`  Modules loaded: ${bundle.resolvedModules.join(', ')}`);
-      console.log(`  Token estimate: ~${bundle.tokenEstimate}`);
-      if (bundle.tokenBudget !== null) {
-        const pct = bundle.tokenUtilization !== null
-          ? ` (${(bundle.tokenUtilization * 100).toFixed(0)}%)`
+      console.log(`  Token estimate: ~${report.tokenEstimate}`);
+      if (report.tokenBudget !== null) {
+        const pct = report.tokenUtilization !== null
+          ? ` (${(report.tokenUtilization * 100).toFixed(0)}%)`
           : '';
-        console.log(`  Token budget: ${bundle.tokenBudget}${pct}`);
+        console.log(`  Token budget: ${report.tokenBudget}${pct}`);
       }
       console.log('');
 
@@ -195,9 +184,9 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
         console.log('');
       }
 
-      if (staleBaselines.length > 0) {
+      if (report.staleBaselines.length > 0) {
         console.log('  Stale baseline warnings:');
-        for (const s of staleBaselines) {
+        for (const s of report.staleBaselines) {
           console.log(`    [warn] ${s.metric}: baseline ${s.baseline}, current ${s.current}, delta ${s.delta}, recommended ceiling ${s.recommendedCeiling} (rationale required)`);
         }
         console.log('');
@@ -205,24 +194,24 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
 
       // Weight summary
       console.log('  Section weights:');
-      console.log(`    Load-bearing: ${evidence.weightSummary.loadBearing}`);
-      console.log(`    Advisory: ${evidence.weightSummary.advisory}`);
-      console.log(`    Unweighted: ${evidence.weightSummary.unweighted}`);
+      console.log(`    Load-bearing: ${report.weightSummary.loadBearing}`);
+      console.log(`    Advisory: ${report.weightSummary.advisory}`);
+      console.log(`    Unweighted: ${report.weightSummary.unweighted}`);
       console.log('');
 
       // Advisory-only module warnings
-      if (bundle.advisoryOnlyModules.length > 0) {
+      if (report.advisoryOnlyModules.length > 0) {
         console.log('  Advisory-only modules:');
-        for (const m of bundle.advisoryOnlyModules) {
+        for (const m of report.advisoryOnlyModules) {
           console.log(`    [!] ${m}: no load-bearing sections`);
         }
         console.log('');
       }
 
       // Constraints
-      if (evidence.constraints.length > 0) {
+      if (report.constraints.length > 0) {
         console.log('  Constraints:');
-        for (const c of evidence.constraints) {
+        for (const c of report.constraints) {
           const icon = c.status === 'pass' ? 'ok' : c.status === 'warn' ? 'WARN' : 'FAIL';
           console.log(`    [${icon}] ${c.message}`);
         }
@@ -244,16 +233,16 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
       console.log('');
 
       // Verdict
-      const verdict = evidence.allPassing ? 'PASS' : 'FAIL';
+      const verdict = report.allPassing ? 'PASS' : 'FAIL';
       console.log(`  Verdict: ${verdict}`);
-      if (evidence.warnCount > 0) {
-        console.log(`  (${evidence.warnCount} warning${evidence.warnCount === 1 ? '' : 's'} — at ceiling boundary)`);
+      if (report.warnCount > 0) {
+        console.log(`  (${report.warnCount} warning${report.warnCount === 1 ? '' : 's'} — at ceiling boundary)`);
       }
       console.log('');
     }
 
     // CI mode: exit 1 on constraint failures
-    if (options.ciMode && !evidence.allPassing) {
+    if (options.ciMode && !report.allPassing) {
       return EXIT_CODE.POLICY_VIOLATION;
     }
 
@@ -280,32 +269,3 @@ function parseStaleThreshold(raw: string): number {
   return parsed;
 }
 
-function detectStaleBaselines(
-  doc: AdfDocument,
-  context: Record<string, number> | undefined,
-  staleThreshold: number
-): StaleBaselineWarning[] {
-  if (!context) return [];
-  const warnings: StaleBaselineWarning[] = [];
-  for (const section of doc.sections) {
-    if (section.key !== 'METRICS' || section.content.type !== 'metric') continue;
-    for (const entry of section.content.entries) {
-      if (entry.value <= 0) continue;
-      const key = entry.key.toLowerCase();
-      const current = context[key];
-      if (!Number.isFinite(current)) continue;
-      const ratio = current / entry.value;
-      if (ratio < staleThreshold) continue;
-      warnings.push({
-        metric: key,
-        baseline: entry.value,
-        current,
-        delta: current - entry.value,
-        ratio: Number(ratio.toFixed(2)),
-        recommendedCeiling: Math.ceil(current * 1.15),
-        rationaleRequired: true,
-      });
-    }
-  }
-  return warnings;
-}
