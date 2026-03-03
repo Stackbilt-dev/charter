@@ -4,115 +4,95 @@
 
 ![Charter Kit hero](./stackbilt-charter-2.png)
 
-> **ADF has completed its inaugural full-SDLC cycle and is now in iterative improvement. Expect frequent updates as real-world feedback shapes the format.**
+## The Problem
 
-Charter is a local-first governance toolkit with a built-in AI context compiler. It ships **ADF (Attention-Directed Format)** -- a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files -- alongside offline governance checks for commit trailers, risk scoring, drift detection, and change classification.
+You write a CLAUDE.md. You add a `.cursorrules`. You paste instructions into GEMINI.md. Your AI agent loads all of it into the context window -- 10,000 tokens of flat, unstructured rules competing with the actual work.
 
-<!-- DOCSYNC:BEGIN:ecosystem-coordination -->
-## Charter: Local Enforcement + ADF Context Compiler
+Half get ignored. You don't know which half.
 
-Charter runs in your terminal and CI pipeline. It validates commit trailers, scores drift against your blessed stack, and blocks merges on violations. Zero SaaS dependency - all checks are deterministic and local.
+## The Solution
 
-Charter also ships **ADF (Attention-Directed Format)** - a modular, AST-backed context system that replaces monolithic `.cursorrules` and `claude.md` files with compiled, trigger-routed `.ai/` modules. ADF treats LLM context as a compiled language: emoji-decorated semantic keys, typed patch operations, manifest-driven progressive disclosure, and metric ceilings with CI evidence gating.
+Charter is an open-source CLI that replaces monolithic agent config files with **ADF (Attention-Directed Format)** -- a modular context system where agents load only the rules they need for the current task.
+
+Instead of one big file, you get a manifest. The manifest declares modules, trigger keywords that load them on demand, token budgets, and weighted sections that tell the agent what's load-bearing vs. advisory.
 
 ```bash
 npm install --save-dev @stackbilt/cli
-npx charter setup --preset fullstack --ci github --yes
-npx charter adf init    # scaffold .ai/ context directory
+npx charter bootstrap --yes   # detect stack, scaffold .ai/, migrate existing rules
 ```
 
-**Governance commands:** `validate`, `drift`, `audit`, `classify`, `hook install`.
-**ADF commands:** `adf init`, `adf fmt`, `adf patch`, `adf bundle`, `adf sync`, `adf evidence`.
+## Five-Minute Adoption
 
-For quantitative analysis of ADF's impact on autonomous system architecture, see the [Context-as-Code white paper](https://github.com/stackbilt-dev/charter/blob/main/papers/context-as-code-v1.1.md).
+Already have agent config files? Charter migrates them:
 
-For iterative UX findings and versioned improvement plans, see the [`papers/` index](https://github.com/stackbilt-dev/charter/blob/main/papers/README.md).
-<!-- DOCSYNC:END:ecosystem-coordination -->
+```bash
+# See what would happen (dry run)
+charter adf migrate --dry-run
 
-## ADF: Attention-Directed Format
+# Migrate: classifies rules by strength, routes to ADF modules, replaces originals with thin pointers
+charter adf migrate
+```
 
-ADF treats LLM context as a compiled language. Instead of dumping flat markdown into a context window, ADF uses emoji-decorated semantic keys, a strict AST, and a module system with progressive disclosure -- so agents load only the context they need for the current task.
+Your `CLAUDE.md` / `.cursorrules` / `GEMINI.md` content gets classified (imperative vs. advisory vs. neutral), routed to the right module (frontend rules to `frontend.adf`, backend rules to `backend.adf`), and your originals become one-line pointers to `.ai/`. No content lost, no rewrite needed.
 
-Charter manages ADF through the `.ai/` directory:
+## How ADF Works
+
+Charter manages context through the `.ai/` directory:
 
 ```text
 .ai/
   manifest.adf    # Module registry: default-load vs on-demand with trigger keywords
-  core.adf        # Always-loaded context (role, constraints, output format)
-  state.adf       # Session state (current task, decisions, blockers)
+  core.adf        # Always-loaded: role, constraints, output format, metric ceilings
+  state.adf       # Session state: current task, decisions, blockers
   frontend.adf    # On-demand: loaded when task mentions "react", "css", etc.
-  api.adf         # On-demand: loaded when task mentions "endpoint", "REST", etc.
+  backend.adf     # On-demand: loaded when task mentions "endpoint", "REST", etc.
 ```
 
-### Quick Start
+When you run `charter adf bundle --task "Fix the React login component"`, Charter:
+1. Reads the manifest
+2. Loads `core.adf` and `state.adf` (always loaded)
+3. Sees "React" matches a trigger keyword -- loads `frontend.adf`
+4. Skips `backend.adf` (no matching triggers)
+5. Merges the loaded modules into a single context payload with token budget tracking
 
-```bash
-# Scaffold the .ai/ directory with starter modules
-charter adf init
-
-# Reformat an ADF file to canonical form
-charter adf fmt .ai/core.adf --write
-
-# Apply a typed patch (add a bullet to a list section)
-charter adf patch .ai/state.adf --ops '[{"op":"ADD_BULLET","section":"STATE","value":"Reviewing PR #42"}]'
-
-# Bundle context for a specific task -- resolves manifest triggers automatically
-charter adf bundle --task "Fix the React login component"
-
-# Migrate existing agent configs (CLAUDE.md, .cursorrules, etc.) into ADF modules
-charter adf migrate --dry-run
-
-# Verify source .adf files haven't drifted from locked hashes
-charter adf sync --check
-
-# Validate metric constraints and produce a structured evidence report
-charter adf evidence --auto-measure --format json
-charter adf metrics recalibrate --headroom 15 --reason "Added new built modules after scope expansion" --dry-run
-charter telemetry report --period 24h --format json
-```
+The agent gets exactly the rules it needs. Nothing more.
 
 ### Format Example
 
 ```text
 ADF: 0.1
 
-🎯 TASK:
+TASK:
   Build the user dashboard
 
-📋 CONTEXT:
+CONTEXT:
   - React 18 with TypeScript
   - TailwindCSS for styling
   - REST API at /api/v2
 
-⚠️ CONSTRAINTS [load-bearing]:
+CONSTRAINTS [load-bearing]:
   - No external state libraries
   - Must support SSR
 
-📊 METRICS [load-bearing]:
+METRICS [load-bearing]:
   entry_loc: 142 / 500 [lines]
   handler_loc: 88 / 300 [lines]
 
-🧠 STATE:
+STATE:
   CURRENT: Implementing layout grid
   NEXT: Add data fetching
   BLOCKED: Waiting on API schema
 ```
 
-Sections use emoji decorations for attention signaling, support four content types (text, list, key-value map, and metric with value/ceiling/unit), and follow a canonical ordering that the formatter enforces. Sections can carry a `[load-bearing]` or `[advisory]` weight annotation to distinguish measurable constraints from preferences. Metric entries (`key: value / ceiling [unit]`) define hard ceilings that the `evidence` command validates automatically.
+Sections use emoji decorations for attention signaling, support four content types (text, list, key-value map, and metric with value/ceiling/unit), and follow a canonical ordering the formatter enforces. `[load-bearing]` vs `[advisory]` weight annotations distinguish measurable constraints from preferences. Metric entries (`key: value / ceiling [unit]`) define hard ceilings that the `evidence` command validates automatically.
 
-See the [`@stackbilt/adf` package README](./packages/adf/README.md) for full API documentation.
+## Self-Governance: Charter Enforces Its Own Rules
 
-## Self-Governance
+This isn't theoretical. Charter uses ADF to govern its own codebase. The `.ai/` directory in this repository contains the same modules and metric ceilings that any adopting repo would use.
 
-Charter uses its own ADF system to govern its own codebase. The `.ai/` directory in this repository contains the same modules and metric ceilings that any adopting repo would use -- meaning every Charter commit is subject to the same constraint checks the tool enforces on others.
+Every commit runs through a pre-commit hook that executes `charter adf evidence --auto-measure`. If a source file exceeds its declared LOC ceiling, the commit is rejected. We can't ship code that violates our own governance rules -- even by accident, even at 2am.
 
-To reproduce this, run the evidence command against Charter's own context directory:
-
-```bash
-charter adf evidence --auto-measure
-```
-
-Here is the actual output from Charter's dogfood run:
+Here is the actual output from Charter's own evidence check (v0.6.0):
 
 ```text
   ADF Evidence Report
@@ -122,61 +102,80 @@ Here is the actual output from Charter's dogfood run:
   Token budget: 4000 (12%)
 
   Auto-measured:
-    adf_commands_loc: 577 lines (packages/cli/src/commands/adf.ts)
+    adf_commands_loc: 618 lines (packages/cli/src/commands/adf.ts)
     adf_bundle_loc: 175 lines (packages/cli/src/commands/adf-bundle.ts)
     adf_sync_loc: 213 lines (packages/cli/src/commands/adf-sync.ts)
-    adf_evidence_loc: 312 lines (packages/cli/src/commands/adf-evidence.ts)
-    adf_migrate_loc: 455 lines (packages/cli/src/commands/adf-migrate.ts)
-    bundler_loc: 413 lines (packages/adf/src/bundler.ts)
+    adf_evidence_loc: 272 lines (packages/cli/src/commands/adf-evidence.ts)
+    adf_migrate_loc: 474 lines (packages/cli/src/commands/adf-migrate.ts)
+    bundler_loc: 125 lines (packages/adf/src/bundler.ts)
     parser_loc: 214 lines (packages/adf/src/parser.ts)
     cli_entry_loc: 191 lines (packages/cli/src/index.ts)
 
-  Section weights:
-    Load-bearing: 2
-    Advisory: 0
-    Unweighted: 3
-
   Constraints:
-    [ok] adf_commands_loc: 577 / 650 [lines] -- PASS
+    [ok] adf_commands_loc: 618 / 650 [lines] -- PASS
     [ok] adf_bundle_loc: 175 / 200 [lines] -- PASS
     [ok] adf_sync_loc: 213 / 250 [lines] -- PASS
-    [ok] adf_evidence_loc: 312 / 380 [lines] -- PASS
-    [ok] adf_migrate_loc: 455 / 500 [lines] -- PASS
-    [ok] bundler_loc: 413 / 500 [lines] -- PASS
+    [ok] adf_evidence_loc: 272 / 380 [lines] -- PASS
+    [ok] adf_migrate_loc: 474 / 500 [lines] -- PASS
+    [ok] bundler_loc: 125 / 500 [lines] -- PASS
     [ok] parser_loc: 214 / 300 [lines] -- PASS
     [ok] cli_entry_loc: 191 / 200 [lines] -- PASS
-
-  Sync: all sources in sync
 
   Verdict: PASS
 ```
 
 What this shows:
 
-- **Metric ceilings enforce LOC limits on source files.** Each key in the `METRICS` section of an `.adf` module declares a ceiling. The `--auto-measure` flag counts lines live from the source files referenced in the manifest.
-- **Self-correcting architecture.** When `adf_commands_loc` approached its ceiling in v0.3.4, Charter's own evidence gate caught it. The file was split into focused modules (`adf.ts`, `adf-bundle.ts`, `adf-sync.ts`, `adf-evidence.ts`, `adf-migrate.ts`), each with its own ceiling. The pre-commit hook now prevents this from happening silently again.
-- **CI gating.** Generated governance workflows run `charter doctor --adf-only --ci` and `charter adf evidence --auto-measure --ci` when `.ai/manifest.adf` is present, blocking merges on ADF wiring violations or ceiling breaches.
-- **Pre-commit enforcement.** `charter hook install --pre-commit` installs a git hook that enforces `doctor --adf-only` + ADF evidence checks (or `pnpm run verify:adf` when present). When an agent runs unattended, wiring/ceiling violations block the commit.
+- **Metric ceilings enforce LOC limits on source files.** Each metric in a `.adf` module declares a ceiling. `--auto-measure` counts lines live from the sources referenced in the manifest.
+- **Self-correcting architecture.** When `bundler_loc` hit 413/500, Charter's own evidence gate flagged the pressure. The file was split into three focused modules (`manifest.ts`, `merger.ts`, `bundler.ts`) -- now 125/500. The system caught the problem and the system verified the fix.
+- **CI gating.** Generated governance workflows run `doctor --adf-only --ci` and `adf evidence --auto-measure --ci` on every PR, blocking merges on ceiling breaches.
 - **Available to any repo.** This is the same system you get by running `charter adf init` in your own project.
+
+## Quick Reference
+
+```bash
+# Scaffold .ai/ with starter modules
+charter adf init
+
+# Reformat to canonical form
+charter adf fmt .ai/core.adf --write
+
+# Apply a typed patch
+charter adf patch .ai/state.adf --ops '[{"op":"ADD_BULLET","section":"STATE","value":"Reviewing PR #42"}]'
+
+# Bundle context for a task (trigger-based module loading)
+charter adf bundle --task "Fix the React login component"
+
+# Migrate existing agent configs into ADF
+charter adf migrate --dry-run
+
+# Verify .adf files haven't drifted from locked hashes
+charter adf sync --check
+
+# Validate metric constraints
+charter adf evidence --auto-measure
+
+# Recalibrate metric ceilings
+charter adf metrics recalibrate --headroom 15 --reason "Scope expansion" --dry-run
+```
 
 ## Why Charter
 
-- **ADF context compiler** -- modular `.ai/` context files with AST-backed parsing, formatting, patching, bundling, sync, and constraint validation
-- **Evidence-based governance** -- metric ceilings with auto-measurement, structured pass/fail evidence reports, and CI gating
+- **Modular AI context** -- trigger-routed `.ai/` modules replace monolithic config files
+- **Five-minute migration** -- classify and route existing CLAUDE.md / .cursorrules / GEMINI.md rules automatically
+- **Evidence-based governance** -- metric ceilings with auto-measurement, structured pass/fail reports, CI gating
+- **Self-regulating** -- pre-commit hooks enforce constraints before code lands
 - **Commit governance** -- validate `Governed-By` and `Resolves-Request` trailers, score commit risk
 - **Drift detection** -- scan for stack drift against blessed patterns
-- **Change classification** -- heuristic `SURFACE`, `LOCAL`, or `CROSS_CUTTING` scope labeling
 - **Stable JSON output** -- every command supports `--format json` with `nextActions` hints for agent workflows
 
 ## Install
 
 ```bash
 npm install --save-dev @stackbilt/cli
-npx charter setup --detect-only --format json
-npx charter setup --ci github --yes
 ```
 
-For pnpm workspaces use `pnpm add -Dw @stackbilt/cli`. For a global install use `npm install -g @stackbilt/cli`.
+For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm install -g @stackbilt/cli`.
 
 ## Getting Started
 
@@ -184,8 +183,7 @@ For pnpm workspaces use `pnpm add -Dw @stackbilt/cli`. For a global install use 
 
 ```bash
 charter                              # Repo risk/value snapshot
-charter bootstrap --ci github        # One-command onboarding (detect + setup + ADF + install + doctor)
-charter setup --ci github            # Apply governance baseline (or use bootstrap)
+charter bootstrap --ci github        # One-command onboarding
 charter doctor                       # Validate environment/config
 charter validate                     # Check commit governance
 charter drift                        # Scan for stack drift
@@ -207,7 +205,6 @@ charter audit --format json
 charter adf bundle --task "describe the task" --format json
 charter adf evidence --auto-measure --format json --ci
 charter adf sync --check --format json
-charter telemetry report --period 24h --format json
 ```
 
 Agent contract:
@@ -229,13 +226,13 @@ Teams often score lower early due to missing governance trailers. Use this ramp:
 
 ## Cross-Platform Support
 
-Charter v0.5.0 works across WSL, PowerShell, CMD, macOS, and Linux. All git operations use a unified invocation layer with cross-platform PATH resolution. Line endings are normalized via `.gitattributes` (LF for source, CRLF for `.bat`/`.cmd`/`.ps1`).
+Charter works across WSL, PowerShell, CMD, macOS, and Linux. All git operations use a unified invocation layer with cross-platform PATH resolution. Line endings are normalized via `.gitattributes`.
 
 ## Command Reference
 
 - `charter`: show repo risk/value snapshot and recommended next action
-- `charter bootstrap [--ci github] [--preset <name>] [--yes] [--skip-install] [--skip-doctor]`: one-command onboarding (detect + setup + ADF + install + doctor)
-- `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]`: detect stack and scaffold `.charter/` baseline
+- `charter bootstrap [--ci github] [--preset <name>] [--yes] [--skip-install] [--skip-doctor]`: one-command onboarding (detect + setup + ADF + migrate + install + doctor)
+- `charter setup [--ci github] [--preset <worker|frontend|backend|fullstack|docs>] [--detect-only] [--no-dependency-sync]`: detect stack and scaffold `.charter/` baseline
 - `charter init [--preset <worker|frontend|backend|fullstack>]`: scaffold `.charter/` templates only
 - `charter doctor [--adf-only]`: validate environment/config state (`--adf-only` runs strict ADF wiring checks)
 - `charter validate [--ci] [--range <revset>]`: validate commit governance and citations
@@ -243,25 +240,22 @@ Charter v0.5.0 works across WSL, PowerShell, CMD, macOS, and Linux. All git oper
 - `charter audit [--ci] [--range <revset>]`: produce governance audit summary
 - `charter classify <subject>`: classify change scope heuristically
 - `charter hook install --commit-msg [--force]`: install commit-msg trailer normalization hook
-- `charter hook install --pre-commit [--force]`: install pre-commit ADF routing + evidence gate (`doctor --adf-only` + `adf evidence`)
-- `charter adf init [--ai-dir <dir>] [--force]`: scaffold `.ai/` context directory with manifest, core, state, and starter on-demand modules
+- `charter hook install --pre-commit [--force]`: install pre-commit ADF routing + evidence gate
+- `charter adf init [--ai-dir <dir>] [--force]`: scaffold `.ai/` context directory
 - `charter adf fmt <file> [--check] [--write]`: parse and reformat ADF files to canonical form
 - `charter adf fmt --explain`: show canonical formatter section ordering
-- `charter adf patch <file> --ops <json> | --ops-file <path>`: apply typed delta operations to ADF files
-- `charter adf create <module> [--triggers "a,b,c"] [--load default|on-demand]`: create/register a module in one step
-- `charter adf bundle --task "<prompt>" [--ai-dir <dir>]`: resolve manifest modules and output merged context with trigger observability
-- `charter adf sync --check [--ai-dir <dir>]`: verify source .adf files match locked hashes (exit 1 on drift)
-- `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current source hashes
-- `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce structured evidence report
-- `charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]`: recalibrate metric baselines/ceilings from current LOC and record budget rationale
-- `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: ingest existing agent config files and migrate content into ADF modules
-- `charter telemetry report [--period <30m|24h|7d>]`: summarize passive local CLI telemetry from `.charter/telemetry/events.ndjson`
+- `charter adf patch <file> --ops <json> | --ops-file <path>`: apply typed delta operations
+- `charter adf create <module> [--triggers "a,b,c"] [--load default|on-demand]`: create and register a module
+- `charter adf bundle --task "<prompt>" [--ai-dir <dir>]`: resolve manifest and output merged context
+- `charter adf sync --check [--ai-dir <dir>]`: verify .adf files match locked hashes
+- `charter adf sync --write [--ai-dir <dir>]`: update `.adf.lock` with current hashes
+- `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce evidence report
+- `charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]`: recalibrate metric baselines/ceilings
+- `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: migrate existing agent config files into ADF modules
+- `charter telemetry report [--period <30m|24h|7d>]`: summarize local CLI telemetry
 - `charter why`: explain adoption rationale and expected payoff
 
 Global options: `--config <path>`, `--format text|json`, `--ci`, `--yes`.
-
-Audit policy scoring note:
-- Policy score now uses configurable section coverage (`config.audit.policyCoverage.requiredSections`) instead of raw markdown file count.
 
 ## Exit Code Contract
 
@@ -271,7 +265,7 @@ Audit policy scoring note:
 
 ## CI Integration
 
-- Reusable template in this repo: `.github/workflows/governance.yml`
+- Reusable template: `.github/workflows/governance.yml`
 - Generated in target repos by `charter setup --ci github`: `.github/workflows/charter-governance.yml`
 - The governance workflow runs `validate`, `drift`, ADF wiring integrity (`doctor --adf-only --ci`), ADF ceiling evidence (`adf evidence --auto-measure --ci`), and `audit` on every PR.
 
@@ -281,7 +275,7 @@ Audit policy scoring note:
 packages/
   types/      Shared contracts
   core/       Schemas, sanitization, errors
-  adf/        ADF parser, formatter, patcher, bundler (AI context format)
+  adf/        ADF parser, formatter, patcher, bundler, evidence pipeline
   git/        Trailer parsing and risk scoring
   classify/   Heuristic classification
   validate/   Governance validation
@@ -299,14 +293,14 @@ packages/
 
 ## Research & White Papers
 
-The [`papers/`](./papers/) directory is the curated narrative layer for Charter's
-iterative process:
+The [`papers/`](./papers/) directory contains Charter's research narrative:
 
 | Entry Point | Purpose |
 |---|---|
-| [Papers Index](./papers/README.md) | Canonical overview of research papers, UX feedback, and release planning docs. |
-| [UX Feedback Index](./papers/ux-feedback/README.md) | Journey-bucketed ADX findings (Onboarding, Daily Use, Reliability/Trust, Output Ergonomics, Automation/CI). |
-| [Release Plans Index](./papers/releases/README.md) | Versioned plans that map selected feedback to implementation outcomes. |
+| [Papers Index](./papers/README.md) | Research papers, UX feedback, and release planning docs |
+| [UX Feedback Index](./papers/ux-feedback/README.md) | Journey-bucketed ADX findings |
+| [Release Plans Index](./papers/releases/README.md) | Versioned plans mapping feedback to implementation |
+| [`@stackbilt/adf` API](./packages/adf/README.md) | Full ADF package API documentation |
 
 ## Release Docs
 
