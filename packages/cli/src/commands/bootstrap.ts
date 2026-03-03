@@ -26,10 +26,13 @@ import {
 } from './setup';
 import {
   MANIFEST_SCAFFOLD,
+  MANIFEST_DOCS_SCAFFOLD,
   CORE_SCAFFOLD,
   STATE_SCAFFOLD,
   FRONTEND_SCAFFOLD,
   BACKEND_SCAFFOLD,
+  DECISIONS_SCAFFOLD,
+  PLANNING_SCAFFOLD,
   POINTER_CLAUDE_MD,
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
@@ -73,7 +76,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   }
 
   if (presetFlag && !isValidPreset(presetFlag)) {
-    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack.`);
+    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack|docs.`);
   }
 
   const result: BootstrapResult = {
@@ -129,7 +132,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 3: ADF Init
   // ========================================================================
-  const adfResult = runAdfInitPhase(options, force);
+  const adfResult = runAdfInitPhase(options, force, selectedPreset);
   result.steps.push(adfResult.step);
   if (adfResult.step.status === 'fail') warnings++;
 
@@ -406,9 +409,26 @@ function runSetupPhase(
 // Phase 3: ADF Init
 // ============================================================================
 
+function writeAdfScaffolds(aiDir: string, preset?: StackPreset): string[] {
+  const isDocsPreset = preset === 'docs';
+  fs.mkdirSync(aiDir, { recursive: true });
+  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), isDocsPreset ? MANIFEST_DOCS_SCAFFOLD : MANIFEST_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
+  if (isDocsPreset) {
+    fs.writeFileSync(path.join(aiDir, 'decisions.adf'), DECISIONS_SCAFFOLD);
+    fs.writeFileSync(path.join(aiDir, 'planning.adf'), PLANNING_SCAFFOLD);
+    return ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/decisions.adf', '.ai/planning.adf'];
+  }
+  fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+  return ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/frontend.adf', '.ai/backend.adf'];
+}
+
 function runAdfInitPhase(
   options: CLIOptions,
-  force: boolean
+  force: boolean,
+  preset?: StackPreset,
 ): { step: StepResult } {
   const warnings: string[] = [];
   const files: string[] = [];
@@ -422,14 +442,8 @@ function runAdfInitPhase(
     const alreadyExists = fs.existsSync(manifestPath);
     const hasCustomContent = alreadyExists && hasCustomAdfContent(aiDir);
     if (!alreadyExists) {
-      // Greenfield: write scaffolds (including on-demand module stubs)
-      fs.mkdirSync(aiDir, { recursive: true });
-      fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/frontend.adf', '.ai/backend.adf');
+      // Greenfield: write scaffolds (preset-aware on-demand modules)
+      files.push(...writeAdfScaffolds(aiDir, preset));
 
       // Write .adf.lock
       const lockData: Record<string, string> = {};
@@ -444,14 +458,8 @@ function runAdfInitPhase(
       warnings.push('.ai/ contains custom ADF content; skipping scaffold overwrite');
       warnings.push("Run 'charter adf migrate' to consolidate agent configs into ADF");
     } else if (force) {
-      // Force overwrite (including on-demand module stubs)
-      fs.mkdirSync(aiDir, { recursive: true });
-      fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-      fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-      files.push('.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/frontend.adf', '.ai/backend.adf');
+      // Force overwrite (preset-aware on-demand modules)
+      files.push(...writeAdfScaffolds(aiDir, preset));
 
       const lockData: Record<string, string> = {};
       for (const mod of ['core.adf', 'state.adf']) {
@@ -696,7 +704,7 @@ function runDoctorPhase(
 // ============================================================================
 
 function isValidPreset(value: string | undefined): value is StackPreset {
-  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack';
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
 }
 
 function hashContent(content: string): string {

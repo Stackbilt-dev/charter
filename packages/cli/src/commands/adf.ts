@@ -81,6 +81,34 @@ export const BACKEND_SCAFFOLD = `ADF: 0.1
   - Add service/API/database constraints and operational rules
 `;
 
+export const DECISIONS_SCAFFOLD = `ADF: 0.1
+\u{1F4CB} CONTEXT:
+  - Decisions module scaffold
+  - Record architectural decision rationale and outcomes
+`;
+
+export const PLANNING_SCAFFOLD = `ADF: 0.1
+\u{1F4CB} CONTEXT:
+  - Planning module scaffold
+  - Track project phases, milestones, and sequencing
+`;
+
+export const MANIFEST_DOCS_SCAFFOLD = `ADF: 0.1
+\u{1F3AF} ROLE: Documentation workspace context router
+
+\u{1F4E6} DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+\u{1F4C2} ON_DEMAND:
+  - decisions.adf (Triggers on: ADR, decision, rationale)
+  - planning.adf (Triggers on: plan, milestone, phase, roadmap)
+
+\u{1F4D0} RULES:
+  - Prefer smallest relevant module set.
+  - Never assume unseen modules were loaded.
+`;
+
 // ============================================================================
 // Dispatcher
 // ============================================================================
