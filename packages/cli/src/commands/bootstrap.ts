@@ -39,12 +39,14 @@ import {
 } from './adf';
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
+import { migrateSource } from './adf-migrate';
+import type { SourceMigrationResult } from './adf-migrate';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type StepName = 'detect' | 'setup' | 'adf-init' | 'install' | 'doctor';
+type StepName = 'detect' | 'setup' | 'adf-init' | 'migrate' | 'install' | 'doctor';
 type StepStatus = 'pass' | 'fail' | 'skip';
 
 interface StepResult {
@@ -100,7 +102,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const packageManager = detectResult.packageManager;
 
   if (options.format === 'text') {
-    console.log('[1/5] Detecting stack...');
+    console.log('[1/6] Detecting stack...');
     console.log(`  Stack: ${selectedPreset} (${detection.confidence} confidence)`);
     console.log(`  Monorepo: ${detection.monorepo ? 'yes' : 'no'}${detection.monorepo && detection.signals.hasPnpm ? ' (pnpm workspace)' : ''}`);
     if (detection.warnings.length > 0) {
@@ -119,7 +121,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   if (setupResult.step.status === 'fail') warnings++;
 
   if (options.format === 'text') {
-    console.log('[2/5] Setting up governance...');
+    console.log('[2/6] Setting up governance...');
     for (const f of (setupResult.step.details.created as string[] || [])) {
       console.log(`  Created ${f}`);
     }
@@ -137,7 +139,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   if (adfResult.step.status === 'fail') warnings++;
 
   if (options.format === 'text') {
-    console.log('[3/5] Initializing ADF context...');
+    console.log('[3/6] Initializing ADF context...');
     for (const f of (adfResult.step.details.files as string[] || [])) {
       console.log(`  Created ${f}`);
     }
@@ -148,14 +150,36 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   }
 
   // ========================================================================
-  // Phase 4: Install
+  // Phase 4: Migrate Agent Configs
+  // ========================================================================
+  const migrateResult = runMigratePhase(options, force);
+  result.steps.push(migrateResult.step);
+  if (migrateResult.step.status === 'fail') warnings++;
+
+  if (options.format === 'text') {
+    console.log('[4/6] Migrating agent configs...');
+    if (migrateResult.step.status === 'skip') {
+      console.log('  Skipped (no migratable files)');
+    } else if (migrateResult.step.details.dryRun) {
+      for (const w of migrateResult.step.warnings) {
+        console.log(`  ${w}`);
+      }
+    } else {
+      const migrated = migrateResult.step.details.migrated as number;
+      console.log(`  Migrated ${migrated} file(s)`);
+    }
+    console.log('');
+  }
+
+  // ========================================================================
+  // Phase 5: Install
   // ========================================================================
   const installResult = runInstallPhase(options, skipInstall);
   result.steps.push(installResult.step);
   if (installResult.step.status === 'fail') warnings++;
 
   if (options.format === 'text') {
-    console.log('[4/5] Installing dependencies...');
+    console.log('[5/6] Installing dependencies...');
     if (skipInstall) {
       console.log('  Skipped (--skip-install)');
     } else {
@@ -177,14 +201,14 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   }
 
   // ========================================================================
-  // Phase 5: Doctor
+  // Phase 6: Doctor
   // ========================================================================
   const doctorResult = runDoctorPhase(options, skipDoctor);
   result.steps.push(doctorResult.step);
   if (doctorResult.step.status === 'fail') warnings++;
 
   if (options.format === 'text') {
-    console.log('[5/5] Running health check...');
+    console.log('[6/6] Running health check...');
     if (skipDoctor) {
       console.log('  Skipped (--skip-doctor)');
     } else {
@@ -519,7 +543,94 @@ function runAdfInitPhase(
 }
 
 // ============================================================================
-// Phase 4: Install
+// Phase 4: Migrate Agent Configs
+// ============================================================================
+
+const AGENT_CONFIG_FILES = [
+  'CLAUDE.md', '.cursorrules', 'agents.md',
+  'GEMINI.md', 'copilot-instructions.md',
+];
+
+function runMigratePhase(
+  options: CLIOptions,
+  force: boolean,
+): { step: StepResult } {
+  const warnings: string[] = [];
+  const aiDir = '.ai';
+
+  try {
+    // Find agent config files that aren't already thin pointers
+    const sources = AGENT_CONFIG_FILES.filter(f => {
+      const fullPath = path.resolve(f);
+      if (!fs.existsSync(fullPath)) return false;
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      return !POINTER_MARKERS.some(marker => content.includes(marker));
+    });
+
+    if (sources.length === 0) {
+      return {
+        step: {
+          name: 'migrate',
+          status: 'skip',
+          details: { skipped: true, reason: 'No migratable agent config files found' },
+          warnings,
+        },
+      };
+    }
+
+    if (!force) {
+      warnings.push(`Found ${sources.length} agent config file(s) with migratable content: ${sources.join(', ')}`);
+      warnings.push("Run with --yes to auto-migrate, or run 'charter adf migrate' separately");
+      return {
+        step: {
+          name: 'migrate',
+          status: 'pass',
+          details: { dryRun: true, sources, migrated: 0 },
+          warnings,
+        },
+      };
+    }
+
+    // Auto-migrate with --yes
+    const results: SourceMigrationResult[] = [];
+    for (const source of sources) {
+      const result = migrateSource(source, aiDir, 'dedupe', false, false, options);
+      results.push(result);
+    }
+
+    const migrated = results.filter(r => !r.skipped).length;
+    return {
+      step: {
+        name: 'migrate',
+        status: 'pass',
+        details: {
+          sources,
+          migrated,
+          results: results.map(r => ({
+            source: r.source,
+            skipped: r.skipped,
+            itemsMigrated: r.plan?.migrateItems.length ?? 0,
+          })),
+        },
+        warnings,
+      },
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    warnings.push(`Migration failed: ${msg}`);
+    return {
+      step: {
+        name: 'migrate',
+        status: 'fail',
+        details: { error: msg },
+        warnings,
+      },
+    };
+  }
+}
+
+// ============================================================================
+// Phase 5: Install
 // ============================================================================
 
 function runInstallPhase(
@@ -585,7 +696,7 @@ function detectPackageManagerFromLockfiles(): 'pnpm' | 'npm' | 'yarn' {
 }
 
 // ============================================================================
-// Phase 5: Doctor
+// Phase 6: Doctor
 // ============================================================================
 
 function runDoctorPhase(

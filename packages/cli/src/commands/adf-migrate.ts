@@ -105,7 +105,7 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
 // Per-source Migration
 // ============================================================================
 
-interface SourceMigrationResult {
+export interface SourceMigrationResult {
   source: string;
   skipped: boolean;
   skipReason?: string;
@@ -121,7 +121,7 @@ interface MigrationAction {
   detail: string;
 }
 
-function migrateSource(
+export function migrateSource(
   sourcePath: string,
   aiDir: string,
   mergeStrategy: 'append' | 'dedupe' | 'replace',
