@@ -29,11 +29,17 @@ export interface MarkdownSection {
   elements: MarkdownElement[];
 }
 
+/** Optional overrides for rule-strength detection patterns. */
+export interface StrengthConfig {
+  imperativePatterns?: RegExp[];
+  advisoryPatterns?: RegExp[];
+}
+
 // ============================================================================
 // Strength Detection
 // ============================================================================
 
-const IMPERATIVE_PATTERNS = [
+const IMPERATIVE_PATTERNS: RegExp[] = [
   /\bNEVER\b/,
   /\bALWAYS\b/,
   /\bMUST\b/,
@@ -43,7 +49,7 @@ const IMPERATIVE_PATTERNS = [
   /\bREQUIRE[DS]?\b/,
 ];
 
-const ADVISORY_PATTERNS = [
+const ADVISORY_PATTERNS: RegExp[] = [
   /\bprefer\b/i,
   /\bshould\b/i,
   /\bbias\b/i,
@@ -53,11 +59,13 @@ const ADVISORY_PATTERNS = [
   /\btry to\b/i,
 ];
 
-function detectStrength(text: string): RuleStrength {
-  for (const p of IMPERATIVE_PATTERNS) {
+function detectStrength(text: string, config?: StrengthConfig): RuleStrength {
+  const imp = config?.imperativePatterns ?? IMPERATIVE_PATTERNS;
+  const adv = config?.advisoryPatterns ?? ADVISORY_PATTERNS;
+  for (const p of imp) {
     if (p.test(text)) return 'imperative';
   }
-  for (const p of ADVISORY_PATTERNS) {
+  for (const p of adv) {
     if (p.test(text)) return 'advisory';
   }
   return 'neutral';
@@ -74,7 +82,7 @@ function detectStrength(text: string): RuleStrength {
  * "preamble" section with heading "". Within each section, sub-elements
  * are classified as rules, code blocks, table rows, or prose.
  */
-export function parseMarkdownSections(input: string): MarkdownSection[] {
+export function parseMarkdownSections(input: string, config?: StrengthConfig): MarkdownSection[] {
   const lines = input.split('\n');
   const sections: MarkdownSection[] = [];
 
@@ -149,7 +157,7 @@ export function parseMarkdownSections(input: string): MarkdownSection[] {
       currentElements.push({
         type: 'rule',
         content: ruleText,
-        strength: detectStrength(ruleText),
+        strength: detectStrength(ruleText, config),
       });
       continue;
     }
