@@ -21,6 +21,12 @@ export type WeightTag = 'load-bearing' | 'advisory';
 /** Module path → lowercase trigger keywords for content-based routing. */
 export type TriggerMap = Record<string, string[]>;
 
+/** Optional overrides for classification heuristics. */
+export interface ClassifierConfig {
+  stayPatterns?: RegExp[];
+  headingRoutes?: Array<{ pattern: RegExp; module: string }>;
+}
+
 export interface ClassificationResult {
   decision: RouteDecision;
   targetSection: AdfTargetSection;
@@ -69,15 +75,22 @@ const STAY_PATTERNS: RegExp[] = [
 // Classification Helpers
 // ============================================================================
 
-function matchesStayPattern(text: string): boolean {
-  return STAY_PATTERNS.some(p => p.test(text));
+function matchesStayPattern(text: string, patterns: RegExp[] = STAY_PATTERNS): boolean {
+  return patterns.some(p => p.test(text));
 }
 
 /**
  * Map a heading name to the most appropriate ADF target module.
  */
-function headingToModule(heading: string): string {
+function headingToModule(heading: string, routes?: ClassifierConfig['headingRoutes']): string {
   const lower = heading.toLowerCase();
+
+  if (routes) {
+    for (const route of routes) {
+      if (route.pattern.test(lower)) return route.module;
+    }
+    return 'core.adf';
+  }
 
   if (/\b(design.system|ui|frontend|css|component|react|vue|svelte)\b/.test(lower)) {
     return 'frontend.adf';
@@ -85,7 +98,6 @@ function headingToModule(heading: string): string {
   if (/\b(api|backend|deploy|server|database|db|endpoint)\b/.test(lower)) {
     return 'backend.adf';
   }
-  // Default: everything routes to core.adf
   return 'core.adf';
 }
 
@@ -120,9 +132,10 @@ export function classifyElement(
   element: MarkdownElement,
   heading: string,
   triggerMap?: TriggerMap,
+  config?: ClassifierConfig,
 ): ClassificationResult {
   const text = element.content;
-  let module = headingToModule(heading);
+  let module = headingToModule(heading, config?.headingRoutes);
 
   // Content-based fallback: when heading routes to core.adf, check element
   // content against ON_DEMAND trigger keywords from the manifest.
@@ -131,7 +144,7 @@ export function classifyElement(
   }
 
   // Check STAY patterns first
-  if (matchesStayPattern(text)) {
+  if (matchesStayPattern(text, config?.stayPatterns)) {
     return {
       decision: 'STAY',
       targetSection: 'CONTEXT',
@@ -291,6 +304,7 @@ export function buildMigrationPlan(
   sections: MarkdownSection[],
   existingAdf?: AdfDocument,
   triggerMap?: TriggerMap,
+  config?: ClassifierConfig,
 ): MigrationPlan {
   const items: MigrationItem[] = [];
 
@@ -310,7 +324,7 @@ export function buildMigrationPlan(
 
   for (const section of sections) {
     for (const element of section.elements) {
-      const classification = classifyElement(element, section.heading, triggerMap);
+      const classification = classifyElement(element, section.heading, triggerMap, config);
 
       // Dedup against existing ADF
       if (classification.decision === 'MIGRATE' && existingItems.size > 0) {
