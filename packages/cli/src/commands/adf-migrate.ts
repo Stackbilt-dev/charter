@@ -12,12 +12,13 @@ import {
   parseAdf,
   formatAdf,
   applyPatches,
+  parseManifest,
   parseMarkdownSections,
   classifyElement,
   isDuplicateItem,
   buildMigrationPlan,
 } from '@stackbilt/adf';
-import type { AdfDocument, PatchOperation, MigrationItem } from '@stackbilt/adf';
+import type { AdfDocument, PatchOperation, MigrationItem, TriggerMap } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -168,7 +169,25 @@ function migrateSource(
     }
   }
 
-  const plan = buildMigrationPlan(sections, existingAdf);
+  // Build trigger map from manifest for content-based module routing
+  let triggerMap: TriggerMap | undefined;
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifestDoc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
+      const manifest = parseManifest(manifestDoc);
+      triggerMap = {};
+      for (const mod of manifest.onDemand) {
+        if (mod.triggers.length > 0) {
+          triggerMap[mod.path] = mod.triggers.map(t => t.toLowerCase());
+        }
+      }
+    } catch {
+      // Manifest parse failed — proceed without content-based routing
+    }
+  }
+
+  const plan = buildMigrationPlan(sections, existingAdf, triggerMap);
   const actions: MigrationAction[] = [];
 
   // Group migrate items by target module and section

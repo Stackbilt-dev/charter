@@ -13,6 +13,7 @@ export type {
   RouteDecision,
   AdfTargetSection,
   WeightTag,
+  TriggerMap,
 } from './content-classifier';
 export * from './types';
 export * from './errors';
