@@ -40,6 +40,40 @@ const PRE_COMMIT_HOOK_CONTENT = `#!/usr/bin/env sh
 ${PRE_COMMIT_HOOK_MARKER}
 set -eu
 
+# Vendor file auto-tidy: extract bloat from staged vendor config files
+# Skip with CHARTER_SKIP_TIDY=1
+if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
+  VENDOR_FILES="CLAUDE.md .cursorrules agents.md AGENTS.md GEMINI.md copilot-instructions.md"
+  STAGED_VENDORS=""
+  for vf in $VENDOR_FILES; do
+    if git diff --cached --name-only | grep -qx "$vf"; then
+      STAGED_VENDORS="$STAGED_VENDORS $vf"
+    fi
+  done
+
+  if [ -n "$STAGED_VENDORS" ]; then
+    echo "[pre-commit] Checking vendor config files:\$STAGED_VENDORS"
+    TIDY_OUTPUT=\$(npx charter adf tidy --dry-run --format json 2>/dev/null || echo '{}')
+    EXTRACTED=\$(echo "\$TIDY_OUTPUT" | grep -o '"totalExtracted":[0-9]*' | grep -o '[0-9]*' || echo "0")
+
+    if [ "\$EXTRACTED" -gt 0 ] 2>/dev/null; then
+      echo "[pre-commit] Found \$EXTRACTED items beyond thin pointer — auto-tidying..."
+      npx charter adf tidy 2>/dev/null
+
+      for vf in \$STAGED_VENDORS; do
+        if [ -f "\$vf" ]; then
+          git add "\$vf"
+        fi
+      done
+      git add .ai/*.adf 2>/dev/null || true
+
+      echo "[pre-commit] Vendor files tidied and re-staged."
+    else
+      echo "[pre-commit] Vendor config files are clean."
+    fi
+  fi
+fi
+
 # ADF evidence gate: check LOC ceilings if manifest exists
 if [ -f ".ai/manifest.adf" ]; then
   echo '[pre-commit] Running ADF evidence check...'
@@ -210,9 +244,9 @@ function printHelp(): void {
   console.log('  --commit-msg: Install a git commit-msg hook that normalizes Governed-By and');
   console.log('  Resolves-Request trailers using git interpret-trailers.');
   console.log('');
-  console.log('  --pre-commit: Install a git pre-commit hook that runs ADF evidence checks');
-  console.log('  (LOC ceiling validation) before each commit. Uses `pnpm run verify:adf` when available,');
-  console.log('  otherwise falls back to `npx charter adf evidence --auto-measure --ci`.');
-  console.log('  Only gates when .ai/manifest.adf exists.');
+  console.log('  --pre-commit: Install a git pre-commit hook that auto-tidies vendor config files');
+  console.log('  (CLAUDE.md, .cursorrules, agents.md, etc.) and runs ADF evidence checks.');
+  console.log('  Vendor file bloat is extracted, routed to .adf modules, and re-staged.');
+  console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
 }
