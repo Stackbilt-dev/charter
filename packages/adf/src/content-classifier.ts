@@ -92,10 +92,16 @@ function headingToModule(heading: string, routes?: ClassifierConfig['headingRout
     return 'core.adf';
   }
 
-  if (/\b(design.system|ui|frontend|css|component|react|vue|svelte)\b/.test(lower)) {
+  if (/\b(design.system|ui|frontend|css|component|react|vue|svelte|next|nextjs|tailwind|shadcn|radix|storybook|vite|vitest|playwright|remix|nuxt|astro)\b/.test(lower)) {
     return 'frontend.adf';
   }
-  if (/\b(api|backend|deploy|server|database|db|endpoint)\b/.test(lower)) {
+  if (/\b(auth|authentication|authorization|security|secret|token|permission|cors|rate.limit|jwt|oauth|clerk|nextauth|lucia|session|cookie|csrf|xss|password|bcrypt)\b/.test(lower)) {
+    return 'security.adf';
+  }
+  if (/\b(deploy|deployment|infrastructure|infra|ci|cd|pipeline|config|configuration|environment|env|docker|wrangler|cloudflare|vercel|netlify|railway|fly|render|github.actions|kv|d1|r2|queue|durable.object)\b/.test(lower)) {
+    return 'infra.adf';
+  }
+  if (/\b(api|backend|server|database|db|endpoint|query|migration|handler|prisma|drizzle|mongoose|postgres|postgresql|mysql|sqlite|express|fastify|hono|trpc|zod|graphql)\b/.test(lower)) {
     return 'backend.adf';
   }
   return 'core.adf';
@@ -113,7 +119,10 @@ function contentToModule(text: string, triggerMap: TriggerMap): string {
   const lower = text.toLowerCase();
   for (const [module, triggers] of Object.entries(triggerMap)) {
     for (const trigger of triggers) {
-      if (new RegExp(`\\b${escapeRegex(trigger)}\\b`, 'i').test(lower)) {
+      // Match whole words or common suffixes (s, ed, ing, ment, tion, ity, ication).
+      // This allows "token" → "tokens", "deploy" → "deploying"/"deployment",
+      // "auth" → "authentication" — while blocking "author", "apiary", "authority".
+      if (new RegExp(`\\b${escapeRegex(trigger)}(?:s|ed|ing|ment|tion|ity|ication)?\\b`, 'i').test(lower)) {
         return module;
       }
     }

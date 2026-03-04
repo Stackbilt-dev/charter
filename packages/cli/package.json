@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/cli",
   "sideEffects": false,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Charter CLI — repo-level governance checks",
   "bin": {
     "charter": "./dist/bin.js"
@@ -38,13 +38,14 @@
     "build": "pnpm exec tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@stackbilt/types": "workspace:^",
-    "@stackbilt/core": "workspace:^",
-    "@stackbilt/git": "workspace:^",
-    "@stackbilt/classify": "workspace:^",
-    "@stackbilt/validate": "workspace:^",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@stackbilt/adf": "workspace:^",
-    "@stackbilt/drift": "workspace:^"
+    "@stackbilt/classify": "workspace:^",
+    "@stackbilt/core": "workspace:^",
+    "@stackbilt/drift": "workspace:^",
+    "@stackbilt/git": "workspace:^",
+    "@stackbilt/types": "workspace:^",
+    "@stackbilt/validate": "workspace:^"
   },
   "license": "Apache-2.0"
 }

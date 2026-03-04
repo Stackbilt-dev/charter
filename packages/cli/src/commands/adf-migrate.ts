@@ -421,7 +421,7 @@ function writePointerWithRetained(
     // If pointer already has ## Environment, replace that section
     // Otherwise append
     const envSection = '\n## Environment\n' +
-      envItems.map(i => `- ${i.element.content}`).join('\n') + '\n';
+      envItems.map(i => i.element.content.trimStart().startsWith('#') ? i.element.content : `- ${i.element.content}`).join('\n') + '\n';
 
     if (pointer.includes('## Environment')) {
       // Replace from ## Environment to end (or next ##)

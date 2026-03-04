@@ -33,6 +33,7 @@ import {
   BACKEND_SCAFFOLD,
   DECISIONS_SCAFFOLD,
   PLANNING_SCAFFOLD,
+  CONTENT_SCAFFOLD,
   POINTER_CLAUDE_MD,
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
@@ -442,9 +443,10 @@ function writeAdfScaffolds(aiDir: string, preset?: StackPreset): string[] {
   fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
   if (isDocsPreset) {
+    fs.writeFileSync(path.join(aiDir, 'content.adf'), CONTENT_SCAFFOLD);
     fs.writeFileSync(path.join(aiDir, 'decisions.adf'), DECISIONS_SCAFFOLD);
     fs.writeFileSync(path.join(aiDir, 'planning.adf'), PLANNING_SCAFFOLD);
-    return ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/decisions.adf', '.ai/planning.adf'];
+    return ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/content.adf', '.ai/decisions.adf', '.ai/planning.adf'];
   }
   fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);

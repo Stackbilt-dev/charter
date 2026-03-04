@@ -15,6 +15,7 @@ import { classifyCommand } from './commands/classify';
 import { quickstartCommand, whyCommand } from './commands/why';
 import { hookCommand } from './commands/hook';
 import { adfCommand } from './commands/adf';
+import { serveCommand } from './commands/serve';
 import { bootstrapCommand } from './commands/bootstrap';
 import { telemetryCommand } from './commands/telemetry';
 import { recordTelemetryEvent } from './telemetry';
@@ -45,6 +46,8 @@ Usage:
   charter hook install --pre-commit [--force]
                                    Install git pre-commit hook for ADF evidence gate
   charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
+  charter serve [--name <name>] [--ai-dir <dir>]
+                                   Expose ADF project context as an MCP server (stdio, for Claude Code)
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
@@ -170,6 +173,9 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'adf':
         exitCode = await adfCommand(options, restArgs);
+        break;
+      case 'serve':
+        exitCode = await serveCommand(options, restArgs);
         break;
       case 'telemetry':
         exitCode = await telemetryCommand(options, restArgs);

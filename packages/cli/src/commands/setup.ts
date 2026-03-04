@@ -392,6 +392,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   console.log('    3. charter validate --format text');
   console.log('    4. charter drift --format text');
   console.log('    5. charter audit --format text');
+  console.log('    6. charter adf bundle --task "<your task>"  # compile ADF context before an agent session');
   console.log('');
   console.log('  Adoption ramp option:');
   console.log('    - Set "validation.citationStrictness": "WARN" in .charter/config.json for an initial non-blocking trailer policy.');
@@ -506,6 +507,22 @@ export function detectStack(contexts: PackageContext[]): DetectionResult {
     };
   }
   if (hasWorker && !hasFrontend && !hasBackend) {
+    // Distinguish static sites that deploy via Wrangler (e.g. Astro docs) from actual Workers apps.
+    if (isStaticWorkerSite()) {
+      return {
+        runtime: dedupRuntime,
+        frameworks: dedup(frameworks),
+        state: dedup(state),
+        sources: contexts.map((c) => c.source),
+        agentStandards,
+        monorepo,
+        signals,
+        mixedStack: false,
+        confidence: 'HIGH',
+        suggestedPreset: 'docs' as StackPreset,
+        warnings: [...warnings, 'wrangler.toml detected with static assets config and no worker entrypoint — suggesting docs preset.'],
+      };
+    }
     return {
       runtime: dedupRuntime,
       frameworks: dedup(frameworks),
@@ -799,6 +816,25 @@ function checkMostlyMarkdown(): boolean {
     const visible = entries.filter(e => !e.startsWith('.'));
     const mdFiles = visible.filter(e => e.endsWith('.md'));
     return visible.length > 0 && mdFiles.length / visible.length >= 0.5;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true when wrangler.toml signals a static-site deployment (assets config, no worker entrypoint).
+ * These repos use Wrangler only for deployment, not to run a Workers application.
+ */
+function isStaticWorkerSite(): boolean {
+  const wranglerPath = path.resolve('wrangler.toml');
+  if (!fs.existsSync(wranglerPath)) return false;
+  try {
+    const toml = fs.readFileSync(wranglerPath, 'utf-8');
+    const hasAssetsConfig = /^\[assets\]/m.test(toml) || /^assets\s*=/m.test(toml);
+    if (!hasAssetsConfig) return false;
+    const workerEntrypoints = ['src/index.ts', 'src/index.js', 'worker.ts', 'worker.js', 'src/worker.ts', 'src/worker.js'];
+    const hasWorkerEntrypoint = workerEntrypoints.some(p => fs.existsSync(path.resolve(p)));
+    return !hasWorkerEntrypoint;
   } catch {
     return false;
   }

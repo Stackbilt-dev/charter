@@ -92,7 +92,7 @@ This isn't theoretical. Charter uses ADF to govern its own codebase. The `.ai/` 
 
 Every commit runs through a pre-commit hook that executes `charter adf evidence --auto-measure`. If a source file exceeds its declared LOC ceiling, the commit is rejected. We can't ship code that violates our own governance rules -- even by accident, even at 2am.
 
-Here is the actual output from Charter's own evidence check (v0.6.0):
+Here is the actual output from Charter's own evidence check (v0.7.0):
 
 ```text
   ADF Evidence Report
@@ -157,12 +157,16 @@ charter adf evidence --auto-measure
 
 # Recalibrate metric ceilings
 charter adf metrics recalibrate --headroom 15 --reason "Scope expansion" --dry-run
+
+# Expose ADF context as an MCP server (for Claude Code / any MCP client)
+charter serve
 ```
 
 ## Why Charter
 
 - **Modular AI context** -- trigger-routed `.ai/` modules replace monolithic config files
 - **Five-minute migration** -- classify and route existing CLAUDE.md / .cursorrules / GEMINI.md rules automatically
+- **MCP server** -- `charter serve` exposes your ADF context as an MCP server; Claude Code can query constraints, architectural decisions, and recent changes without reading raw files
 - **Evidence-based governance** -- metric ceilings with auto-measurement, structured pass/fail reports, CI gating
 - **Self-regulating** -- pre-commit hooks enforce constraints before code lands
 - **Commit governance** -- validate `Governed-By` and `Resolves-Request` trailers, score commit risk
@@ -190,6 +194,23 @@ charter drift                        # Scan for stack drift
 charter audit                        # Governance summary
 charter adf init                     # Scaffold .ai/ context directory
 ```
+
+### Claude Code Integration (MCP)
+
+`charter serve` exposes your `.ai/` modules as an MCP server. Add it to `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "charter": {
+      "command": "charter",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Claude Code can then call `getProjectContext`, `getArchitecturalDecisions`, `getProjectState`, and `getRecentChanges` directly — no manual `adf bundle` needed in the conversation.
 
 ### Agent Workflow
 
@@ -252,6 +273,7 @@ Charter works across WSL, PowerShell, CMD, macOS, and Linux. All git operations 
 - `charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure] [--context '{"k":v}'] [--context-file <path>]`: validate metric constraints and produce evidence report
 - `charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]`: recalibrate metric baselines/ceilings
 - `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: migrate existing agent config files into ADF modules
+- `charter serve [--name <name>] [--ai-dir <dir>]`: start an MCP server (stdio) exposing ADF context as tools and resources for Claude Code and other MCP clients
 - `charter telemetry report [--period <30m|24h|7d>]`: summarize local CLI telemetry
 - `charter why`: explain adoption rationale and expected payoff
 

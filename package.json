@@ -23,14 +23,24 @@
     "docs:oss:auto:dry-run": "node scripts/docs-oss-auto-sync.mjs --config .docsync.oss.json --dry-run --no-push",
     "verify:adf": "bash -lc \"node packages/cli/dist/bin.js doctor --adf-only --ci --format json && node packages/cli/dist/bin.js adf evidence --auto-measure --ci --format json\"",
     "charter:detect": "charter setup --detect-only --format json",
-    "charter:setup": "charter setup --preset fullstack --ci github --yes"
+    "charter:setup": "charter setup --preset fullstack --ci github --yes",
+    "harness": "node --import tsx harness/runner.ts",
+    "harness:scenario": "node --import tsx harness/runner.ts --scenario",
+    "harness:archetype": "node --import tsx harness/runner.ts --archetype",
+    "harness:ollama": "node --import tsx harness/runner.ts --ollama",
+    "harness:ollama:worker": "node --import tsx harness/runner.ts --ollama --archetype worker",
+    "harness:ollama:backend": "node --import tsx harness/runner.ts --ollama --archetype backend",
+    "harness:real": "node --import tsx harness/runner.ts --real",
+    "harness:real:aegis": "node --import tsx harness/runner.ts --real --archetype aegis",
+    "harness:real:bizops": "node --import tsx harness/runner.ts --real --archetype bizops"
   },
   "packageManager": "pnpm@9.15.9",
   "devDependencies": {
+    "@stackbilt/cli": "0.6.0",
     "@types/node": "^25.2.3",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vitest": "^4.0.18",
-    "zod": "^3.24.1",
-    "@stackbilt/cli": "0.6.0"
+    "zod": "^3.24.1"
   }
 }

@@ -94,6 +94,21 @@ export const PLANNING_SCAFFOLD = `ADF: 0.1
   - Track project phases, milestones, and sequencing
 `;
 
+
+export const CONTENT_SCAFFOLD = `ADF: 0.1
+\u{1F4CB} CONTEXT:
+  - Content module scaffold
+  - Add Markdown/MDX authoring conventions, frontmatter schema, and doc linting rules
+
+\u26A0\uFE0F CONSTRAINTS [load-bearing]:
+  - All pages must include required frontmatter fields (title, description)
+  - Use MDX for pages that require interactive components
+
+\u{1F4CB} ADVISORY:
+  - Prefer flat URL structures; avoid deep nesting beyond 3 levels
+  - Include alt text on all images
+`;
+
 export const MANIFEST_DOCS_SCAFFOLD = `ADF: 0.1
 \u{1F3AF} ROLE: Documentation workspace context router
 
@@ -102,7 +117,8 @@ export const MANIFEST_DOCS_SCAFFOLD = `ADF: 0.1
   - state.adf
 
 \u{1F4C2} ON_DEMAND:
-  - decisions.adf (Triggers on: ADR, decision, rationale)
+  - content.adf (Triggers on: Markdown, MDX, frontmatter, content, Astro, navigation, docs, authoring)
+  - decisions.adf (Triggers on: ADR, decision, rationale, architecture)
   - planning.adf (Triggers on: plan, milestone, phase, roadmap)
 
 \u{1F4D0} RULES:
@@ -306,6 +322,8 @@ function adfInit(options: CLIOptions, args: string[]): number {
     console.log('    1. Edit core.adf with your universal repo rules');
     console.log('    2. Edit frontend.adf/backend.adf stubs or replace with domain modules');
     console.log('    3. Run: charter adf fmt .ai/core.adf --check');
+    console.log('    4. Run: charter adf bundle --task "<your task>" to compile context for an agent session');
+    console.log('       (The verify:adf script runs this automatically in CI)');
   }
 
   return EXIT_CODE.SUCCESS;

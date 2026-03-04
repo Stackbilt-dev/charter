@@ -52,6 +52,8 @@ function getPointerTemplates(): Record<string, string> {
 // Types
 // ============================================================================
 
+const SECTION_SIZE_WARN_THRESHOLD = 20;
+
 interface TidyFileResult {
   file: string;
   status: 'clean' | 'tidied' | 'not-found';
@@ -59,11 +61,18 @@ interface TidyFileResult {
   routing: Record<string, number>;
 }
 
+interface ModuleSizeWarning {
+  module: string;
+  section: string;
+  itemCount: number;
+}
+
 interface TidyResult {
   dryRun: boolean;
   files: TidyFileResult[];
   totalExtracted: number;
   modulesModified: string[];
+  moduleWarnings: ModuleSizeWarning[];
 }
 
 // ============================================================================
@@ -83,7 +92,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
 
   if (targets.length === 0) {
     if (options.format === 'json') {
-      console.log(JSON.stringify({ dryRun, files: [], totalExtracted: 0, modulesModified: [] }, null, 2));
+      console.log(JSON.stringify({ dryRun, files: [], totalExtracted: 0, modulesModified: [], moduleWarnings: [] }, null, 2));
     } else {
       console.log('  No vendor config files found.');
     }
@@ -147,7 +156,13 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
   const totalExtracted = fileResults.reduce((sum, f) => sum + f.itemsExtracted, 0);
   const modulesModified = Object.keys(allModuleGroups);
 
-  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified };
+  // Check module health — warn when sections grow past the threshold.
+  // In dry-run mode project counts (current + incoming); otherwise read written files.
+  const moduleWarnings: ModuleSizeWarning[] = dryRun
+    ? projectModuleWarnings(aiDir, allModuleGroups)
+    : scanModuleWarnings(aiDir, modulesModified);
+
+  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings };
 
   // Output
   if (options.format === 'json') {
@@ -197,16 +212,9 @@ function analyzeVendorFile(
   // Parse and classify the extracted content
   const sections = parseMarkdownSections(beyondPointer);
 
-  // Load existing ADF for dedup
-  let existingAdf: AdfDocument | undefined;
-  const coreAdfPath = path.join(aiDir, 'core.adf');
-  if (fs.existsSync(coreAdfPath)) {
-    try {
-      existingAdf = parseAdf(fs.readFileSync(coreAdfPath, 'utf-8'));
-    } catch {
-      // proceed without dedup
-    }
-  }
+  // Load ALL existing ADF modules for dedup (not just core.adf — items may have
+  // been routed to any domain module in a previous session).
+  const existingAdf = loadAllAdfModules(aiDir);
 
   const plan = buildMigrationPlan(sections, existingAdf, triggerMap);
   return {
@@ -395,6 +403,14 @@ function formatItemForAdf(item: MigrationItem): string {
 // Pointer Restoration
 // ============================================================================
 
+/**
+ * Format a STAY item for writing back into the vendor file's ## Environment section.
+ * Headings (lines starting with #) are preserved as-is; everything else gets a - prefix.
+ */
+function formatStayItem(content: string): string {
+  return content.trimStart().startsWith('#') ? content : `- ${content}`;
+}
+
 function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
   const fullPath = path.resolve(filePath);
   const baseName = path.basename(filePath);
@@ -416,7 +432,7 @@ function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
 
   if (envItems.length > 0) {
     const envSection = '\n## Environment\n' +
-      envItems.map(i => `- ${i.element.content}`).join('\n') + '\n';
+      envItems.map(i => formatStayItem(i.element.content)).join('\n') + '\n';
 
     if (pointer.includes('## Environment')) {
       pointer = pointer.replace(/## Environment[\s\S]*$/, envSection.trim() + '\n');
@@ -460,6 +476,89 @@ function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Load and merge all .adf modules in aiDir into a single synthetic AdfDocument
+ * for dedup checking. This ensures items previously routed to any domain module
+ * (backend.adf, security.adf, etc.) are recognized as duplicates on re-injection.
+ */
+function loadAllAdfModules(aiDir: string): AdfDocument | undefined {
+  if (!fs.existsSync(aiDir)) return undefined;
+
+  const allSections: AdfDocument['sections'] = [];
+
+  let files: string[];
+  try {
+    files = fs.readdirSync(aiDir).filter(f => f.endsWith('.adf') && f !== 'manifest.adf');
+  } catch {
+    return undefined;
+  }
+
+  for (const file of files) {
+    try {
+      const doc = parseAdf(fs.readFileSync(path.join(aiDir, file), 'utf-8'));
+      allSections.push(...doc.sections);
+    } catch {
+      // skip unparseable modules
+    }
+  }
+
+  if (allSections.length === 0) return undefined;
+  return { sections: allSections } as AdfDocument;
+}
+
+/**
+ * Scan written modules post-apply for sections that exceed the warning threshold.
+ */
+function scanModuleWarnings(aiDir: string, modules: string[]): ModuleSizeWarning[] {
+  const warnings: ModuleSizeWarning[] = [];
+  for (const mod of modules) {
+    const p = path.join(aiDir, mod);
+    if (!fs.existsSync(p)) continue;
+    try {
+      const doc = parseAdf(fs.readFileSync(p, 'utf-8'));
+      for (const section of doc.sections) {
+        if (section.content.type !== 'list') continue;
+        const count = section.content.items.length;
+        if (count >= SECTION_SIZE_WARN_THRESHOLD) {
+          warnings.push({ module: mod, section: section.key, itemCount: count });
+        }
+      }
+    } catch { /* skip unparseable */ }
+  }
+  return warnings;
+}
+
+/**
+ * Project module sizes in dry-run mode: current items + incoming items per section.
+ */
+function projectModuleWarnings(
+  aiDir: string,
+  allModuleGroups: Record<string, Record<string, MigrationItem[]>>,
+): ModuleSizeWarning[] {
+  const warnings: ModuleSizeWarning[] = [];
+  for (const [mod, sectionGroups] of Object.entries(allModuleGroups)) {
+    const p = path.join(aiDir, mod);
+    const currentCounts: Record<string, number> = {};
+    if (fs.existsSync(p)) {
+      try {
+        const doc = parseAdf(fs.readFileSync(p, 'utf-8'));
+        for (const section of doc.sections) {
+          if (section.content.type === 'list') {
+            currentCounts[section.key] = section.content.items.length;
+          }
+        }
+      } catch { /* skip */ }
+    }
+    for (const [sectionKey, items] of Object.entries(sectionGroups)) {
+      const projected = (currentCounts[sectionKey] ?? 0) + items.length;
+      if (projected >= SECTION_SIZE_WARN_THRESHOLD) {
+        warnings.push({ module: mod, section: sectionKey, itemCount: projected });
+      }
+    }
+  }
+  return warnings;
+}
 
 function loadTriggerMap(aiDir: string): TriggerMap | undefined {
   const manifestPath = path.join(aiDir, 'manifest.adf');
@@ -505,6 +604,14 @@ function printTextResult(result: TidyResult): void {
 
   if (clean.length > 0) {
     console.log(`  ${clean.length} file(s) already clean.`);
+  }
+
+  if (result.moduleWarnings.length > 0) {
+    console.log('');
+    console.log('  ⚠ Module size warnings:');
+    for (const w of result.moduleWarnings) {
+      console.log(`    ${w.module} > ${w.section}: ${w.itemCount} items — consider running: charter adf prune`);
+    }
   }
 
   if (result.dryRun) {

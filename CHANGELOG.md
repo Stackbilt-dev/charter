@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-04
+
+### Added
+- **`charter serve` — MCP server** ([#28](https://github.com/Stackbilt-dev/charter/issues/28)): New command exposes ADF-curated project context as an MCP server over stdio, enabling Claude Code and other MCP clients to query project constraints, architectural decisions, and recent changes. Tools: `getProjectContext` (ADF bundle filtered by task keywords), `getArchitecturalDecisions` (load-bearing CONSTRAINTS from `core.adf`), `getProjectState` (constraint validation status), `getRecentChanges` (git log). Resources: `adf://manifest`, `adf://modules/{name}`. Add to Claude Code via `mcpServers: { charter: { command: "charter", args: ["serve"] } }` in `.claude/settings.json`.
+- **Static site detection** ([#30](https://github.com/Stackbilt-dev/charter/issues/30)): `charter setup --detect-only` now distinguishes static sites that deploy via Wrangler from actual Workers applications. Repos with `wrangler.toml` containing `[assets]` config and no worker entrypoint (`src/index.ts`, `worker.ts`, etc.) are suggested `docs` preset instead of `worker`, with an explanatory warning in detection output.
+- **`content.adf` for docs preset** ([#31](https://github.com/Stackbilt-dev/charter/issues/31)): `charter bootstrap --preset docs` now scaffolds `content.adf` (triggers: Markdown, MDX, frontmatter, Astro, navigation, docs, authoring) alongside `decisions.adf` and `planning.adf`. `MANIFEST_DOCS_SCAFFOLD` trigger keywords updated to match documentation workflows.
+- **7 new harness edge-case scenarios** ([#36](https://github.com/Stackbilt-dev/charter/issues/36)): `edge-dedup-rephrased`, `edge-dedup-partial-overlap`, `edge-heading-dominates-cross-module`, `edge-auth-implementation-vs-policy`, `edge-trigger-prefix-collision`, `edge-large-injection` (22-item multi-module stress test), `edge-empty-heading`. Harness: 21/21 passing.
+
+### Fixed
+- **Trigger prefix collision in content classifier** ([#36](https://github.com/Stackbilt-dev/charter/issues/36)): `contentToModule()` regex changed from bare prefix match (`\bauth`) to suffix-aware word-boundary match (`\bauth(?:s|ed|ing|ment|tion|ity|ication)?\b`). Triggers `auth` and `api` previously matched "author", "authentic", "authority", "apiary" — now blocked.
+
+### Changed
+- **`adf init` and `charter setup` next-steps** ([#32](https://github.com/Stackbilt-dev/charter/issues/32)): Both commands now include `charter adf bundle --task "<your task>"` in next-steps output with a note that `verify:adf` runs this in CI.
+- All packages bumped from 0.6.0 to 0.7.0.
+
 ## [0.6.0] - 2026-03-03
 
 ### Added

@@ -1,0 +1,281 @@
+/**
+ * charter serve
+ *
+ * Exposes ADF-curated project context as an MCP server.
+ * Supports stdio (default) and SSE transports.
+ *
+ * Usage:
+ *   charter serve                              # stdio, for Claude Code
+ *   charter serve --transport sse --port 3847  # SSE, for network access
+ *   charter serve --name "my-project"          # custom server name
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+
+import {
+  parseAdf,
+  formatAdf,
+  parseManifest,
+  bundleModules,
+  resolveModules,
+  validateConstraints,
+} from '@stackbilt/adf';
+import type { CLIOptions } from '../index';
+import { CLIError, EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const DEFAULT_PORT = 3847;
+
+// ============================================================================
+// Command Entry
+// ============================================================================
+
+export async function serveCommand(options: CLIOptions, args: string[]): Promise<number> {
+  const transport = (getFlag(args, '--transport') ?? 'stdio') as 'stdio' | 'sse';
+  const port = parseInt(getFlag(args, '--port') ?? String(DEFAULT_PORT), 10);
+  const aiDir = getFlag(args, '--ai-dir') ?? '.ai';
+  const customName = getFlag(args, '--name');
+
+  if (!fs.existsSync(path.join(aiDir, 'manifest.adf'))) {
+    throw new CLIError(`No .ai/ directory found. Run: charter init`);
+  }
+
+  if (transport === 'sse') {
+    throw new CLIError(`SSE transport not yet implemented. Use stdio (default) for now.`);
+  }
+
+  const projectName = customName ?? inferProjectName(aiDir);
+
+  const server = new McpServer({
+    name: projectName,
+    version: '1.0.0',
+  });
+
+  registerTools(server, aiDir);
+  registerResources(server, aiDir);
+
+  if (options.format !== 'json') {
+    process.stderr.write(`charter serve: ${projectName} — stdio transport ready\n`);
+    process.stderr.write(`  ADF modules: ${listModuleNames(aiDir).join(', ')}\n`);
+  }
+
+  const stdioTransport = new StdioServerTransport();
+  await server.connect(stdioTransport);
+
+  return EXIT_CODE.SUCCESS;
+}
+
+// ============================================================================
+// Tool Registration
+// ============================================================================
+
+function registerTools(server: McpServer, aiDir: string): void {
+
+  (server.registerTool as Function)(
+    'getProjectContext',
+    {
+      description: 'Returns the ADF bundle for this project — constraints, context, and advisory rules loaded for the given task or trigger keywords.',
+      inputSchema: { task: z.string().optional().describe('Task description or trigger keywords to load on-demand modules') },
+    },
+    async ({ task }: { task?: string }) => {
+      try {
+        const manifest = loadManifest(aiDir);
+        const keywords = task ? task.toLowerCase().split(/\s+/) : [];
+        const modulePaths = resolveModules(manifest, keywords);
+        const bundle = bundleModules(
+          aiDir,
+          modulePaths,
+          (p) => fs.readFileSync(path.join(aiDir, p), 'utf-8'),
+          keywords,
+          manifest,
+        );
+        return { content: [{ type: 'text' as const, text: formatAdf(bundle.mergedDocument) }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    },
+  );
+
+  server.registerTool(
+    'getArchitecturalDecisions',
+    {
+      description: 'Returns load-bearing constraints from core.adf — the non-negotiable rules that define this project\'s identity.',
+    },
+    async () => {
+      try {
+        const corePath = path.join(aiDir, 'core.adf');
+        if (!fs.existsSync(corePath)) {
+          return { content: [{ type: 'text' as const, text: 'No core.adf found.' }] };
+        }
+        const doc = parseAdf(fs.readFileSync(corePath, 'utf-8'));
+        const constraints = doc.sections
+          .filter(s => s.key === 'CONSTRAINTS' && s.content.type === 'list')
+          .flatMap(s => s.content.type === 'list' ? s.content.items : []);
+        if (constraints.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No CONSTRAINTS found in core.adf.' }] };
+        }
+        return { content: [{ type: 'text' as const, text: constraints.map(c => `- ${c}`).join('\n') }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    },
+  );
+
+  server.registerTool(
+    'getProjectState',
+    {
+      description: 'Returns evidence metrics and constraint validation results from the project\'s ADF state.',
+    },
+    async () => {
+      try {
+        const manifest = loadManifest(aiDir);
+        const allModulePaths = [
+          ...manifest.defaultLoad,
+          ...manifest.onDemand.map(m => m.path),
+        ];
+        const lines: string[] = ['## Project State\n'];
+
+        // Constraint validation
+        for (const modPath of allModulePaths) {
+          const fullPath = path.join(aiDir, modPath);
+          if (!fs.existsSync(fullPath)) continue;
+          const doc = parseAdf(fs.readFileSync(fullPath, 'utf-8'));
+          const result = validateConstraints(doc);
+          const failing = result.constraints.filter(c => c.status === 'fail' || c.status === 'warn');
+          if (failing.length > 0) {
+            lines.push(`### ${modPath} — ${failing.length} issue(s)`);
+            for (const c of failing) {
+              lines.push(`- [${c.status.toUpperCase()}] ${c.message}`);
+            }
+            lines.push('');
+          }
+        }
+
+        if (lines.length === 1) {
+          lines.push('All constraints pass — no violations detected.');
+        }
+
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    },
+  );
+
+  (server.registerTool as Function)(
+    'getRecentChanges',
+    {
+      description: 'Returns recent git commits with their classification (feature/fix/refactor/etc.).',
+      inputSchema: { days: z.number().optional().describe('Number of days to look back (default: 7)') },
+    },
+    async ({ days = 7 }: { days?: number }) => {
+      try {
+        const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+        const log = execFileSync('git', [
+          'log',
+          `--since=${since}`,
+          '--oneline',
+          '--no-merges',
+        ], { encoding: 'utf-8' }).trim();
+
+        if (!log) {
+          return { content: [{ type: 'text' as const, text: `No commits in the last ${days} days.` }] };
+        }
+        return { content: [{ type: 'text' as const, text: `## Recent Changes (last ${days} days)\n\n${log}` }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Error reading git log: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    },
+  );
+}
+
+// ============================================================================
+// Resource Registration
+// ============================================================================
+
+function registerResources(server: McpServer, aiDir: string): void {
+
+  // adf://manifest — module routing table
+  server.resource(
+    'manifest',
+    'adf://manifest',
+    async () => {
+      const manifestPath = path.join(aiDir, 'manifest.adf');
+      if (!fs.existsSync(manifestPath)) {
+        return { contents: [{ uri: 'adf://manifest', text: 'manifest.adf not found', mimeType: 'text/plain' }] };
+      }
+      return {
+        contents: [{
+          uri: 'adf://manifest',
+          text: fs.readFileSync(manifestPath, 'utf-8'),
+          mimeType: 'text/plain',
+        }],
+      };
+    },
+  );
+
+  // adf://modules/{name} — individual module content
+  for (const modName of listModuleNames(aiDir)) {
+    const uri = `adf://modules/${modName}`;
+    server.resource(
+      modName,
+      uri,
+      async () => {
+        const modPath = path.join(aiDir, modName);
+        if (!fs.existsSync(modPath)) {
+          return { contents: [{ uri, text: `${modName} not found`, mimeType: 'text/plain' }] };
+        }
+        return {
+          contents: [{
+            uri,
+            text: fs.readFileSync(modPath, 'utf-8'),
+            mimeType: 'text/plain',
+          }],
+        };
+      },
+    );
+  }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function loadManifest(aiDir: string) {
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  return parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8')));
+}
+
+function listModuleNames(aiDir: string): string[] {
+  try {
+    return fs.readdirSync(aiDir).filter(f => f.endsWith('.adf'));
+  } catch {
+    return [];
+  }
+}
+
+function inferProjectName(aiDir: string): string {
+  try {
+    const corePath = path.join(aiDir, 'core.adf');
+    if (fs.existsSync(corePath)) {
+      const doc = parseAdf(fs.readFileSync(corePath, 'utf-8'));
+      const project = doc.sections.find(s => s.key === 'PROJECT');
+      if (project?.content.type === 'text') {
+        return project.content.value.trim();
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Fall back to directory name
+  return path.basename(process.cwd());
+}
