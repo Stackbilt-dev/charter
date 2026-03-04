@@ -76,6 +76,28 @@ Stays in CSA Cloud:
 - Database operations and multi-tenant runtime features
 - AuthN/AuthZ and hosted frontend concerns
 
+## Claude Code Setup
+
+This repo ships with Claude Code skills and permissions config in `.claude/`.
+
+**Tracked (shared with all contributors):**
+- `.claude/skills/` — project workflows (`/commit`, `/release`, `/issue`, `/test`)
+- `.claude/settings.json` — stable Bash permissions and PostToolUse hooks
+- `CLAUDE.md` / `AGENTS.md` — thin pointers routing agents to `.ai/` modules
+
+**Not tracked (create your own):**
+- `.claude/settings.local.json` — personal overrides, MCP server config, WSL/machine-specific permissions
+
+To add personal overrides, create `.claude/settings.local.json`:
+```json
+{
+  "permissions": {
+    "allow": ["Bash(wslview:*)"]
+  },
+  "enabledMcpjsonServers": ["your-mcp-server"]
+}
+```
+
 ## Reporting Issues
 
 Use GitHub Issues for bugs/features. Include Node.js version, OS, and `charter --version` output.

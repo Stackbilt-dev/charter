@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm:*)",
+      "Bash(node:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh release:*)",
+      "Bash(gh api:*)",
+      "Bash(gh label:*)",
+      "Bash(npm view:*)",
+      "Bash(npm whoami:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'pkg=$(echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -oP \"packages/[^/]+\" | head -1); if [ -n \"$pkg\" ] && echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q \"/src/\"; then echo \"[hook] Type-checking $pkg...\"; cd /mnt/c/Users/kover/Documents/digitalcsa-kit && pnpm exec tsc --noEmit -p tsconfig.json 2>&1 | tail -20; fi'"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q \"\\.ai/.*\\.adf$\"; then echo \"[hook] Checking ADF evidence...\"; cd /mnt/c/Users/kover/Documents/digitalcsa-kit && node packages/cli/dist/bin.js adf evidence --auto-measure 2>&1 | tail -20; fi'"
+          }
+        ]
+      }
+    ]
+  }
+}

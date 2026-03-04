@@ -7,10 +7,8 @@ coverage/
 .cache/
 *.log
 .mcp.json
-.claude/
+.claude/settings.local.json
 .docsync.json
-AGENTS.md
-CLAUDE.md
 plans/
 governance/
 
