@@ -22,7 +22,7 @@ import type { AdfDocument, PatchOperation, MigrationItem, TriggerMap } from '@st
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD, POINTER_MARKERS } from './adf';
+import { POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD, POINTER_GEMINI_MD, POINTER_COPILOT_MD, POINTER_MARKERS } from './adf';
 
 // ============================================================================
 // Constants
@@ -41,6 +41,9 @@ const POINTER_TEMPLATES: Record<string, string> = {
   'CLAUDE.md': POINTER_CLAUDE_MD,
   '.cursorrules': POINTER_CURSORRULES,
   'agents.md': POINTER_AGENTS_MD,
+  'AGENTS.md': POINTER_AGENTS_MD,
+  'GEMINI.md': POINTER_GEMINI_MD,
+  'copilot-instructions.md': POINTER_COPILOT_MD,
 };
 
 // ============================================================================

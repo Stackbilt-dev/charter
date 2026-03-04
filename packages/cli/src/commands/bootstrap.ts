@@ -36,6 +36,8 @@ import {
   POINTER_CLAUDE_MD,
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
+  POINTER_GEMINI_MD,
+  POINTER_COPILOT_MD,
 } from './adf';
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
@@ -501,6 +503,8 @@ function runAdfInitPhase(
       { name: 'CLAUDE.md', content: POINTER_CLAUDE_MD, label: 'CLAUDE.md (thin pointer)' },
       { name: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
       { name: 'agents.md', content: POINTER_AGENTS_MD, label: 'agents.md (thin pointer)' },
+      { name: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
+      { name: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
     ];
 
     for (const pf of pointerFiles) {

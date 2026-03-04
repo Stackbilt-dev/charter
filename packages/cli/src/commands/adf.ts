@@ -164,41 +164,45 @@ export const POINTER_MARKERS = [
   'Do not duplicate ADF rules here',
   'Do not duplicate rules from .ai/',
   'Do not add stack rules here',
+  'DO NOT add rules, constraints, or context to this file',
+  'DO NOT modify this file. All project rules are managed in .ai/',
+  'DO NOT add instructions to this file',
+  'DO NOT add rules or context to this file',
 ];
 
 // -- Thin pointer file content --
 
-export const POINTER_CLAUDE_MD = `# Project Context
+export const POINTER_CLAUDE_MD = `# CLAUDE.md
 
-> This project uses [ADF](https://github.com/Stackbilt-dev/charter) for AI agent context management.
-> All stack rules, constraints, and architectural guidance live in \`.ai/\`.
-> **Do not duplicate ADF rules here.** Only pre-ADF bootstrap content belongs in this file.
-
-See \`.ai/manifest.adf\` for the module routing manifest.
+> **DO NOT add rules, constraints, or context to this file.**
+> This file is auto-managed by Charter. All project rules live in \`.ai/\`.
+> New rules should be added to the appropriate \`.ai/*.adf\` module.
+> See \`.ai/manifest.adf\` for the module routing manifest.
 
 ## Environment
 <!-- Add runtime/OS/shell-specific notes here (not stack rules) -->
 `;
 
-export const POINTER_CURSORRULES = `# Cursor Rules
-
-This project uses ADF (Attention-Directed Format) for context management.
-All rules and constraints are in .ai/ \u2014 see .ai/manifest.adf for routing.
-
-Do not add stack rules here. This file exists only as a pointer.
-See: .ai/core.adf for universal constraints.
+export const POINTER_CURSORRULES = `DO NOT modify this file. All project rules are managed in .ai/ by Charter.
+See .ai/manifest.adf for the module routing manifest.
 `;
 
-export const POINTER_AGENTS_MD = `# Agent Guidelines
+export const POINTER_AGENTS_MD = `# agents.md
 
-This project uses ADF for structured agent context.
-All architectural rules, constraints, and guidance live in \`.ai/\`.
+> **DO NOT add instructions to this file.**
+> All agent instructions are managed in \`.ai/\` by Charter.
+> See \`.ai/manifest.adf\` for the module routing manifest.
+`;
 
-Module manifest: .ai/manifest.adf
-Universal rules: .ai/core.adf
-Current state: .ai/state.adf
+export const POINTER_GEMINI_MD = `# GEMINI.md
 
-Do not duplicate rules from .ai/ modules into this file or other agent config files.
+> **DO NOT add rules or context to this file.**
+> All project rules are managed in \`.ai/\` by Charter.
+> See \`.ai/manifest.adf\` for the module routing manifest.
+`;
+
+export const POINTER_COPILOT_MD = `DO NOT modify this file. All project rules are managed in .ai/ by Charter.
+See .ai/manifest.adf for the module routing manifest.
 `;
 
 function adfInit(options: CLIOptions, args: string[]): number {
@@ -249,6 +253,8 @@ function adfInit(options: CLIOptions, args: string[]): number {
       { file: 'CLAUDE.md', content: POINTER_CLAUDE_MD, label: 'CLAUDE.md (thin pointer)' },
       { file: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
       { file: 'agents.md', content: POINTER_AGENTS_MD, label: 'agents.md (thin pointer)' },
+      { file: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
+      { file: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
     ];
     const createdPointers: string[] = [];
     const skippedPointers: string[] = [];

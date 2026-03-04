@@ -1,10 +1,9 @@
 # CLAUDE.md
 
-> This project uses [ADF](https://github.com/Stackbilt-dev/charter) for AI agent context management.
-> All stack rules, constraints, and architectural guidance live in `.ai/`.
-> **Do not duplicate ADF rules here.** Only pre-ADF bootstrap content belongs in this file.
-
-See `.ai/manifest.adf` for the module routing manifest.
+> **DO NOT add rules, constraints, or context to this file.**
+> This file is auto-managed by Charter. All project rules live in `.ai/`.
+> New rules should be added to the appropriate `.ai/*.adf` module.
+> See `.ai/manifest.adf` for the module routing manifest.
 
 ## Environment
 

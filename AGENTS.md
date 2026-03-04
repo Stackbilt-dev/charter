@@ -1,10 +1,5 @@
-# Agent Guidelines
+# agents.md
 
-This project uses ADF for structured agent context.
-All architectural rules, constraints, and guidance live in `.ai/`.
-
-Module manifest: .ai/manifest.adf
-Universal rules: .ai/core.adf
-Current state: .ai/state.adf
-
-Do not duplicate rules from .ai/ modules into this file or other agent config files.
+> **DO NOT add instructions to this file.**
+> All agent instructions are managed in `.ai/` by Charter.
+> See `.ai/manifest.adf` for the module routing manifest.
