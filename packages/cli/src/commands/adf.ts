@@ -21,6 +21,7 @@ import { adfBundle } from './adf-bundle';
 import { adfSync } from './adf-sync';
 import { adfEvidence } from './adf-evidence';
 import { adfMetricsCommand } from './adf-metrics';
+import { adfTidyCommand } from './adf-tidy';
 
 // ============================================================================
 // Scaffold Content
@@ -139,10 +140,12 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfEvidence(options, restArgs);
     case 'migrate':
       return adfMigrateCommand(options, restArgs);
+    case 'tidy':
+      return adfTidyCommand(options, restArgs);
     case 'metrics':
       return adfMetricsCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, bundle, sync, evidence, migrate, metrics`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, bundle, sync, evidence, migrate, tidy, metrics`);
   }
 }
 
@@ -591,6 +594,12 @@ function printHelp(): void {
   console.log('      --source: migrate a single file instead of scanning all agent configs');
   console.log('      --no-backup: skip creating .pre-adf-migrate.bak backups');
   console.log('      --merge-strategy: append (always add), dedupe (skip duplicates, default), replace');
+  console.log('');
+  console.log('    charter adf tidy [--dry-run] [--source <file>] [--ai-dir <dir>] [--ci]');
+  console.log('      Scan vendor config files for content added beyond the thin pointer,');
+  console.log('      classify and route to ADF modules, restore thin pointer.');
+  console.log('      --dry-run: preview without modifying files');
+  console.log('      --ci: exit 1 if bloat found (with --dry-run, for pre-commit gating)');
   console.log('');
   console.log('    charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]');
   console.log('      Recalibrate metric baselines/ceilings from current LOC with required rationale.');
