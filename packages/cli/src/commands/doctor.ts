@@ -150,12 +150,15 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       // Agent config pointer check: flag files with stack rules that should be in .ai/
       const AGENT_CONFIG_FILES = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
       const nonPointerFiles: string[] = [];
+      const pointerFiles: Array<{ file: string; content: string }> = [];
       for (const file of AGENT_CONFIG_FILES) {
         if (fs.existsSync(file)) {
           const content = fs.readFileSync(file, 'utf-8');
           const isPointer = POINTER_MARKERS.some(marker => content.includes(marker));
           if (!isPointer) {
             nonPointerFiles.push(file);
+          } else {
+            pointerFiles.push({ file, content });
           }
         }
       }
@@ -166,7 +169,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
           details: `${nonPointerFiles.join(', ')} contain${nonPointerFiles.length === 1 ? 's' : ''} stack rules that should live in .ai/. Run: charter adf migrate --dry-run`,
         });
       } else {
-        const pointerCount = AGENT_CONFIG_FILES.filter(f => fs.existsSync(f)).length;
+        const pointerCount = pointerFiles.length;
         if (pointerCount > 0) {
           checks.push({
             name: 'adf agent config',
@@ -174,6 +177,103 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
             details: `${pointerCount} agent config file(s) are thin pointers to .ai/.`,
           });
         }
+      }
+
+      // Vendor file bloat detection: line count, section overlap, keyword density
+      const BLOAT_LINE_THRESHOLD = 80;
+      const bloatWarnings: string[] = [];
+
+      // Collect ADF section keys for overlap detection
+      const adfSectionKeys = new Set<string>();
+      const allModulePaths = [...manifest.defaultLoad, ...manifest.onDemand.map(m => m.path)];
+      for (const mod of allModulePaths) {
+        const modPath = path.join(aiDir, mod);
+        if (fs.existsSync(modPath)) {
+          try {
+            const modDoc = parseAdf(fs.readFileSync(modPath, 'utf-8'));
+            for (const sec of modDoc.sections) {
+              adfSectionKeys.add(sec.key.toLowerCase());
+            }
+          } catch { /* skip unparseable */ }
+        }
+      }
+
+      // Collect trigger keywords for density check
+      const triggerKeywords: Array<{ keyword: string; module: string }> = [];
+      for (const mod of manifest.onDemand) {
+        for (const trigger of mod.triggers) {
+          triggerKeywords.push({ keyword: trigger.toLowerCase(), module: mod.path });
+        }
+      }
+
+      for (const { file, content } of pointerFiles) {
+        const lines = content.split('\n');
+        const lineCount = lines.length;
+        const fileWarnings: string[] = [];
+
+        // 1. Line count threshold
+        if (lineCount > BLOAT_LINE_THRESHOLD) {
+          fileWarnings.push(`${lineCount} lines (threshold: ${BLOAT_LINE_THRESHOLD})`);
+        }
+
+        // 2. Section overlap detection — find H2 headers that match ADF section keys
+        const h2Sections = lines
+          .filter(l => l.trim().startsWith('## '))
+          .map(l => l.trim().replace(/^## /, ''))
+          .filter(h => h !== 'Environment'); // Environment is legitimate
+
+        for (const header of h2Sections) {
+          const headerLower = header.toLowerCase();
+          for (const adfKey of adfSectionKeys) {
+            const keyWords = adfKey.toLowerCase().split(/[_\s]+/);
+            if (keyWords.some(w => w.length > 3 && headerLower.includes(w))) {
+              fileWarnings.push(`"${header}" section overlaps ADF section "${adfKey}"`);
+              break;
+            }
+          }
+        }
+
+        // 3. Keyword density — check for trigger keyword concentration
+        // Exclude pointer preamble lines (blockquotes, comments, marker lines)
+        const nonPointerContent = lines.filter(l => {
+          const t = l.trim();
+          if (t.startsWith('>') || t.startsWith('<!--') || t.startsWith('#') && !t.startsWith('## ')) return false;
+          if (POINTER_MARKERS.some(m => t.includes(m))) return false;
+          if (t.includes('.ai/manifest.adf') || t.includes('auto-managed by Charter')) return false;
+          return true;
+        }).join('\n');
+        const contentLower = nonPointerContent.toLowerCase();
+        const matchedModules = new Map<string, string[]>();
+        for (const { keyword, module } of triggerKeywords) {
+          // Count occurrences (word boundary match)
+          const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+          const matches = contentLower.match(regex);
+          if (matches && matches.length >= 2) {
+            if (!matchedModules.has(module)) matchedModules.set(module, []);
+            matchedModules.get(module)!.push(`${keyword} (${matches.length}x)`);
+          }
+        }
+        for (const [mod, keywords] of matchedModules) {
+          fileWarnings.push(`trigger keywords [${keywords.join(', ')}] suggest content belongs in ${mod}`);
+        }
+
+        if (fileWarnings.length > 0) {
+          bloatWarnings.push(`${file}: ${fileWarnings.join('; ')}`);
+        }
+      }
+
+      if (bloatWarnings.length > 0) {
+        checks.push({
+          name: 'adf vendor bloat',
+          status: 'WARN',
+          details: `Vendor file bloat detected:\n    ${bloatWarnings.join('\n    ')}\n    Run: charter adf tidy --dry-run`,
+        });
+      } else if (pointerFiles.length > 0) {
+        checks.push({
+          name: 'adf vendor bloat',
+          status: 'PASS',
+          details: `${pointerFiles.length} vendor file(s) within bloat thresholds.`,
+        });
       }
 
       // Sync lock status
