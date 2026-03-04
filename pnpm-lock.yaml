@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@stackbilt/cli':
-        specifier: 0.6.0
-        version: 0.6.0
+        specifier: workspace:^
+        version: link:packages/cli
       '@types/node':
         specifier: ^25.2.3
         version: 25.2.3
@@ -395,39 +395,6 @@ packages:
     resolution: {integrity: sha512-mxRFDdHIWRxg3UfIIAwCm6NzvxG0jDX/wBN6KsQFTvKFqqg9vTrWUE68qEjHt19A5wwx5X5aUi2zuZT7YR0jrA==}
     cpu: [x64]
     os: [win32]
-
-  '@stackbilt/adf@0.6.0':
-    resolution: {integrity: sha512-LnVweHlqoQvmVvt1yAKybQMr3ngtKGOrcrEe89iSgB7RZXI6hUGB7VSJ96Xqh/E4G4YDxxnAtxTAwF/qNKj0QQ==}
-    engines: {node: '>=18.0.0'}
-
-  '@stackbilt/classify@0.6.0':
-    resolution: {integrity: sha512-GkiXqV62BsdNhV0v4QnsQiR5Q3WSzRepa6q0O2vwpMBxoge5KTdFIT8sY+kUnqtFCLfhG2P1D1N5fVHLZMeQTg==}
-    engines: {node: '>=18.0.0'}
-
-  '@stackbilt/cli@0.6.0':
-    resolution: {integrity: sha512-VE85xhORCA7PhtHqurXWHINAFFy6Au27yv80vcGEWfcnpLKuXBX0r4xiXVFbTfNg/NHH5ydGXpxIGu9A/3UNjQ==}
-    engines: {node: '>=18.0.0'}
-    hasBin: true
-
-  '@stackbilt/core@0.6.0':
-    resolution: {integrity: sha512-nScHIquzp1IgVIzyVhiZYFMu4MUBuXbCgoneKBLI9d6+Xh0nOvayOrW32Hx94mBiznaVclqnqAIcBZOtZzcPSg==}
-    engines: {node: '>=18.0.0'}
-
-  '@stackbilt/drift@0.6.0':
-    resolution: {integrity: sha512-ZWHsRrUvG03OQrRlgVu0EEAZ6rDiNE+d6BgNBb7f4caPnPAOT8OrAu1PrjUhtcAVcnL9V9syOpPuEKO39Wme4g==}
-    engines: {node: '>=18.0.0'}
-
-  '@stackbilt/git@0.6.0':
-    resolution: {integrity: sha512-W7ZJre806DiPMEIJ6UB/Reul6ClHrhjP6n97btMxJbUxbu2TcVBXNXmSfup2BnSmnLjYwnJYo2IdENBwEQSdEg==}
-    engines: {node: '>=18.0.0'}
-
-  '@stackbilt/types@0.6.0':
-    resolution: {integrity: sha512-ajWrM1haetiXiV544IN9SkhD580pqDBd+GDaY98vqw1smYRJvBFmKuqleUBJgp+6vTpufGKTU4BRn0Ur0g5djg==}
-    engines: {node: '>=18.0.0'}
-
-  '@stackbilt/validate@0.6.0':
-    resolution: {integrity: sha512-uYTK2XvwSnP0xw/J5B4akxkHZn0kJMstHdEJmONnNkYYXHEWa4UZDZa+uc5NxYL53KEvU/SU9XYTBQ5bAUpPWw==}
-    engines: {node: '>=18.0.0'}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -1198,40 +1165,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.57.1':
     optional: true
-
-  '@stackbilt/adf@0.6.0': {}
-
-  '@stackbilt/classify@0.6.0':
-    dependencies:
-      '@stackbilt/types': 0.6.0
-
-  '@stackbilt/cli@0.6.0':
-    dependencies:
-      '@stackbilt/adf': 0.6.0
-      '@stackbilt/classify': 0.6.0
-      '@stackbilt/core': 0.6.0
-      '@stackbilt/drift': 0.6.0
-      '@stackbilt/git': 0.6.0
-      '@stackbilt/types': 0.6.0
-      '@stackbilt/validate': 0.6.0
-
-  '@stackbilt/core@0.6.0':
-    dependencies:
-      zod: 3.25.76
-
-  '@stackbilt/drift@0.6.0':
-    dependencies:
-      '@stackbilt/types': 0.6.0
-
-  '@stackbilt/git@0.6.0':
-    dependencies:
-      '@stackbilt/types': 0.6.0
-
-  '@stackbilt/types@0.6.0': {}
-
-  '@stackbilt/validate@0.6.0':
-    dependencies:
-      '@stackbilt/types': 0.6.0
 
   '@standard-schema/spec@1.1.0': {}
 
