@@ -95,6 +95,9 @@ function headingToModule(heading: string, routes?: ClassifierConfig['headingRout
   if (/\b(design.system|ui|frontend|css|component|react|vue|svelte|next|nextjs|tailwind|shadcn|radix|storybook|vite|vitest|playwright|remix|nuxt|astro)\b/.test(lower)) {
     return 'frontend.adf';
   }
+  if (/\b(qa|quality|test|testing|verification|validate|validation|contract|smoke|evidence|audit)\b/.test(lower)) {
+    return 'qa.adf';
+  }
   if (/\b(auth|authentication|authorization|security|secret|token|permission|cors|rate.limit|jwt|oauth|clerk|nextauth|lucia|session|cookie|csrf|xss|password|bcrypt)\b/.test(lower)) {
     return 'security.adf';
   }
@@ -117,17 +120,31 @@ function escapeRegex(str: string): string {
  */
 function contentToModule(text: string, triggerMap: TriggerMap): string {
   const lower = text.toLowerCase();
+  let bestModule = 'core.adf';
+  let bestScore = 0;
+  let bestSpecificity = 0;
+
   for (const [module, triggers] of Object.entries(triggerMap)) {
+    let score = 0;
+    let specificity = 0;
+
     for (const trigger of triggers) {
       // Match whole words or common suffixes (s, ed, ing, ment, tion, ity, ication).
       // This allows "token" → "tokens", "deploy" → "deploying"/"deployment",
       // "auth" → "authentication" — while blocking "author", "apiary", "authority".
       if (new RegExp(`\\b${escapeRegex(trigger)}(?:s|ed|ing|ment|tion|ity|ication)?\\b`, 'i').test(lower)) {
-        return module;
+        score++;
+        specificity = Math.max(specificity, trigger.length);
       }
     }
+
+    if (score > bestScore || (score === bestScore && specificity > bestSpecificity)) {
+      bestModule = module;
+      bestScore = score;
+      bestSpecificity = specificity;
+    }
   }
-  return 'core.adf';
+  return bestModule;
 }
 
 // ============================================================================

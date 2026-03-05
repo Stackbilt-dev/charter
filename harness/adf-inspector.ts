@@ -120,6 +120,9 @@ export function printSnapshot(snapshot: AdfSnapshot, previous?: AdfSnapshot): vo
 export function detectAccumulationIssues(snapshots: AdfSnapshot[]): string[] {
   const issues: string[] = [];
   if (snapshots.length < 2) return issues;
+  const MIN_ABSOLUTE_GROWTH = 10;
+  const MIN_BASELINE_ITEMS = 3;
+  const MAX_SECTION_ITEMS = 20;
 
   const first = snapshots[0];
   const last = snapshots[snapshots.length - 1];
@@ -131,13 +134,13 @@ export function detectAccumulationIssues(snapshots: AdfSnapshot[]): string[] {
     const growth = mod.totalItems - start.totalItems;
     const growthRate = start.totalItems > 0 ? growth / start.totalItems : growth;
 
-    if (growthRate > 2) {
+    if (growth >= MIN_ABSOLUTE_GROWTH && start.totalItems >= MIN_BASELINE_ITEMS && growthRate > 2) {
       issues.push(`${mod.module}: grew ${growth} items (${(growthRate * 100).toFixed(0)}% increase) — possible accumulation`);
     }
 
     // Check any single section that got very large
     for (const sec of mod.sections) {
-      if (sec.itemCount > 15) {
+      if (sec.itemCount > MAX_SECTION_ITEMS) {
         issues.push(`${mod.module} > ${sec.key}: ${sec.itemCount} items — section may need pruning`);
       }
     }
