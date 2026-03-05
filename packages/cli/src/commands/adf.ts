@@ -480,7 +480,19 @@ function adfCreate(options: CLIOptions, args: string[]): number {
 
   const modulePath = moduleArg.endsWith('.adf') ? moduleArg : `${moduleArg}.adf`;
   const moduleRelPath = modulePath.replace(/\\/g, '/');
+
+  // Prevent directory traversal: reject paths that escape the .ai/ directory
+  if (moduleRelPath.includes('..') || path.isAbsolute(moduleRelPath)) {
+    throw new CLIError(`Invalid module path: "${moduleRelPath}". Path must not contain ".." or be absolute.`);
+  }
+
   const moduleAbsPath = path.join(aiDir, moduleRelPath);
+  const resolvedAiDir = path.resolve(aiDir);
+  const resolvedModulePath = path.resolve(moduleAbsPath);
+  if (!resolvedModulePath.startsWith(resolvedAiDir + path.sep)) {
+    throw new CLIError(`Invalid module path: "${moduleRelPath}". Path must stay within ${aiDir}/.`);
+  }
+
   fs.mkdirSync(path.dirname(moduleAbsPath), { recursive: true });
 
   let fileCreated = false;
