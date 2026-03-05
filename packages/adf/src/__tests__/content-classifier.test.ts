@@ -28,6 +28,11 @@ describe('classifyElement', () => {
       expect(result.targetModule).toBe('backend.adf');
     });
 
+    it('routes verification headings to qa.adf', () => {
+      const result = classifyElement(rule('Run contract tests before release'), 'Verification');
+      expect(result.targetModule).toBe('qa.adf');
+    });
+
     it('routes to core.adf for generic headings', () => {
       const result = classifyElement(rule('Use conventional commits'), 'Conventions');
       expect(result.targetModule).toBe('core.adf');
@@ -53,6 +58,19 @@ describe('classifyElement', () => {
     it('routes CSS content to frontend.adf', () => {
       const result = classifyElement(rule('Use CSS modules for scoped styles'), 'Stack', triggerMap);
       expect(result.targetModule).toBe('frontend.adf');
+    });
+
+    it('chooses the module with the strongest trigger match instead of first match', () => {
+      const qaTriggerMap: TriggerMap = {
+        'infra.adf': ['ci', 'pipeline', 'artifact'],
+        'qa.adf': ['test', 'playwright', 'evidence', 'auditability'],
+      };
+      const result = classifyElement(
+        rule('Playwright test evidence is uploaded from the CI pipeline for auditability'),
+        'Checklist',
+        qaTriggerMap,
+      );
+      expect(result.targetModule).toBe('qa.adf');
     });
 
     it('stays on core.adf when no trigger keyword matches', () => {

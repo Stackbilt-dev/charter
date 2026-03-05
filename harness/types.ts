@@ -87,7 +87,35 @@ export interface ScenarioResult {
   archetype: string;
   description: string;
   sessions: SessionResult[];
+  staticAudit?: StaticScenarioAudit;
   pass: boolean;
+}
+
+export interface StaticSessionAudit {
+  sessionLabel: string;
+  dryRunExtracted: number;
+  appliedModulesModified: string[];
+  claudeRestored: boolean;
+  adfTotalItems: number;
+  modulesGrew: string[];
+  itemRoutes: StaticItemRoute[];
+}
+
+export interface StaticScenarioAudit {
+  sessions: StaticSessionAudit[];
+  accumulationIssues: string[];
+}
+
+export interface StaticItemRoute {
+  heading: string;
+  content: string;
+  headingModule: string;
+  targetModule: string;
+  targetSection: string;
+  decision: 'STAY' | 'MIGRATE';
+  reason: string;
+  matchedTriggers: string[];
+  matchScore: number;
 }
 
 // ============================================================================

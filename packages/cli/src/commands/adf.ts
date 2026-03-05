@@ -22,6 +22,7 @@ import { adfSync } from './adf-sync';
 import { adfEvidence } from './adf-evidence';
 import { adfMetricsCommand } from './adf-metrics';
 import { adfTidyCommand } from './adf-tidy';
+import { adfPopulateCommand } from './adf-populate';
 
 // ============================================================================
 // Scaffold Content
@@ -44,6 +45,9 @@ export const MANIFEST_SCAFFOLD = `ADF: 0.1
 `;
 
 export const CORE_SCAFFOLD = `ADF: 0.1
+
+\u{1F4CB} CONTEXT:
+  - Project context (run 'charter adf populate' to auto-fill from codebase)
 
 \u{1F4D6} GUIDE [advisory]:
   - Pure runtime/environment? (OS, line endings) \u2192 CLAUDE.md, not ADF
@@ -160,8 +164,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfTidyCommand(options, restArgs);
     case 'metrics':
       return adfMetricsCommand(options, restArgs);
+    case 'populate':
+      return adfPopulateCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, bundle, sync, evidence, migrate, tidy, metrics`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics`);
   }
 }
 
@@ -304,8 +310,8 @@ function adfInit(options: CLIOptions, args: string[]): number {
     console.log(JSON.stringify({
       ...result,
       nextActions: [
-        'Edit core.adf with your universal repo rules',
-        'Edit frontend.adf and backend.adf stubs or replace with your domain modules',
+        'charter adf populate  # auto-fill ADF files from codebase signals',
+        'Edit core.adf to add project-specific constraints and rules',
         'charter adf fmt .ai/core.adf --check',
         'charter adf bundle --task "<prompt>"',
       ],
@@ -319,8 +325,8 @@ function adfInit(options: CLIOptions, args: string[]): number {
     }
     console.log('');
     console.log('  Next steps:');
-    console.log('    1. Edit core.adf with your universal repo rules');
-    console.log('    2. Edit frontend.adf/backend.adf stubs or replace with domain modules');
+    console.log('    1. Run: charter adf populate  # auto-fill ADF files from codebase signals');
+    console.log('    2. Edit core.adf to add project-specific constraints and rules');
     console.log('    3. Run: charter adf fmt .ai/core.adf --check');
     console.log('    4. Run: charter adf bundle --task "<your task>" to compile context for an agent session');
     console.log('       (The verify:adf script runs this automatically in CI)');
@@ -585,7 +591,17 @@ function printHelp(): void {
   console.log('');
   console.log('    charter adf patch <file> --ops <json> | --ops-file <path>');
   console.log('      Apply ADF_PATCH operations to a file.');
+  console.log('      Valid ops: ADD_BULLET, REPLACE_BULLET, REMOVE_BULLET,');
+  console.log('                 ADD_SECTION, REPLACE_SECTION, REMOVE_SECTION, UPDATE_METRIC');
+  console.log('      Examples:');
+  console.log('        ADD_BULLET:    {"op":"ADD_BULLET","section":"CONSTRAINTS","value":"..."}');
+  console.log('        ADD_SECTION:   {"op":"ADD_SECTION","key":"CONTEXT","decoration":"📋","content":{"type":"list","items":["..."]}}');
+  console.log('        REPLACE_SECTION: {"op":"REPLACE_SECTION","key":"STATE","content":{"type":"map","entries":[{"key":"CURRENT","value":"..."}]}}');
   console.log('');
+  console.log('    charter adf populate [--ai-dir <dir>] [--dry-run] [--force]');
+  console.log('      Auto-fill ADF files from codebase signals (package.json, README, stack detection).');
+  console.log('      Populates CONTEXT in core/backend/frontend.adf and STATE in state.adf.');
+  console.log('      Skips files with existing custom content unless --force.');
   console.log('    charter adf create <module> [--ai-dir <dir>] [--triggers "a,b,c"] [--load default|on-demand] [--force]');
   console.log('      Create a module file and register it in manifest DEFAULT_LOAD or ON_DEMAND.');
   console.log('      --triggers: comma-separated trigger keywords (for ON_DEMAND entries).');
