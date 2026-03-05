@@ -600,7 +600,7 @@ function runMigratePhase(
     // Auto-migrate with --yes
     const results: SourceMigrationResult[] = [];
     for (const source of sources) {
-      const result = migrateSource(source, aiDir, 'dedupe', false, false, options);
+      const result = migrateSource(source, aiDir, 'dedupe', false, false, false, options);
       results.push(result);
     }
 

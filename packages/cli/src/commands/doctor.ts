@@ -17,7 +17,7 @@ interface DoctorResult {
   status: 'PASS' | 'WARN';
   checks: Array<{
     name: string;
-    status: 'PASS' | 'WARN';
+    status: 'PASS' | 'WARN' | 'INFO';
     details: string;
   }>;
 }
@@ -276,6 +276,22 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
         });
       }
 
+      // Cold-start check: thin pointers with no architectural orientation (#41)
+      // A pointer that's <15 lines and contains no stack/framework keywords gives
+      // agents zero context about the project. Soft [info] — does not fail doctor.
+      const STACK_KEYWORDS = /\b(react|vue|svelte|next|nuxt|astro|remix|angular|node|bun|deno|python|go|rust|postgres|mysql|sqlite|d1|prisma|drizzle|hono|express|fastify|trpc|cloudflare|vercel|railway|docker|kubernetes)\b/i;
+      for (const { file, content } of pointerFiles) {
+        const lineCount = content.split('\n').filter(l => l.trim()).length;
+        const hasStackHint = STACK_KEYWORDS.test(content);
+        if (lineCount < 15 && !hasStackHint) {
+          checks.push({
+            name: 'adf cold start',
+            status: 'INFO',
+            details: `${file} is a thin pointer with ${lineCount} lines and no stack keywords — agents have no architecture orientation. Run: charter adf populate`,
+          });
+        }
+      }
+
       // Sync lock status
       if (manifest.sync.length > 0) {
         const lockFile = path.join(aiDir, '.adf.lock');
@@ -308,7 +324,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
   } else {
     console.log(`  Doctor status: ${result.status}`);
     for (const check of result.checks) {
-      const icon = check.status === 'PASS' ? '[ok]' : '[warn]';
+      const icon = check.status === 'PASS' ? '[ok]' : check.status === 'INFO' ? '[info]' : '[warn]';
       console.log(`  ${icon} ${check.name}: ${check.details}`);
     }
   }
