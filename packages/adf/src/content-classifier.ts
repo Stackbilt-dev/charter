@@ -27,12 +27,23 @@ export interface ClassifierConfig {
   headingRoutes?: Array<{ pattern: RegExp; module: string }>;
 }
 
+export interface RoutingTrace {
+  /** What headingToModule() returned before content-based fallback. */
+  headingModule: string;
+  /** Set when a phrase-level QA override fired instead of keyword scoring. */
+  phraseOverride?: string;
+  /** Per-module keyword match score from the triggerMap scoring pass. */
+  candidateScores: Record<string, number>;
+}
+
 export interface ClassificationResult {
   decision: RouteDecision;
   targetSection: AdfTargetSection;
   targetModule: string;
   weight: WeightTag;
   reason: string;
+  /** Populated when content-based routing ran. Opt-in observability for #46. */
+  routingTrace?: RoutingTrace;
 }
 
 export interface MigrationItem {
@@ -115,11 +126,52 @@ function escapeRegex(str: string): string {
 }
 
 /**
+ * Phrase-level QA patterns that signal verification/testing intent even when
+ * infra or backend keywords coexist in the same bullet (fixes #44, #45).
+ *
+ * These fire BEFORE trigger-keyword scoring and route to qa.adf when that
+ * module is present in the manifest's triggerMap.
+ */
+const QA_PHRASE_PATTERNS: RegExp[] = [
+  /\bsmoke[\s-]tests?\b/i,
+  /\bcontract[\s-]tests?\b/i,
+  /\bschema[\s-]compat/i,
+  /\bapproval[\s-]gat/i,          // "approval gate", "approval gating"
+  /\bverified\s+against\b/i,
+  /\btest[\s-]fixtures?\b/i,
+];
+
+/**
+ * Return the override module if strong QA phrase patterns are detected, else null.
+ * Callers must confirm the override module exists in the triggerMap before using it.
+ */
+function contentRouteOverride(text: string): string | null {
+  if (QA_PHRASE_PATTERNS.some(p => p.test(text))) return 'qa.adf';
+  return null;
+}
+
+/**
  * Content-based fallback routing. When heading-based routing returns core.adf,
  * scan element content against ON_DEMAND trigger keywords from the manifest.
+ *
+ * Returns the winning module plus a score map and optional phrase-override for
+ * routing observability (#46).
  */
-function contentToModule(text: string, triggerMap: TriggerMap): string {
+function contentToModule(
+  text: string,
+  triggerMap: TriggerMap,
+): { module: string; phraseOverride?: string; scores: Record<string, number> } {
   const lower = text.toLowerCase();
+  const scores: Record<string, number> = {};
+
+  // Phrase-level override: high-signal compound patterns beat keyword counting.
+  // Only fires when the override module is actually in the manifest triggerMap.
+  const override = contentRouteOverride(text);
+  if (override && override in triggerMap) {
+    scores[override] = Infinity; // sentinel — phrase match beats all trigger scores
+    return { module: override, phraseOverride: override, scores };
+  }
+
   let bestModule = 'core.adf';
   let bestScore = 0;
   let bestSpecificity = 0;
@@ -138,13 +190,16 @@ function contentToModule(text: string, triggerMap: TriggerMap): string {
       }
     }
 
+    scores[module] = score;
+
     if (score > bestScore || (score === bestScore && specificity > bestSpecificity)) {
       bestModule = module;
       bestScore = score;
       bestSpecificity = specificity;
     }
   }
-  return bestModule;
+
+  return { module: bestModule, scores };
 }
 
 // ============================================================================
@@ -161,12 +216,16 @@ export function classifyElement(
   config?: ClassifierConfig,
 ): ClassificationResult {
   const text = element.content;
-  let module = headingToModule(heading, config?.headingRoutes);
+  const headingModule = headingToModule(heading, config?.headingRoutes);
+  let module = headingModule;
+  let routingTrace: RoutingTrace | undefined;
 
   // Content-based fallback: when heading routes to core.adf, check element
   // content against ON_DEMAND trigger keywords from the manifest.
   if (module === 'core.adf' && triggerMap) {
-    module = contentToModule(text, triggerMap);
+    const { module: contentModule, phraseOverride, scores } = contentToModule(text, triggerMap);
+    module = contentModule;
+    routingTrace = { headingModule, phraseOverride, candidateScores: scores };
   }
 
   // Check STAY patterns first
@@ -177,6 +236,7 @@ export function classifyElement(
       targetModule: module,
       weight: 'advisory',
       reason: 'Environment/runtime-specific (STAY in vendor file)',
+      routingTrace,
     };
   }
 
@@ -190,6 +250,7 @@ export function classifyElement(
           targetModule: module,
           weight: 'load-bearing',
           reason: 'Imperative rule (NEVER/ALWAYS/MUST)',
+          routingTrace,
         };
       }
       if (element.strength === 'advisory') {
@@ -199,6 +260,7 @@ export function classifyElement(
           targetModule: module,
           weight: 'advisory',
           reason: 'Advisory rule (prefer/should/bias)',
+          routingTrace,
         };
       }
       // Neutral rules — check heading context for more signal
@@ -209,6 +271,7 @@ export function classifyElement(
           targetModule: module,
           weight: 'advisory',
           reason: 'Naming/style convention',
+          routingTrace,
         };
       }
       if (/\b(git|commit|workflow|hook)\b/i.test(heading)) {
@@ -218,6 +281,7 @@ export function classifyElement(
           targetModule: module,
           weight: 'load-bearing',
           reason: 'Git workflow rule',
+          routingTrace,
         };
       }
       // Default neutral rule → CONSTRAINTS advisory
@@ -227,6 +291,7 @@ export function classifyElement(
         targetModule: module,
         weight: 'advisory',
         reason: 'Rule (neutral strength)',
+        routingTrace,
       };
     }
 
@@ -239,6 +304,7 @@ export function classifyElement(
         reason: element.language === 'bash' || element.language === 'sh'
           ? 'Build/tool commands'
           : 'Code reference',
+        routingTrace,
       };
     }
 
@@ -249,6 +315,7 @@ export function classifyElement(
         targetModule: module,
         weight: 'advisory',
         reason: 'Tabular reference data',
+        routingTrace,
       };
     }
 
@@ -261,6 +328,7 @@ export function classifyElement(
           targetModule: module,
           weight: 'advisory',
           reason: 'Architecture description',
+          routingTrace,
         };
       }
       // Directory/config descriptions → CONTEXT
@@ -271,6 +339,7 @@ export function classifyElement(
           targetModule: module,
           weight: 'advisory',
           reason: 'Configuration/structure description',
+          routingTrace,
         };
       }
       // Default prose → CONTEXT (never silently dropped)
@@ -280,6 +349,7 @@ export function classifyElement(
         targetModule: module,
         weight: 'advisory',
         reason: 'Informational context',
+        routingTrace,
       };
     }
   }

@@ -10,6 +10,7 @@ export type { MarkdownSection, MarkdownElement, RuleStrength, StrengthConfig } f
 export { classifyElement, isDuplicateItem, buildMigrationPlan } from './content-classifier';
 export type {
   ClassificationResult,
+  RoutingTrace,
   MigrationItem,
   MigrationPlan,
   RouteDecision,

@@ -67,12 +67,23 @@ interface ModuleSizeWarning {
   itemCount: number;
 }
 
+interface ItemRoute {
+  item: string;
+  targetModule: string;
+  targetSection: string;
+  headingModule: string;
+  phraseOverride?: string;
+  candidateScores: Record<string, number>;
+}
+
 interface TidyResult {
   dryRun: boolean;
   files: TidyFileResult[];
   totalExtracted: number;
   modulesModified: string[];
   moduleWarnings: ModuleSizeWarning[];
+  /** Populated when --verbose: per-item routing trace for each migrated item. */
+  itemRoutes?: ItemRoute[];
 }
 
 // ============================================================================
@@ -82,6 +93,7 @@ interface TidyResult {
 export async function adfTidyCommand(options: CLIOptions, args: string[]): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const ciMode = args.includes('--ci');
+  const verbose = args.includes('--verbose');
   const sourceFile = getFlag(args, '--source');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
 
@@ -162,7 +174,28 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     ? projectModuleWarnings(aiDir, allModuleGroups)
     : scanModuleWarnings(aiDir, modulesModified);
 
-  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings };
+  // Collect per-item routing trace when --verbose (or always in JSON mode)
+  let itemRoutes: ItemRoute[] | undefined;
+  if (verbose || options.format === 'json') {
+    itemRoutes = [];
+    for (const [, sectionGroups] of Object.entries(allModuleGroups)) {
+      for (const [, items] of Object.entries(sectionGroups)) {
+        for (const item of items) {
+          const trace = item.classification.routingTrace;
+          itemRoutes.push({
+            item: item.element.content.slice(0, 100),
+            targetModule: item.classification.targetModule,
+            targetSection: item.classification.targetSection,
+            headingModule: trace?.headingModule ?? item.classification.targetModule,
+            phraseOverride: trace?.phraseOverride,
+            candidateScores: trace?.candidateScores ?? {},
+          });
+        }
+      }
+    }
+  }
+
+  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings, itemRoutes };
 
   // Output
   if (options.format === 'json') {
@@ -604,6 +637,20 @@ function printTextResult(result: TidyResult): void {
 
   if (clean.length > 0) {
     console.log(`  ${clean.length} file(s) already clean.`);
+  }
+
+  // Verbose: per-item routing rationale
+  if (result.itemRoutes && result.itemRoutes.length > 0) {
+    console.log('');
+    console.log('  Routing trace:');
+    for (const r of result.itemRoutes) {
+      const preview = r.item.length > 60 ? r.item.slice(0, 57) + '...' : r.item;
+      const via = r.phraseOverride
+        ? `phrase override (${r.phraseOverride})`
+        : `scores: ${Object.entries(r.candidateScores).map(([m, s]) => `${m}=${s}`).join(', ')}`;
+      console.log(`    "${preview}"`);
+      console.log(`      → ${r.targetModule} / ${r.targetSection}  [${via}]`);
+    }
   }
 
   if (result.moduleWarnings.length > 0) {
