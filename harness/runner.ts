@@ -21,7 +21,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import type { Scenario, TidyOutput, ScenarioResult, HarnessReport } from './types';
+import { buildMigrationPlan, parseMarkdownSections, type TriggerMap } from '../packages/adf/src';
+import type { Scenario, TidyOutput, ScenarioResult, HarnessReport, StaticSessionAudit, StaticItemRoute } from './types';
 import { evaluateSession, printSessionResult } from './evaluator';
 import { generateScenarios, getArchetypeManifest } from './ollama';
 import { REAL_REPOS } from './corpus/real-repos';
@@ -31,6 +32,7 @@ import { workerScenarios } from './corpus/worker';
 import { backendScenarios } from './corpus/backend';
 import { fullstackScenarios } from './corpus/fullstack';
 import { edgeCaseScenarios } from './corpus/edge-cases';
+import { sdlcScenarios } from './corpus/sdlc';
 
 // ============================================================================
 // Config
@@ -44,6 +46,7 @@ const ALL_STATIC: Scenario[] = [
   ...backendScenarios,
   ...fullstackScenarios,
   ...edgeCaseScenarios,
+  ...sdlcScenarios,
 ];
 
 const OLLAMA_ARCHETYPES = ['worker', 'backend', 'fullstack'];
@@ -158,7 +161,12 @@ function runTidy(repoDir: string, dryRun = true): TidyOutput {
 function runStaticScenario(scenario: Scenario): ScenarioResult {
   const tmp = makeTempRepo(scenario);
   const sessionResults = [];
+  const sessionAudits: StaticSessionAudit[] = [];
+  const snapshots: AdfSnapshot[] = [];
+  let prevSnapshot: AdfSnapshot | undefined;
   let scenarioPass = true;
+  const baseClaude = THIN_POINTER.trim();
+  const aiDir = path.join(tmp, '.ai');
 
   for (const session of scenario.sessions) {
     // Each session: inject onto thin pointer, dry-run to evaluate, then apply
@@ -173,7 +181,43 @@ function runStaticScenario(scenario: Scenario): ScenarioResult {
 
     // Apply tidy (non-dry-run) to route content into ADF modules, restoring
     // CLAUDE.md to thin pointer so the next session sees a clean baseline.
-    runTidy(tmp, false);
+    const applyOutput = runTidy(tmp, false);
+
+    const postClaude = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8').trim();
+    const claudeRestored = postClaude === baseClaude;
+    if (!claudeRestored) {
+      scenarioPass = false;
+      console.log('      portability warning: CLAUDE.md was not restored to thin pointer state');
+    }
+
+    const snapshot = inspectAdfModules(aiDir, session.label, prevSnapshot);
+    snapshots.push(snapshot);
+    prevSnapshot = snapshot;
+    const itemRoutes = previewItemRoutes(session.inject, scenario);
+
+    sessionAudits.push({
+      sessionLabel: session.label,
+      dryRunExtracted: tidyOutput.totalExtracted,
+      appliedModulesModified: applyOutput.modulesModified,
+      claudeRestored,
+      adfTotalItems: snapshot.totalItemsAcrossAllModules,
+      modulesGrew: snapshot.grew,
+      itemRoutes,
+    });
+
+    if (!sessionResult.pass) {
+      console.log('      item routing preview:');
+      for (const item of itemRoutes) {
+        const matches = item.matchedTriggers.length > 0 ? ` | matches=${item.matchedTriggers.join(', ')} score=${item.matchScore}` : '';
+        console.log(`        [${item.heading || 'preamble'} -> ${item.headingModule}] ${item.targetModule} (${item.targetSection}) :: ${item.content}${matches}`);
+      }
+    }
+  }
+
+  const accumulationIssues = detectAccumulationIssues(snapshots);
+  if (accumulationIssues.length > 0) {
+    console.log('      accumulation warnings:');
+    for (const issue of accumulationIssues) console.log(`        - ${issue}`);
   }
 
   return {
@@ -181,8 +225,77 @@ function runStaticScenario(scenario: Scenario): ScenarioResult {
     archetype: scenario.archetype,
     description: scenario.description,
     sessions: sessionResults,
+    staticAudit: {
+      sessions: sessionAudits,
+      accumulationIssues,
+    },
     pass: scenarioPass,
   };
+}
+
+function previewItemRoutes(inject: string, scenario: Scenario): StaticItemRoute[] {
+  const triggerMap: TriggerMap = {};
+  for (const entry of scenario.manifest.onDemand) {
+    if (entry.triggers.length > 0) {
+      triggerMap[entry.path] = entry.triggers.map(trigger => trigger.toLowerCase());
+    }
+  }
+
+  const sections = parseMarkdownSections(inject);
+  const plan = buildMigrationPlan(sections, undefined, triggerMap);
+
+  return plan.items.map(item => ({
+    heading: item.sourceHeading,
+    content: item.element.content,
+    headingModule: previewHeadingModule(item.sourceHeading),
+    targetModule: item.classification.targetModule,
+    targetSection: item.classification.targetSection,
+    decision: item.classification.decision,
+    reason: item.classification.reason,
+    ...scoreItemAgainstTriggers(item.element.content, triggerMap),
+  }));
+}
+
+function previewHeadingModule(heading: string): string {
+  const lower = heading.toLowerCase();
+  if (/\b(design.system|ui|frontend|css|component|react|vue|svelte|next|nextjs|tailwind|shadcn|radix|storybook|vite|vitest|playwright|remix|nuxt|astro)\b/.test(lower)) {
+    return 'frontend.adf';
+  }
+  if (/\b(qa|quality|test|testing|verification|validate|validation|contract|smoke|evidence|audit)\b/.test(lower)) {
+    return 'qa.adf';
+  }
+  if (/\b(auth|authentication|authorization|security|secret|token|permission|cors|rate.limit|jwt|oauth|clerk|nextauth|lucia|session|cookie|csrf|xss|password|bcrypt)\b/.test(lower)) {
+    return 'security.adf';
+  }
+  if (/\b(deploy|deployment|infrastructure|infra|ci|cd|pipeline|config|configuration|environment|env|docker|wrangler|cloudflare|vercel|netlify|railway|fly|render|github.actions|kv|d1|r2|queue|durable.object)\b/.test(lower)) {
+    return 'infra.adf';
+  }
+  if (/\b(api|backend|server|database|db|endpoint|query|migration|handler|prisma|drizzle|mongoose|postgres|postgresql|mysql|sqlite|express|fastify|hono|trpc|zod|graphql)\b/.test(lower)) {
+    return 'backend.adf';
+  }
+  return 'core.adf';
+}
+
+function scoreItemAgainstTriggers(text: string, triggerMap: TriggerMap): Pick<StaticItemRoute, 'matchedTriggers' | 'matchScore'> {
+  const lower = text.toLowerCase();
+  let matchedTriggers: string[] = [];
+  let matchScore = 0;
+
+  for (const triggers of Object.values(triggerMap)) {
+    const currentMatches = triggers.filter(trigger =>
+      new RegExp(`\\b${escapeRegex(trigger)}(?:s|ed|ing|ment|tion|ity|ication)?\\b`, 'i').test(lower),
+    );
+    if (currentMatches.length > matchScore) {
+      matchedTriggers = currentMatches;
+      matchScore = currentMatches.length;
+    }
+  }
+
+  return { matchedTriggers, matchScore };
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ============================================================================

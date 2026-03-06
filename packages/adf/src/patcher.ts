@@ -37,8 +37,16 @@ const handlers: Record<PatchOperation['op'], (doc: AdfDocument, op: never) => Ad
 };
 
 function applyOne(doc: AdfDocument, op: PatchOperation): AdfDocument {
+  const handler = handlers[op.op];
+  if (!handler) {
+    const valid = Object.keys(handlers).join(', ');
+    throw new AdfPatchError(
+      `Unknown patch op: '${op.op}'. Valid ops: ${valid}`,
+      String(op.op)
+    );
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (handlers[op.op] as any)(doc, op);
+  return (handler as any)(doc, op);
 }
 
 // ============================================================================

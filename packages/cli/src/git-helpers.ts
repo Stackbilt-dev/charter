@@ -1,9 +1,9 @@
 /**
  * Shared git invocation helpers.
  *
- * Centralizes all child-process git calls behind a single `runGit()` that
- * uses `shell: true` for cross-platform PATH resolution (fixes WSL, CMD,
- * PowerShell parity — see ADX-005 F2).
+ * Centralizes all child-process git calls behind a single `runGit()`.
+ * All args are hardcoded call-site strings, never user input — but we
+ * still avoid `shell: true` to eliminate any shell-injection surface.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -16,17 +16,16 @@ import type { GitCommit } from '@stackbilt/types';
 /**
  * Run a git command and return its stdout.
  *
- * Uses `shell: true` so that the OS shell resolves the `git` binary via
- * PATH.  This is the key cross-platform fix: `execFileSync` *without* a
- * shell can fail on WSL/Windows when git lives in a PATH entry the Node
- * process doesn't see directly.
+ * Does NOT use `shell: true` — Node resolves `git` via PATH directly, which
+ * works on WSL, Linux, macOS, and Windows (Git for Windows adds git to PATH
+ * at install time). Using shell: true is unnecessary here and would allow
+ * shell metacharacters in args to be interpreted as shell syntax.
  */
 export function runGit(args: string[]): string {
   return execFileSync('git', args, {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 10 * 1024 * 1024,
-    shell: true,
   });
 }
 

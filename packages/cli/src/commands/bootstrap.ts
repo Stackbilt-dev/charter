@@ -237,9 +237,9 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     reason: 'Customize blessed stack patterns',
   });
   result.nextSteps.push({
-    cmd: 'Add project-specific rules to .ai/core.adf',
+    cmd: 'charter adf populate  # auto-fill ADF files from codebase signals',
     required: false,
-    reason: 'Add project-specific ADF rules',
+    reason: 'Populate ADF context from package.json, README, and stack detection',
   });
   result.nextSteps.push({
     cmd: 'git add .charter .ai CLAUDE.md .cursorrules agents.md && git commit -m "chore: bootstrap charter governance"',
@@ -600,7 +600,7 @@ function runMigratePhase(
     // Auto-migrate with --yes
     const results: SourceMigrationResult[] = [];
     for (const source of sources) {
-      const result = migrateSource(source, aiDir, 'dedupe', false, false, options);
+      const result = migrateSource(source, aiDir, 'dedupe', false, false, false, options);
       results.push(result);
     }
 

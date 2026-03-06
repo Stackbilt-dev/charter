@@ -28,6 +28,11 @@ describe('classifyElement', () => {
       expect(result.targetModule).toBe('backend.adf');
     });
 
+    it('routes verification headings to qa.adf', () => {
+      const result = classifyElement(rule('Run contract tests before release'), 'Verification');
+      expect(result.targetModule).toBe('qa.adf');
+    });
+
     it('routes to core.adf for generic headings', () => {
       const result = classifyElement(rule('Use conventional commits'), 'Conventions');
       expect(result.targetModule).toBe('core.adf');
@@ -53,6 +58,19 @@ describe('classifyElement', () => {
     it('routes CSS content to frontend.adf', () => {
       const result = classifyElement(rule('Use CSS modules for scoped styles'), 'Stack', triggerMap);
       expect(result.targetModule).toBe('frontend.adf');
+    });
+
+    it('chooses the module with the strongest trigger match instead of first match', () => {
+      const qaTriggerMap: TriggerMap = {
+        'infra.adf': ['ci', 'pipeline', 'artifact'],
+        'qa.adf': ['test', 'playwright', 'evidence', 'auditability'],
+      };
+      const result = classifyElement(
+        rule('Playwright test evidence is uploaded from the CI pipeline for auditability'),
+        'Checklist',
+        qaTriggerMap,
+      );
+      expect(result.targetModule).toBe('qa.adf');
     });
 
     it('stays on core.adf when no trigger keyword matches', () => {
@@ -135,5 +153,125 @@ describe('buildMigrationPlan', () => {
 
     const plan = buildMigrationPlan(sections);
     expect(plan.migrateItems[0].classification.targetModule).toBe('core.adf');
+  });
+});
+
+// ============================================================================
+// QA phrase override routing (#44, #45)
+// ============================================================================
+
+describe('QA phrase override routing', () => {
+  const mixedTriggerMap: TriggerMap = {
+    'infra.adf': ['ci', 'pipeline', 'artifact', 'deploy'],
+    'backend.adf': ['api', 'database', 'migration'],
+    'qa.adf': ['test', 'smoke', 'contract', 'evidence'],
+  };
+
+  it('routes "smoke test" bullet to qa.adf even when infra keywords dominate (#44)', () => {
+    // "ci pipeline artifact" would win on raw keyword count vs single "smoke test"
+    const result = classifyElement(
+      rule('Run smoke tests against the CI pipeline artifact before promoting'),
+      'Checklist',
+      mixedTriggerMap,
+    );
+    expect(result.targetModule).toBe('qa.adf');
+    expect(result.routingTrace?.phraseOverride).toBe('qa.adf');
+  });
+
+  it('routes "contract test" bullet to qa.adf even when backend keywords coexist (#45)', () => {
+    // "api", "database", "migration" would score 3 for backend vs 1 "contract" for qa
+    const result = classifyElement(
+      rule('Run contract tests for all API and database migration endpoints'),
+      'Release',
+      mixedTriggerMap,
+    );
+    expect(result.targetModule).toBe('qa.adf');
+    expect(result.routingTrace?.phraseOverride).toBe('qa.adf');
+  });
+
+  it('routes "schema compat" bullet to qa.adf', () => {
+    const result = classifyElement(
+      rule('Verify schema compat before every deploy'),
+      'Checklist',
+      mixedTriggerMap,
+    );
+    expect(result.targetModule).toBe('qa.adf');
+  });
+
+  it('routes "approval gate" bullet to qa.adf', () => {
+    const result = classifyElement(
+      rule('All deploys must pass the approval gate'),
+      'Checklist',
+      mixedTriggerMap,
+    );
+    expect(result.targetModule).toBe('qa.adf');
+  });
+
+  it('does NOT fire phrase override when qa.adf is absent from triggerMap', () => {
+    // Without qa.adf in the map, phrase override cannot fire — falls through to keyword scoring
+    const infraOnly: TriggerMap = {
+      'infra.adf': ['ci', 'pipeline', 'artifact'],
+    };
+    const result = classifyElement(
+      rule('Run smoke tests against the CI pipeline artifact'),
+      'Checklist',
+      infraOnly,
+    );
+    // Falls back to keyword scoring: ci+pipeline+artifact → infra.adf wins
+    expect(result.targetModule).toBe('infra.adf');
+    expect(result.routingTrace?.phraseOverride).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Routing trace observability (#46)
+// ============================================================================
+
+describe('routing trace (#46)', () => {
+  const traceMap: TriggerMap = {
+    'frontend.adf': ['react', 'css', 'ui'],
+    'backend.adf': ['api', 'node', 'db'],
+    'qa.adf': ['test', 'smoke', 'contract'],
+  };
+
+  it('attaches routingTrace when content-based routing fires', () => {
+    const result = classifyElement(
+      rule('React components use PascalCase'),
+      'Conventions',
+      traceMap,
+    );
+    expect(result.routingTrace).toBeDefined();
+    expect(result.routingTrace?.headingModule).toBe('core.adf');
+    expect(result.routingTrace?.candidateScores).toBeDefined();
+    expect(result.routingTrace?.candidateScores['frontend.adf']).toBeGreaterThan(0);
+  });
+
+  it('populates phraseOverride when a QA phrase pattern matches', () => {
+    const result = classifyElement(
+      rule('Run smoke tests against staging before release'),
+      'Checklist',
+      traceMap,
+    );
+    expect(result.routingTrace?.phraseOverride).toBe('qa.adf');
+    expect(result.routingTrace?.candidateScores['qa.adf']).toBe(Infinity);
+  });
+
+  it('candidateScores contains an entry for every module in the triggerMap', () => {
+    const result = classifyElement(
+      rule('Use React for all UI components'),
+      'General',
+      traceMap,
+    );
+    expect(result.routingTrace).toBeDefined();
+    const scores = result.routingTrace!.candidateScores;
+    expect('frontend.adf' in scores).toBe(true);
+    expect('backend.adf' in scores).toBe(true);
+    expect('qa.adf' in scores).toBe(true);
+  });
+
+  it('does not attach routingTrace when heading-based routing resolves without fallback', () => {
+    // Heading "UI Components" resolves to frontend.adf directly — no content fallback runs
+    const result = classifyElement(rule('Use PascalCase'), 'UI Components', traceMap);
+    expect(result.routingTrace).toBeUndefined();
   });
 });
