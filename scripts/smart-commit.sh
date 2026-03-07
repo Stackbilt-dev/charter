@@ -209,3 +209,24 @@ else
   echo
   echo 'Commit workflow complete.'
 fi
+
+# -- State staleness warning --
+# If any feat: commit was created but .ai/state.adf wasn't in the changeset, warn.
+HAS_FEAT=0
+STATE_TOUCHED=0
+for group in "${GROUP_ORDER[@]}"; do
+  msg="$(commit_message_for_group "$group")"
+  if [[ "$msg" == feat* ]]; then
+    HAS_FEAT=1
+  fi
+  files_in_group="${GROUP_FILES[$group]}"
+  if echo "$files_in_group" | grep -q '\.ai/state\.adf'; then
+    STATE_TOUCHED=1
+  fi
+done
+
+if [[ "$HAS_FEAT" -eq 1 && "$STATE_TOUCHED" -eq 0 && -f ".ai/state.adf" ]]; then
+  echo
+  echo '  [warn] feat: commit created but .ai/state.adf was not updated.'
+  echo '         Consider updating STATE to reflect the new milestone/feature.'
+fi
