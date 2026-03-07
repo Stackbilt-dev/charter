@@ -264,11 +264,12 @@ function adfInit(options: CLIOptions, args: string[]): number {
   fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, '.adf.lock'), '{}\n');
 
   const result: AdfInitResult = {
     created: true,
     aiDir,
-    files: ['manifest.adf', 'core.adf', 'state.adf', 'frontend.adf', 'backend.adf'],
+    files: ['manifest.adf', 'core.adf', 'state.adf', 'frontend.adf', 'backend.adf', '.adf.lock'],
   };
 
   // --emit-pointers: generate thin pointer files that redirect to .ai/
