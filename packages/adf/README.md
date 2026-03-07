@@ -300,6 +300,191 @@ The sync protocol uses a lockfile (`.adf.lock`) to detect drift between source `
 
 The hash algorithm: `crypto.createHash('sha256').update(content).digest('hex').slice(0, 16)`.
 
+## Rule Routing Decision Tree
+
+When a task arrives, ADF uses a two-phase resolution to decide which modules to load and where rules belong.
+
+### Phase 1: Module Resolution (manifest.adf → which .adf files to load)
+
+```
+Task keywords extracted from prompt
+        │
+        ▼
+┌─────────────────────┐
+│ DEFAULT_LOAD modules │──→ Always loaded (e.g., core.adf, state.adf)
+└─────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────┐
+│ For each ON_DEMAND module:      │
+│   For each trigger keyword:     │
+│     Match against task keywords │
+│     (case-insensitive)          │
+└─────────────────────────────────┘
+        │
+   match found?
+   ├── yes → load module
+   └── no  → skip (reported as unmatched)
+```
+
+**Trigger matching** uses exact match plus prefix stemming. A trigger matches a keyword if:
+
+- **Exact**: `trigger === keyword` (case-insensitive)
+- **Prefix stem**: one is a prefix of the other, the prefix is ≥ 4 chars, and the prefix is ≥ 66% of the full word's length
+
+Examples: trigger `"react"` matches keyword `"reactivity"` (prefix, 5/10 = 50% — no match, too short ratio). Trigger `"deploy"` matches `"deploying"` (prefix, 6/9 = 67% — match).
+
+**Manifest syntax** for ON_DEMAND entries:
+
+```
+📂 ON_DEMAND:
+  - frontend.adf (Triggers on: React, CSS, UI)
+  - security.adf (Triggers on: auth, CORS, token) [budget: 800]
+```
+
+The optional `[budget: N]` suffix sets a per-module token ceiling.
+
+### Phase 2: Rule Placement (content → which section inside a module)
+
+When migrating rules from markdown (e.g., CLAUDE.md) into ADF, the content classifier routes each element:
+
+```
+Element text
+     │
+     ▼
+Match STAY patterns?  ──→ yes → STAY (env/runtime, keep in vendor file)
+     │                          Examples: WSL, credential helper, /mnt/c/
+     no
+     │
+     ▼
+Route by heading context ──→ maps to target module:
+     │                        frontend keywords → frontend.adf
+     │                        auth/security     → security.adf
+     │                        deploy/infra/CI   → infra.adf
+     │                        api/db/backend    → backend.adf
+     │                        fallback          → core.adf
+     │
+     ▼
+If heading routed to core.adf,
+check element content against
+ON_DEMAND trigger keywords ──→ may re-route to a specialist module
+     │
+     ▼
+Route by element type + strength:
+     │
+     ├── rule (imperative: NEVER/ALWAYS/MUST)
+     │   → CONSTRAINTS [load-bearing]
+     │
+     ├── rule (advisory: prefer/should/bias)
+     │   → ADVISORY [advisory]
+     │
+     ├── rule (neutral) + convention heading
+     │   → CONSTRAINTS [advisory]
+     │
+     ├── rule (neutral) + git/workflow heading
+     │   → CONSTRAINTS [load-bearing]
+     │
+     ├── rule (neutral, default)
+     │   → CONSTRAINTS [advisory]
+     │
+     ├── code-block
+     │   → CONTEXT [advisory]
+     │
+     ├── table-row
+     │   → CONTEXT [advisory]
+     │
+     └── prose
+         ├── architecture keywords → CONTEXT [advisory]
+         ├── config/structure      → CONTEXT [advisory]
+         └── default               → CONTEXT [advisory]
+```
+
+### Quick Reference: Where Should a Rule Go?
+
+| Rule type | Target section | Weight | Example |
+|---|---|---|---|
+| Hard constraint (`NEVER`, `MUST`, `ALWAYS`) | CONSTRAINTS | load-bearing | "NEVER skip pre-commit hooks" |
+| Preference (`prefer`, `should`, `bias toward`) | ADVISORY | advisory | "Prefer pure functions in library code" |
+| Convention (naming, style, format) | CONSTRAINTS | advisory | "kebab-case filenames" |
+| Git/workflow rule | CONSTRAINTS | load-bearing | "Commits via smart-commit.sh only" |
+| Architecture description | CONTEXT | advisory | "Package flow: types ← cli" |
+| Environment/runtime specific | STAY in vendor file | — | "Use git-credential-manager.exe in WSL" |
+
+## Section Taxonomy
+
+ADF sections use `UPPERCASE_KEY` names with optional emoji decorations and weight annotations.
+
+### Canonical Sections
+
+The following sections have standard emoji decorations and a defined sort order. The formatter auto-injects decorations when missing.
+
+| Key | Emoji | Content type | Purpose |
+|---|---|---|---|
+| `TASK` | 🎯 | text | Current task description |
+| `ROLE` | 🧑 | text | Agent role / persona |
+| `CONTEXT` | 📋 | list, map, or text | Background knowledge, architecture, stack info |
+| `OUTPUT` | ✅ | text | Expected deliverable format |
+| `CONSTRAINTS` | ⚠️ | list | Hard and soft rules the agent must follow |
+| `RULES` | 📐 | list | Manifest-level routing rules |
+| `DEFAULT_LOAD` | 📦 | list | Modules loaded on every task (manifest only) |
+| `ON_DEMAND` | 📂 | list | Trigger-gated modules (manifest only) |
+| `BUDGET` | 💰 | map | Token budget (`MAX_TOKENS: N`) |
+| `SYNC` | 🔄 | list | Source → target sync pairs |
+| `CADENCE` | 📊 | map | Check frequency per metric |
+| `FILES` | 🗂️ | list | Relevant file paths |
+| `TOOLS` | 🛠️ | list | Available tools or commands |
+| `RISKS` | 🚨 | list | Known risks or blockers |
+| `STATE` | 🧠 | map or metric | Current/next state, metric ceilings |
+| `GUIDE` | 📖 | text | Instructional or reference content |
+
+### Open vs Closed
+
+**Sections are open.** Any `UPPERCASE_KEY` is a valid section name. The canonical set above gets standard emoji decorations and sort-order priority; non-canonical sections are appended after canonical ones in document order.
+
+This means you can add custom sections like `ADVISORY`, `METRICS`, `EXAMPLES`, or domain-specific keys without parser changes. The parser recognizes any line matching `EMOJI? UPPERCASE_KEY [weight]?:` as a section header.
+
+### Emoji Semantics
+
+Emoji decorations are **semantic attention markers**, not cosmetic:
+
+- They act as high-contrast token boundaries for transformer attention
+- The formatter auto-injects standard decorations for canonical keys
+- Custom sections can use any emoji (or none) — the parser strips them for AST processing
+- Emoji is never part of the key itself; `🎯 TASK:` and `TASK:` parse identically
+
+### Weight Annotations
+
+Sections can carry a weight annotation in brackets after the key name:
+
+```
+⚠️ CONSTRAINTS [load-bearing]:
+  - Must pass CI
+
+📋 CONTEXT [advisory]:
+  - Cloudflare Workers environment
+```
+
+| Weight | Meaning | Validation behavior |
+|---|---|---|
+| `[load-bearing]` | Violation = failure | Evidence report marks ceiling breaches as `fail` |
+| `[advisory]` | Violation = warning | Evidence report marks ceiling breaches as `warn` |
+| *(none)* | Unweighted | No special validation treatment |
+
+Weight annotations are preserved through parse → format round-trips and are used by `validateConstraints()` and `computeWeightSummary()` to produce structured evidence reports.
+
+### Content Type Disambiguation
+
+The parser auto-detects content type from body lines:
+
+| Pattern | Detected type | Example |
+|---|---|---|
+| `- item` (all lines) | `list` | `- No new deps` |
+| `lowercase_key: N / M [unit]` (all lines) | `metric` | `entry_loc: 142 / 200 [lines]` |
+| `UPPERCASE_KEY: value` (all lines) | `map` | `CURRENT: Starting` |
+| Anything else | `text` | Free-form prose |
+
+If the section has only an inline value (on the header line) and no body, it's always `text`.
+
 ## Error Types
 
 - `AdfParseError` -- invalid document structure (with optional line number)
