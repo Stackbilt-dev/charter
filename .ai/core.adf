@@ -6,6 +6,7 @@ ADF: 0.1
   - PNPM monorepo with project references
   - Package flow: types <- git, classify, validate, drift, ci <- cli
   - ADF package is zero-dependency and self-contained
+  - Repo uses SemVer for published packages and machine-facing governance contracts
   - Conventional Commits: feat(scope):, fix(scope):, docs:, chore:
   - .charter/ holds governance config: config.json, patterns/*.json, policies/*.md
   - CLI command handlers in packages/cli/src/commands/, config in src/config.ts
@@ -17,6 +18,8 @@ ADF: 0.1
   - Import across packages via @stackbilt/* aliases (tsconfig.base.json)
   - All commands must support --format json for stable machine-readable output
   - Exit codes: 0 success, 1 policy violation, 2 runtime/usage error
+  - Treat JSON schemas, exit-code meanings, and generated artifact conventions as semver-governed contracts
+  - Breaking contract changes require explicit semver classification and migration notes in roadmap/release docs
   - Commits via scripts/smart-commit.sh only (never raw git add/commit)
   - Run scripts/smart-commit.sh --dry-run first to preview grouped commits
   - Validation gates: pnpm run typecheck, pnpm run build, pnpm run test
@@ -24,7 +27,7 @@ ADF: 0.1
   - Bias toward action over clarification; implement rather than ask when task is clear
 
 📊 METRICS [load-bearing]:
-  adf_commands_loc: 0 / 650 [lines]
+  adf_commands_loc: 0 / 700 [lines]
   adf_bundle_loc: 0 / 200 [lines]
   adf_sync_loc: 0 / 250 [lines]
   adf_evidence_loc: 0 / 380 [lines]
