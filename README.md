@@ -313,6 +313,28 @@ packages/
 - `pnpm run build`
 - `pnpm run test`
 
+## SemVer and Stability Policy
+
+Charter uses [Semantic Versioning](https://semver.org/) for this repository and for published `@stackbilt/*` packages.
+
+Until `1.0.0`, Charter may still evolve quickly, but breaking changes should remain exceptional, deliberate, and clearly documented. The goal of `1.0.0` is simple: a connected coding agent or developer can rely on Charter's machine-facing contracts without source archaeology.
+
+The following surfaces are semver-governed:
+
+- **Package APIs** -- exported functions, classes, and types from published `@stackbilt/*` packages
+- **CLI behavior** -- command names, flags, exit codes, and machine-readable `--format json` output
+- **ADF behavior** -- parse, format, patch, bundle, sync, and evidence semantics
+- **Generated artifacts** -- thin pointer files, `.ai/manifest.adf`, `.adf.lock`, and related scaffolded outputs
+- **Governance schemas** -- evidence, audit, drift, doctor, and scorecard JSON envelopes
+
+Versioning rules:
+
+- **PATCH** -- bug fixes, docs, internal refactors, and non-breaking UX improvements
+- **MINOR** -- additive commands, flags, fields, modules, templates, and advisory checks that do not break existing consumers
+- **MAJOR** -- incompatible changes to CLI contracts, JSON schemas, ADF semantics, generated artifact conventions, or other machine-facing behavior that agents may rely on
+
+For agent-facing workflows, schema stability is treated as a core product promise, not a nice-to-have.
+
 ## Research & White Papers
 
 The [`papers/`](./papers/) directory contains Charter's research narrative:

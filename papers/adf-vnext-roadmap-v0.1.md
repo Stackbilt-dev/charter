@@ -39,6 +39,7 @@ These are complementary. Together they suggest the next version should prioritiz
 - better bootstrap scaffolding (thin pointer files, pattern-aware init)
 - better validation and observability (trigger test tooling)
 - automation-first onboarding (single-command bootstrap, post-setup install orchestration)
+- semver-governed stability for machine-facing contracts
 
 ## 2. Product Goal for vNext
 
@@ -107,7 +108,48 @@ Outcome target:
 
 - a repo can reach "configured + local pinned CLI + doctor verified" with one command (or one command plus one machine-emitted next step)
 
+## Theme F: Stabilize Machine Contracts With SemVer
+
+From Charter's current trajectory:
+
+- Charter is already operating as a protocol surface for agents, not just a CLI
+- machine-readable outputs are part of the product contract
+- schema drift or silent behavior changes have outsized cost for connected coding agents
+
+Outcome target:
+
+- agents can rely on Charter's CLI, JSON outputs, and generated artifacts across releases without source archaeology
+
 ## 4. Proposed vNext Milestones
+
+## Milestone 0 (P0): SemVer Policy and Contract Inventory
+
+Goal: explicitly define what Charter promises to keep stable before adding more surface area.
+
+Scope:
+
+- Publish a SemVer policy in the root README and Charter's own `.ai/` context.
+- Inventory semver-governed contracts:
+  - published `@stackbilt/*` package APIs
+  - CLI commands, flags, exit codes, and `--format json` behavior
+  - ADF parse/format/patch/bundle/sync/evidence semantics
+  - generated artifacts such as thin pointers, `.ai/manifest.adf`, and `.adf.lock`
+  - governance JSON envelopes including evidence, audit, drift, doctor, and scorecard outputs
+- Define what counts as `patch`, `minor`, and `major` changes for agent-facing behavior.
+- Mark unstable or exploratory surfaces explicitly as experimental until stabilized.
+
+Likely packages:
+
+- root docs / release docs
+- `packages/cli`
+- `packages/adf`
+- `packages/types`
+
+Exit criteria:
+
+- the repo explicitly states that it uses SemVer
+- machine-facing contracts are enumerated and scoped
+- breaking-change criteria are documented before the next feature wave lands
 
 ## Milestone 1 (P0): Documentation + Discoverability Baseline
 
@@ -251,6 +293,38 @@ Exit criteria:
 - setup/install/doctor sequence can be scripted without interactive prompts in supported environments
 - users do not need to manually choose between `node dist`, `npx`, and `pnpm exec` for normal onboarding
 
+## Milestone 6 (P1/P2): Compatibility Harness and `1.0` Readiness
+
+Goal: turn SemVer from a statement into an enforced release discipline.
+
+Scope:
+
+- Add fixture-based compatibility tests for core JSON outputs and generated artifacts.
+- Add release checks that detect accidental schema drift in:
+  - `bundle`
+  - `doctor`
+  - `evidence`
+  - `migrate`
+  - scorecard generation
+- Define deprecation policy for machine-facing fields and commands:
+  - additive first
+  - warn before remove
+  - document migration path for breaking changes
+- Set `1.0.0` exit criteria around machine-contract stability, not just feature completeness.
+
+Likely packages:
+
+- `packages/cli`
+- `packages/adf`
+- `scripts/`
+- CI workflows
+
+Exit criteria:
+
+- schema drift is caught in CI before release
+- deprecations have explicit migration notes
+- `1.0.0` can be justified as a stable agent-governance protocol, not only a mature CLI
+
 ## 5. Prioritization Rationale
 
 Order is intentional:
@@ -260,6 +334,7 @@ Order is intentional:
 3. Guided insertion (`M3`) after taxonomy/routing rules are explicit, so CLI behavior encodes a stable spec.
 4. Automation/bootstrap consolidation (`M5`) after baseline docs/bootstrap improvements, to reduce command sprawl and platform friction.
 5. Trigger/pattern tooling (`M4`) after baseline workflows exist, to improve precision and scale.
+6. Compatibility hardening (`M6`) once the core contract surface is documented, so SemVer is enforced rather than aspirational.
 
 ## 6. Candidate Success Metrics (Seed for CSA-002 / vNext Validation)
 
@@ -298,6 +373,7 @@ Keep vNext pragmatic:
 - Every new assistive command should support `--dry-run --format json`.
 - New docs and commands should include examples usable by agents (not just human prose).
 - Public interfaces should live where `.d.ts` discovery in `node_modules` is straightforward.
+- Machine-readable outputs should be treated as release contracts with compatibility tests before `1.0.0`.
 
 ## 8. Open Questions Before v0.2 of This Roadmap
 
@@ -316,6 +392,7 @@ If the next version needs a narrow, high-leverage start, implement:
 3. rule-routing decision tree docs
 4. section taxonomy spec docs
 5. `charter adf init --emit-pointers` (thin `CLAUDE.md` + `agents.md`)
+6. SemVer policy + machine-contract inventory
 
 This slice addresses the core friction reported in both feedback papers without requiring a large parser/CLI redesign.
 
@@ -327,3 +404,13 @@ An immediate follow-on sprint after the above slice should target automation erg
 2. document the canonical sequence: `npx ... setup` -> `pnpm install` -> `pnpm exec charter doctor`
 3. non-interactive install guidance for PowerShell/WSL
 4. decide whether `bootstrap` is a new command or a `setup --install` extension
+
+## 11. Versioning Policy for vNext
+
+For roadmap planning, Charter should classify changes this way:
+
+- **PATCH** -- bug fixes, documentation, internal refactors, and non-breaking UX polish
+- **MINOR** -- additive commands, flags, fields, templates, modules, and advisory validations
+- **MAJOR** -- incompatible changes to CLI contracts, JSON schemas, ADF semantics, or generated artifact conventions
+
+For Charter, machine-readable stability matters as much as API stability. A renamed JSON field can be as breaking for an agent as a removed function is for a developer.
