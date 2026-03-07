@@ -1,0 +1,35 @@
+ADF: 0.1
+
+🎯 TASK: Routing engine and rule classifier design context (M3)
+
+📋 CONTEXT:
+  - The classifier is Charter's core IP — the thing that makes it more than a format with a CLI
+  - It routes rules to positions by triggers and weight, the same mechanism pattern as routing cards to positions by spread topology
+  - Input arrives (the rule), context gives it meaning (the routing engine decides which section), pattern match selects the handler (CONSTRAINTS vs ADVISORY vs CONTEXT)
+  - The classifier already exists in content-classifier.ts for migration (CLAUDE.md -> ADF); M3 extends it to handle freestanding rule insertion via `charter adf add`
+  - Design must grow from the rule-routing decision tree already codified in packages/adf/README.md — that spec is the source of truth
+
+📖 GUIDE [advisory]:
+  - Phase 1 of routing (manifest triggers -> module resolution) is stable in manifest.ts
+  - Phase 2 of routing (content -> section placement) is stable in content-classifier.ts
+  - M3 adds Phase 3: freestanding rule classification without a source heading context
+  - The gap: content-classifier.ts uses heading context as a routing signal; `charter adf add --rule` has no heading — it must infer from rule text alone
+  - Weight inference: imperative patterns (NEVER/ALWAYS/MUST) -> load-bearing; preference patterns (prefer/should/bias) -> advisory; neutral -> advisory default
+  - Module inference: check rule text against ON_DEMAND trigger keywords from manifest, fall back to core.adf
+  - Section inference: rules -> CONSTRAINTS or ADVISORY; descriptions -> CONTEXT
+  - --auto-route should explain its reasoning (which signals fired, confidence level)
+  - --dry-run must preview the full routing decision before writing
+
+⚠ CONSTRAINTS [load-bearing]:
+  - Deterministic heuristics first — do not require LLM inference for classification
+  - Every new command must support --dry-run --format json
+  - Classifier decisions must be explainable: which patterns matched, why this section, why this weight
+  - Do not duplicate routing logic — extend content-classifier.ts, don't create a parallel path
+
+📋 CONTEXT:
+  - Existing classifier entry points: classifyElement(), buildMigrationPlan()
+  - Existing strength detection: imperative/advisory/neutral in markdown-parser.ts
+  - Existing trigger matching: isKeywordMatch() with prefix stemming in manifest.ts
+  - M3 CLI surface: charter adf add --rule "text" [--weight load-bearing|advisory] [--section CONSTRAINTS|ADVISORY|CONTEXT] [--module core.adf] [--auto-route] [--dry-run]
+  - Explicit flags (--weight, --section, --module) override auto-route inference
+  - Roadmap reference: papers/adf-vnext-roadmap-v0.1.md Milestone 3

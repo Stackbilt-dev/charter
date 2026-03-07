@@ -14,6 +14,7 @@ ADF: 0.1
 📂 ON_DEMAND:
   - adf-dev.adf (Triggers on: ADF, parser, formatter, patcher, bundler, metric, weight)
   - governance.adf (Triggers on: validate, drift, audit, trailer, risk, governance)
+  - classifier.adf (Triggers on: classifier, routing, auto-route, adf add, classify, rule placement)
 
 💰 BUDGET:
   MAX_TOKENS: 4000

@@ -1,6 +1,7 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: Phase 7 complete (Opinionated Guardrails & Auto-Evidence)
-  NEXT: Stabilize, gather feedback, plan Phase 8
-  COMPLETED: Phase 1 (metric, weight, UPDATE_METRIC), Phase 2 (token budget), Phase 3 (adf sync), Phase 4 (per-module budgets, cadence), Phase 5+6 (constraint validation, evidence report), Phase 7a (scaffold LOC guardrail), Phase 7b (auto-measure), Phase 7c (advisory-only warnings), Phase 7d (agent ergonomics: file inputs, doctor ADF checks, trigger observability, nextActions)
+  CURRENT: M0-M2 closed (SemVer policy, docs/discoverability, bootstrap UX). v0.8.0 shipped with classifier QA, routing trace, cold-start UX.
+  NEXT: M3 — Guided Authoring (charter adf add --rule --auto-route --dry-run). Requires focused routing engine design session.
+  BLOCKED_ON: Routing engine classifier design — must grow from the rule-routing decision tree (packages/adf/README.md), not be bolted on.
+  COMPLETED: Phase 1-7, M0 (SemVer policy + contract inventory), M1 (rule-routing decision tree, section taxonomy spec, lockfile docs), M2 (emit-pointers, lockfile seeding on init)
