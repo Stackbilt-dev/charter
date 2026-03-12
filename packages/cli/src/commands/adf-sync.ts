@@ -11,6 +11,7 @@ import { parseAdf, parseManifest } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
+import { updateModuleIndex } from './adf-migrate';
 
 interface SyncStatus {
   source: string;
@@ -147,6 +148,9 @@ export function adfSync(options: CLIOptions, args: string[]): number {
       newLock[e.source] = e.sourceHash;
     }
     fs.writeFileSync(lockFile, JSON.stringify(newLock, null, 2) + '\n');
+
+    // Keep module index in CLAUDE.md current (#52)
+    updateModuleIndex('CLAUDE.md', aiDir);
 
     const result: AdfSyncResult = {
       aiDir,

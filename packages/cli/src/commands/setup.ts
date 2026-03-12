@@ -341,8 +341,12 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   result.appliedMutations.scripts = manifestApplied.report.scripts;
   result.appliedMutations.dependencies = manifestApplied.report.dependencies;
 
+  // Advisory: suggest bootstrap when .ai/ is missing
+  const hasAiManifest = fs.existsSync(path.resolve('.ai', 'manifest.adf'));
+
   if (options.format === 'json') {
-    console.log(JSON.stringify(result, null, 2));
+    const jsonResult = hasAiManifest ? result : { ...result, suggestion: 'bootstrap' };
+    console.log(JSON.stringify(jsonResult, null, 2));
     return EXIT_CODE.SUCCESS;
   }
 
@@ -397,6 +401,11 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   console.log('  Adoption ramp option:');
   console.log('    - Set "validation.citationStrictness": "WARN" in .charter/config.json for an initial non-blocking trailer policy.');
   console.log('    - Keep "git.trailerThreshold" at HIGH initially, then tighten based on team maturity.');
+
+  if (!hasAiManifest) {
+    console.log('');
+    console.log('  \u{1F4A1} No .ai/ found. Run `charter bootstrap` for full onboarding (ADF + CI + hooks).');
+  }
 
   return EXIT_CODE.SUCCESS;
 }
@@ -470,7 +479,7 @@ export function detectStack(contexts: PackageContext[]): DetectionResult {
 
   const dedup = (values: string[]) => [...new Set(values)];
   const dedupRuntime = dedup(runtime);
-  const mixedStack = (hasFrontend && (hasBackend || hasWorker)) || dedupRuntime.length > 1;
+  const mixedStack = (hasFrontend && (hasBackend || hasWorker)) || (dedupRuntime.length > 1 && hasFrontend);
   const signals = {
     hasFrontend,
     hasBackend,
@@ -488,6 +497,23 @@ export function detectStack(contexts: PackageContext[]): DetectionResult {
   }
   if (agentStandards.length > 0) {
     warnings.push(`Agent standards detected (${agentStandards.join(', ')}); align Charter policy with existing agent instructions.`);
+  }
+
+  // Worker + backend framework (e.g. hono) without frontend → worker preset
+  if (hasWorker && hasBackend && !hasFrontend) {
+    return {
+      runtime: dedupRuntime,
+      frameworks: dedup(frameworks),
+      state: dedup(state),
+      sources: contexts.map((c) => c.source),
+      agentStandards,
+      monorepo,
+      signals,
+      mixedStack: false,
+      confidence: 'HIGH',
+      suggestedPreset: 'worker',
+      warnings: [...warnings, 'Worker runtime with backend framework and no frontend — suggesting worker preset.'],
+    };
   }
 
   if (mixedStack) {

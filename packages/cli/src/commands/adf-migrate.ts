@@ -22,7 +22,17 @@ import type { AdfDocument, PatchOperation, MigrationItem, MigrationPlan, Trigger
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD, POINTER_GEMINI_MD, POINTER_COPILOT_MD, POINTER_MARKERS } from './adf';
+import {
+  POINTER_CLAUDE_MD,
+  POINTER_CLAUDE_MD_HYBRID,
+  POINTER_CURSORRULES,
+  POINTER_AGENTS_MD,
+  POINTER_GEMINI_MD,
+  POINTER_COPILOT_MD,
+  POINTER_MARKERS,
+  MODULE_INDEX_START,
+  MODULE_INDEX_END,
+} from './adf';
 
 // ============================================================================
 // Constants
@@ -55,6 +65,8 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
   const noBackup = args.includes('--no-backup');
   const keepSummary = args.includes('--keep-summary');
   const audit = args.includes('--audit');
+  const replaceMode = args.includes('--replace');
+  const coexist = !replaceMode; // default: coexist; opt-out with --replace
   const sourceFile = getFlag(args, '--source');
   const mergeStrategy = (getFlag(args, '--merge-strategy') || 'dedupe') as 'append' | 'dedupe' | 'replace';
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
@@ -81,7 +93,7 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
   const results: SourceMigrationResult[] = [];
 
   for (const source of sources) {
-    const result = migrateSource(source, aiDir, mergeStrategy, dryRun, noBackup, keepSummary, options);
+    const result = migrateSource(source, aiDir, mergeStrategy, dryRun, noBackup, keepSummary, options, coexist);
     results.push(result);
   }
 
@@ -130,6 +142,56 @@ interface MigrationAction {
   detail: string;
 }
 
+// ============================================================================
+// Module Index — shared helpers for #52 and #53
+// ============================================================================
+
+/**
+ * Generate a markdown table summarizing all modules from the manifest.
+ * Used in the hybrid CLAUDE.md template and by `charter adf context`.
+ */
+export function generateModuleIndex(aiDir: string): string {
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  if (!fs.existsSync(manifestPath)) return '';
+  try {
+    const doc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
+    const manifest = parseManifest(doc);
+
+    let table = '| Module | Triggers | Load |\n|--------|----------|------|\n';
+    for (const mod of manifest.defaultLoad) {
+      table += `| ${mod} | _(always loaded)_ | DEFAULT |\n`;
+    }
+    for (const mod of manifest.onDemand) {
+      table += `| ${mod.path} | ${mod.triggers.join(', ')} | ON_DEMAND |\n`;
+    }
+    return table;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Inject or update the module index table between sentinel comments in a file.
+ * No-op if the file doesn't exist or lacks sentinels.
+ */
+export function updateModuleIndex(filePath: string, aiDir: string): void {
+  const fullPath = path.resolve(filePath);
+  if (!fs.existsSync(fullPath)) return;
+  let content = fs.readFileSync(fullPath, 'utf-8');
+  const index = generateModuleIndex(aiDir);
+  const re = new RegExp(
+    escapeRegexStr(MODULE_INDEX_START) + '[\\s\\S]*?' + escapeRegexStr(MODULE_INDEX_END),
+  );
+  if (re.test(content)) {
+    content = content.replace(re, `${MODULE_INDEX_START}\n${index}${MODULE_INDEX_END}`);
+    fs.writeFileSync(fullPath, content);
+  }
+}
+
+function escapeRegexStr(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function migrateSource(
   sourcePath: string,
   aiDir: string,
@@ -137,7 +199,8 @@ export function migrateSource(
   dryRun: boolean,
   noBackup: boolean,
   keepSummary: boolean,
-  options: CLIOptions
+  options: CLIOptions,
+  coexist: boolean = true,
 ): SourceMigrationResult {
   const fullPath = path.resolve(sourcePath);
   if (!fs.existsSync(fullPath)) {
@@ -255,8 +318,8 @@ export function migrateSource(
       applyMigrationToModule(modulePath, sectionGroups, mergeStrategy);
     }
 
-    // Write thin pointer with retained STAY items (and optional architecture summary)
-    writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined);
+    // Write pointer with retained STAY items (and optional architecture summary)
+    writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined, coexist, aiDir);
   }
 
   return {
@@ -391,6 +454,8 @@ function formatItemForAdf(item: MigrationItem): string {
       return `[${el.language || 'code'}] ${el.content.split('\n')[0]}`;
     case 'table-row':
       return el.content;
+    case 'table-block':
+      return el.content;  // preserve full table markdown
     case 'prose':
       return el.content;
   }
@@ -404,9 +469,47 @@ function writePointerWithRetained(
   fullPath: string,
   fileName: string,
   stayItems: MigrationItem[],
-  plan?: MigrationPlan
+  plan?: MigrationPlan,
+  coexist: boolean = false,
+  aiDir: string = '.ai',
 ): void {
   const baseName = path.basename(fileName);
+
+  // Coexist mode for CLAUDE.md: use hybrid template with module index
+  if (coexist && baseName === 'CLAUDE.md') {
+    let pointer = POINTER_CLAUDE_MD_HYBRID;
+
+    // Populate module index
+    const index = generateModuleIndex(aiDir);
+    if (index) {
+      pointer = pointer.replace(
+        `${MODULE_INDEX_START}\n${MODULE_INDEX_END}`,
+        `${MODULE_INDEX_START}\n${index}${MODULE_INDEX_END}`,
+      );
+    }
+
+    // Add retained env items
+    const envItems = stayItems.filter(i =>
+      i.classification.reason.includes('Environment') ||
+      i.classification.reason.includes('runtime') ||
+      i.classification.reason.includes('STAY')
+    );
+    if (envItems.length > 0) {
+      const envSection = '\n## Environment\n' +
+        envItems.map(i => i.element.content.trimStart().startsWith('#') ? i.element.content : `- ${i.element.content}`).join('\n') + '\n';
+      pointer = pointer.replace(/## Environment[\s\S]*$/, envSection.trim() + '\n');
+    }
+
+    // --keep-summary
+    if (plan && plan.migrateItems.length > 0) {
+      pointer += buildArchitectureSummary(plan);
+    }
+
+    fs.writeFileSync(fullPath, pointer);
+    return;
+  }
+
+  // Replace mode (original behavior): thin pointer for all files
   let pointer = POINTER_TEMPLATES[baseName];
 
   if (!pointer) {
@@ -441,25 +544,29 @@ function writePointerWithRetained(
 
   // --keep-summary: inject auto-generated architecture summary for agent orientation (#39)
   if (plan && plan.migrateItems.length > 0) {
-    const moduleGroups = new Map<string, { CONSTRAINTS: number; CONTEXT: number; ADVISORY: number }>();
-    for (const item of plan.migrateItems) {
-      const mod = item.classification.targetModule;
-      if (!moduleGroups.has(mod)) moduleGroups.set(mod, { CONSTRAINTS: 0, CONTEXT: 0, ADVISORY: 0 });
-      moduleGroups.get(mod)![item.classification.targetSection as 'CONSTRAINTS' | 'CONTEXT' | 'ADVISORY']++;
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    let summary = `\n## Architecture Summary\n> Auto-generated by \`charter adf migrate\` on ${today}.\n> Rules live in \`.ai/\` — do not duplicate them here.\n\n`;
-    for (const [mod, counts] of moduleGroups) {
-      const parts: string[] = [];
-      if (counts.CONSTRAINTS > 0) parts.push(`${counts.CONSTRAINTS} constraints`);
-      if (counts.CONTEXT > 0) parts.push(`${counts.CONTEXT} context`);
-      if (counts.ADVISORY > 0) parts.push(`${counts.ADVISORY} advisory`);
-      summary += `- **${mod.replace('.adf', '')}**: ${parts.join(', ')} → \`.ai/${mod}\`\n`;
-    }
-    pointer += summary;
+    pointer += buildArchitectureSummary(plan);
   }
 
   fs.writeFileSync(fullPath, pointer);
+}
+
+function buildArchitectureSummary(plan: MigrationPlan): string {
+  const moduleGroups = new Map<string, { CONSTRAINTS: number; CONTEXT: number; ADVISORY: number }>();
+  for (const item of plan.migrateItems) {
+    const mod = item.classification.targetModule;
+    if (!moduleGroups.has(mod)) moduleGroups.set(mod, { CONSTRAINTS: 0, CONTEXT: 0, ADVISORY: 0 });
+    moduleGroups.get(mod)![item.classification.targetSection as 'CONSTRAINTS' | 'CONTEXT' | 'ADVISORY']++;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  let summary = `\n## Architecture Summary\n> Auto-generated by \`charter adf migrate\` on ${today}.\n> Rules live in \`.ai/\` — do not duplicate them here.\n\n`;
+  for (const [mod, counts] of moduleGroups) {
+    const parts: string[] = [];
+    if (counts.CONSTRAINTS > 0) parts.push(`${counts.CONSTRAINTS} constraints`);
+    if (counts.CONTEXT > 0) parts.push(`${counts.CONTEXT} context`);
+    if (counts.ADVISORY > 0) parts.push(`${counts.ADVISORY} advisory`);
+    summary += `- **${mod.replace('.adf', '')}**: ${parts.join(', ')} → \`.ai/${mod}\`\n`;
+  }
+  return summary;
 }
 
 // ============================================================================

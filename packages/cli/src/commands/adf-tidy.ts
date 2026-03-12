@@ -427,9 +427,12 @@ function formatItemForAdf(item: MigrationItem): string {
       return `[${el.language || 'code'}] ${el.content.split('\n')[0]}`;
     case 'table-row':
       return el.content;
+    case 'table-block':
+      return el.content;
     case 'prose':
       return el.content;
   }
+  return el.content;
 }
 
 // ============================================================================

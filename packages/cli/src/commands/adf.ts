@@ -23,6 +23,7 @@ import { adfEvidence } from './adf-evidence';
 import { adfMetricsCommand } from './adf-metrics';
 import { adfTidyCommand } from './adf-tidy';
 import { adfPopulateCommand } from './adf-populate';
+import { adfContextCommand } from './adf-context';
 
 // ============================================================================
 // Scaffold Content
@@ -113,6 +114,36 @@ export const CONTENT_SCAFFOLD = `ADF: 0.1
   - Include alt text on all images
 `;
 
+export const MANIFEST_FRONTEND_SCAFFOLD = `ADF: 0.1
+\u{1F3AF} ROLE: Repo context router
+
+\u{1F4E6} DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+\u{1F4C2} ON_DEMAND:
+  - frontend.adf (Triggers on: React, CSS, UI)
+
+\u{1F4D0} RULES:
+  - Prefer smallest relevant module set.
+  - Never assume unseen modules were loaded.
+`;
+
+export const MANIFEST_BACKEND_SCAFFOLD = `ADF: 0.1
+\u{1F3AF} ROLE: Repo context router
+
+\u{1F4E6} DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+\u{1F4C2} ON_DEMAND:
+  - backend.adf (Triggers on: API, Node, DB)
+
+\u{1F4D0} RULES:
+  - Prefer smallest relevant module set.
+  - Never assume unseen modules were loaded.
+`;
+
 export const MANIFEST_DOCS_SCAFFOLD = `ADF: 0.1
 \u{1F3AF} ROLE: Documentation workspace context router
 
@@ -129,6 +160,21 @@ export const MANIFEST_DOCS_SCAFFOLD = `ADF: 0.1
   - Prefer smallest relevant module set.
   - Never assume unseen modules were loaded.
 `;
+
+/** Return the correct manifest scaffold for a given preset. */
+export function manifestForPreset(preset?: string): string {
+  switch (preset) {
+    case 'docs':
+      return MANIFEST_DOCS_SCAFFOLD;
+    case 'frontend':
+      return MANIFEST_FRONTEND_SCAFFOLD;
+    case 'backend':
+    case 'worker':
+      return MANIFEST_BACKEND_SCAFFOLD;
+    default:
+      return MANIFEST_SCAFFOLD;
+  }
+}
 
 // ============================================================================
 // Dispatcher
@@ -166,8 +212,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfMetricsCommand(options, restArgs);
     case 'populate':
       return adfPopulateCommand(options, restArgs);
+    case 'context':
+      return adfContextCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics, context`);
   }
 }
 
@@ -195,6 +243,11 @@ export const POINTER_MARKERS = [
   'DO NOT add rules or context to this file',
 ];
 
+// -- Module index sentinels --
+
+export const MODULE_INDEX_START = '<!-- charter:module-index:start -->';
+export const MODULE_INDEX_END = '<!-- charter:module-index:end -->';
+
 // -- Thin pointer file content --
 
 export const POINTER_CLAUDE_MD = `# CLAUDE.md
@@ -203,6 +256,21 @@ export const POINTER_CLAUDE_MD = `# CLAUDE.md
 > This file is auto-managed by Charter. All project rules live in \`.ai/\`.
 > New rules should be added to the appropriate \`.ai/*.adf\` module.
 > See \`.ai/manifest.adf\` for the module routing manifest.
+
+## Environment
+<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->
+`;
+
+export const POINTER_CLAUDE_MD_HYBRID = `# CLAUDE.md
+
+> **DO NOT add rules, constraints, or context to this file.**
+> This file is auto-managed by Charter. All project rules live in \`.ai/\`.
+> New rules should be added to the appropriate \`.ai/*.adf\` module.
+> See \`.ai/manifest.adf\` for the module routing manifest.
+
+## Module Index
+<!-- charter:module-index:start -->
+<!-- charter:module-index:end -->
 
 ## Environment
 <!-- Add runtime/OS/shell-specific notes here (not stack rules) -->
@@ -234,6 +302,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
   const force = options.yes || args.includes('--force');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const moduleFlag = getFlag(args, '--module');
+  const presetFlag = getFlag(args, '--preset');
   const manifestPath = path.join(aiDir, 'manifest.adf');
 
   // --module: additive single-module creation — delegate to adf create
@@ -259,17 +328,33 @@ function adfInit(options: CLIOptions, args: string[]): number {
   }
 
   fs.mkdirSync(aiDir, { recursive: true });
-  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), MANIFEST_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), manifestForPreset(presetFlag));
   fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-  fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-  fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+
+  const moduleFiles: string[] = [];
+  if (presetFlag === 'docs') {
+    fs.writeFileSync(path.join(aiDir, 'content.adf'), CONTENT_SCAFFOLD);
+    fs.writeFileSync(path.join(aiDir, 'decisions.adf'), DECISIONS_SCAFFOLD);
+    fs.writeFileSync(path.join(aiDir, 'planning.adf'), PLANNING_SCAFFOLD);
+    moduleFiles.push('content.adf', 'decisions.adf', 'planning.adf');
+  } else if (presetFlag === 'frontend') {
+    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+    moduleFiles.push('frontend.adf');
+  } else if (presetFlag === 'backend' || presetFlag === 'worker') {
+    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+    moduleFiles.push('backend.adf');
+  } else {
+    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+    moduleFiles.push('frontend.adf', 'backend.adf');
+  }
   fs.writeFileSync(path.join(aiDir, '.adf.lock'), '{}\n');
 
   const result: AdfInitResult = {
     created: true,
     aiDir,
-    files: ['manifest.adf', 'core.adf', 'state.adf', 'frontend.adf', 'backend.adf', '.adf.lock'],
+    files: ['manifest.adf', 'core.adf', 'state.adf', ...moduleFiles, '.adf.lock'],
   };
 
   // --emit-pointers: generate thin pointer files that redirect to .ai/
@@ -579,9 +664,10 @@ function printHelp(): void {
   console.log('  charter adf — Attention-Directed Format tools');
   console.log('');
   console.log('  Usage:');
-  console.log('    charter adf init [--ai-dir <dir>] [--force] [--emit-pointers]');
+  console.log('    charter adf init [--ai-dir <dir>] [--force] [--emit-pointers] [--preset <preset>]');
   console.log('      Scaffold .ai/ directory with manifest, core, and state modules.');
   console.log('      --module <name>: add a single module to an existing .ai/ (additive, no overwrite)');
+  console.log('      --preset <preset>: scaffold preset-aware modules (worker|frontend|backend|fullstack|docs)');
   console.log('      --emit-pointers: also generate thin pointer files (CLAUDE.md, .cursorrules, agents.md)');
   console.log('');
   console.log('    charter adf fmt <file> [--check] [--write]');

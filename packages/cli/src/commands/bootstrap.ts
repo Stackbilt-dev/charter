@@ -27,6 +27,8 @@ import {
 import {
   MANIFEST_SCAFFOLD,
   MANIFEST_DOCS_SCAFFOLD,
+  MANIFEST_FRONTEND_SCAFFOLD,
+  MANIFEST_BACKEND_SCAFFOLD,
   CORE_SCAFFOLD,
   STATE_SCAFFOLD,
   FRONTEND_SCAFFOLD,
@@ -34,15 +36,16 @@ import {
   DECISIONS_SCAFFOLD,
   PLANNING_SCAFFOLD,
   CONTENT_SCAFFOLD,
-  POINTER_CLAUDE_MD,
+  POINTER_CLAUDE_MD_HYBRID,
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
   POINTER_GEMINI_MD,
   POINTER_COPILOT_MD,
+  manifestForPreset,
 } from './adf';
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
-import { migrateSource } from './adf-migrate';
+import { migrateSource, updateModuleIndex } from './adf-migrate';
 import type { SourceMigrationResult } from './adf-migrate';
 
 // ============================================================================
@@ -437,20 +440,32 @@ function runSetupPhase(
 // ============================================================================
 
 function writeAdfScaffolds(aiDir: string, preset?: StackPreset): string[] {
-  const isDocsPreset = preset === 'docs';
   fs.mkdirSync(aiDir, { recursive: true });
-  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), isDocsPreset ? MANIFEST_DOCS_SCAFFOLD : MANIFEST_SCAFFOLD);
+  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), manifestForPreset(preset));
   fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
   fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-  if (isDocsPreset) {
+
+  const files = ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf'];
+
+  if (preset === 'docs') {
     fs.writeFileSync(path.join(aiDir, 'content.adf'), CONTENT_SCAFFOLD);
     fs.writeFileSync(path.join(aiDir, 'decisions.adf'), DECISIONS_SCAFFOLD);
     fs.writeFileSync(path.join(aiDir, 'planning.adf'), PLANNING_SCAFFOLD);
-    return ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/content.adf', '.ai/decisions.adf', '.ai/planning.adf'];
+    files.push('.ai/content.adf', '.ai/decisions.adf', '.ai/planning.adf');
+  } else if (preset === 'frontend') {
+    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+    files.push('.ai/frontend.adf');
+  } else if (preset === 'backend' || preset === 'worker') {
+    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+    files.push('.ai/backend.adf');
+  } else {
+    // fullstack or undefined — both frontend + backend
+    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
+    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
+    files.push('.ai/frontend.adf', '.ai/backend.adf');
   }
-  fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-  fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-  return ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf', '.ai/frontend.adf', '.ai/backend.adf'];
+
+  return files;
 }
 
 function runAdfInitPhase(
@@ -500,9 +515,9 @@ function runAdfInitPhase(
       warnings.push('.ai/ already exists; skipping scaffold (use --yes to overwrite)');
     }
 
-    // Generate thin pointer files
+    // Generate pointer files (CLAUDE.md uses hybrid template with module index)
     const pointerFiles: Array<{ name: string; content: string; label: string }> = [
-      { name: 'CLAUDE.md', content: POINTER_CLAUDE_MD, label: 'CLAUDE.md (thin pointer)' },
+      { name: 'CLAUDE.md', content: POINTER_CLAUDE_MD_HYBRID, label: 'CLAUDE.md (hybrid pointer)' },
       { name: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
       { name: 'agents.md', content: POINTER_AGENTS_MD, label: 'agents.md (thin pointer)' },
       { name: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
@@ -525,6 +540,9 @@ function runAdfInitPhase(
         warnings.push(`${pf.name} already exists; skipping (use --yes to overwrite)`);
       }
     }
+
+    // Populate module index in CLAUDE.md from manifest
+    updateModuleIndex('CLAUDE.md', aiDir);
 
     return {
       step: {
