@@ -1,7 +1,7 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: M0-M2 closed (SemVer policy, docs/discoverability, bootstrap UX). v0.8.0 shipped with classifier QA, routing trace, cold-start UX.
+  CURRENT: v0.8.0 ready with #50-53 folded in. Hybrid CLAUDE.md, auto-loading, parser fixes, preset-aware scaffolding.
   NEXT: M3 — Guided Authoring (charter adf add --rule --auto-route --dry-run). Requires focused routing engine design session.
   BLOCKED_ON: Routing engine classifier design — must grow from the rule-routing decision tree (packages/adf/README.md), not be bolted on.
-  COMPLETED: Phase 1-7, M0 (SemVer policy + contract inventory), M1 (rule-routing decision tree, section taxonomy spec, lockfile docs), M2 (emit-pointers, lockfile seeding on init)
+  COMPLETED: Phase 1-7, M0-M2, #50 (bootstrap UX), #51 (migrate parser), #52 (auto-loading), #53 (CLAUDE.md coexistence)
