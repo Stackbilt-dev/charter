@@ -11,7 +11,7 @@
 
 export type RuleStrength = 'imperative' | 'advisory' | 'neutral';
 
-export type MarkdownElementType = 'rule' | 'code-block' | 'table-row' | 'prose';
+export type MarkdownElementType = 'rule' | 'code-block' | 'table-row' | 'table-block' | 'prose';
 
 export interface MarkdownElement {
   type: MarkdownElementType;
@@ -91,6 +91,18 @@ export function parseMarkdownSections(input: string, config?: StrengthConfig): M
   let inCodeBlock = false;
   let codeBlockLang = '';
   let codeBlockLines: string[] = [];
+  let tableLines: string[] = [];
+
+  function flushTable(): void {
+    if (tableLines.length > 0) {
+      const content = tableLines.join('\n');
+      currentElements.push({
+        type: 'table-block',
+        content,
+      });
+      tableLines = [];
+    }
+  }
 
   function flushCodeBlock(): void {
     if (codeBlockLines.length > 0) {
@@ -107,6 +119,7 @@ export function parseMarkdownSections(input: string, config?: StrengthConfig): M
   }
 
   function flushSection(): void {
+    flushTable();
     if (inCodeBlock) {
       flushCodeBlock();
       inCodeBlock = false;
@@ -145,6 +158,17 @@ export function parseMarkdownSections(input: string, config?: StrengthConfig): M
       continue;
     }
 
+    // H3+ sub-headings: strip markdown heading syntax, emit as prose
+    const subHeadingMatch = line.match(/^(#{3,})\s+(.*)$/);
+    if (subHeadingMatch) {
+      flushTable();
+      currentElements.push({
+        type: 'prose',
+        content: subHeadingMatch[2],
+      });
+      continue;
+    }
+
     // Skip H1 headings (title line) — treat as prose if in a section
     if (line.startsWith('# ') && currentHeading === '' && currentElements.length === 0) {
       continue;
@@ -162,16 +186,15 @@ export function parseMarkdownSections(input: string, config?: StrengthConfig): M
       continue;
     }
 
-    // Table rows: lines matching `| ... |`
+    // Table rows: buffer consecutive `| ... |` lines into a single table-block
     if (/^\s*\|.*\|/.test(line)) {
-      // Skip separator rows (| --- | --- |)
-      if (!/^\s*\|[\s-:|]+\|$/.test(line)) {
-        currentElements.push({
-          type: 'table-row',
-          content: line.trim(),
-        });
-      }
+      tableLines.push(line.trim());
       continue;
+    }
+
+    // Non-table line: flush any buffered table lines
+    if (tableLines.length > 0) {
+      flushTable();
     }
 
     // Skip blank lines
