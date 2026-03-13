@@ -18,6 +18,9 @@ import { adfCommand } from './commands/adf';
 import { serveCommand } from './commands/serve';
 import { bootstrapCommand } from './commands/bootstrap';
 import { telemetryCommand } from './commands/telemetry';
+import { loginCommand } from './commands/login';
+import { architectCommand } from './commands/architect';
+import { scaffoldCommand } from './commands/scaffold';
 import { recordTelemetryEvent } from './telemetry';
 import { getFlag } from './flags';
 import packageJson from '../package.json';
@@ -48,6 +51,12 @@ Usage:
   charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
   charter serve [--name <name>] [--ai-dir <dir>]
                                    Expose ADF project context as an MCP server (stdio, for Claude Code)
+  charter login --key <key>        Store Stackbilt API key
+  charter login --logout           Clear stored credentials
+  charter architect <description>  Generate tech stack from project description
+  charter architect --file <path>  Generate tech stack from spec file
+  charter scaffold [--output <dir>] [--dry-run]
+                                   Write scaffold files from last build
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
@@ -179,6 +188,15 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'telemetry':
         exitCode = await telemetryCommand(options, restArgs);
+        break;
+      case 'login':
+        exitCode = await loginCommand(options, restArgs);
+        break;
+      case 'architect':
+        exitCode = await architectCommand(options, restArgs);
+        break;
+      case 'scaffold':
+        exitCode = await scaffoldCommand(options, restArgs);
         break;
       default:
         throw new CLIError(`Unknown command: ${command}\n${HELP}`);
