@@ -193,6 +193,12 @@ charter validate                     # Check commit governance
 charter drift                        # Scan for stack drift
 charter audit                        # Governance summary
 charter adf init                     # Scaffold .ai/ context directory
+
+# Stack generation (Stackbilder engine)
+charter login --key sb_live_xxx      # Store API key
+charter architect "A real-time chat app on Cloudflare"
+charter architect --cloudflare-only --framework Hono --database D1
+charter scaffold --output ./my-project
 ```
 
 ### Claude Code Integration (MCP)
@@ -274,6 +280,12 @@ Charter works across WSL, PowerShell, CMD, macOS, and Linux. All git operations 
 - `charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]`: recalibrate metric baselines/ceilings
 - `charter adf migrate [--dry-run] [--source <file>] [--no-backup] [--merge-strategy append|dedupe|replace]`: migrate existing agent config files into ADF modules
 - `charter serve [--name <name>] [--ai-dir <dir>]`: start an MCP server (stdio) exposing ADF context as tools and resources for Claude Code and other MCP clients
+- `charter login --key <key>`: store Stackbilt API key for engine access (`~/.charter/credentials.json`)
+- `charter login --logout`: clear stored credentials
+- `charter architect <description>`: generate tech stack from project description via stackbilt-engine
+- `charter architect --file <path>`: generate stack from spec file
+- `charter architect --cloudflare-only --framework <name> --database <name>`: constrained stack generation
+- `charter scaffold [--output <dir>] [--dry-run]`: write scaffold files from last `architect` build
 - `charter telemetry report [--period <30m|24h|7d>]`: summarize local CLI telemetry
 - `charter why`: explain adoption rationale and expected payoff
 
