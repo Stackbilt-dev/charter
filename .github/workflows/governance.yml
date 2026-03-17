@@ -1,20 +1,20 @@
-# Charter Governance Check
+# Charter Governance
 #
-# Drop this workflow into any repo with a .charter/ directory.
-# It runs governance checks on every PR and posts results as annotations.
+# Consolidated governance workflow for the Charter repo.
+# Replaces the former charter-governance.yml, governance.yml, and
+# governance-scorecard.yml to cut redundant CI runs.
 #
-# Prerequisites:
-#   1. Run `npx @stackbilt/cli setup --ci github` in your repo
-#   2. Or copy this file to .github/workflows/governance.yml
-#
-# Configuration:
-#   Edit .charter/config.json to adjust thresholds and behavior.
+# For consumer repos, `charter setup --ci github` generates
+# .github/workflows/charter-governance.yml (a lighter single-job variant).
 
-name: Governance Check
+name: Governance
 
 on:
   pull_request:
     branches: [main, master]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,31 +22,23 @@ permissions:
 
 jobs:
   governance:
-    name: Charter
+    name: Charter Governance
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed for commit analysis
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
-        if: hashFiles('pnpm-lock.yaml') != ''
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || hashFiles('package-lock.json') != '' && 'npm' || '' }}
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: |
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile
-          elif [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        run: pnpm install --frozen-lockfile
 
       - name: Validate Commits
         run: npx charter validate --ci --format text
@@ -54,6 +46,10 @@ jobs:
       - name: Drift Scan
         run: npx charter drift --ci --format text
         if: hashFiles('.charter/patterns/*.json') != ''
+
+      - name: ADF Wiring & Pointer Integrity
+        run: npx charter doctor --adf-only --ci --format text
+        if: hashFiles('.ai/manifest.adf') != ''
 
       - name: ADF Evidence
         run: npx charter adf evidence --auto-measure --ci --format text
@@ -72,3 +68,42 @@ jobs:
             SCORE=$(cat /tmp/audit.json | jq -r '.score.overall')
             echo "**Governance Score:** ${SCORE}/100" >> $GITHUB_STEP_SUMMARY
           fi
+
+  scorecard:
+    name: Governance Scorecard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+
+      - name: Generate Charter JSON outputs
+        shell: bash
+        run: |
+          mkdir -p governance
+          node packages/cli/dist/bin.js validate --ci --format json > governance/validate.json || true
+          node packages/cli/dist/bin.js drift --ci --format json > governance/drift.json || true
+          node packages/cli/dist/bin.js adf evidence --auto-measure --ci --format json > governance/evidence.json || true
+
+      - name: Build governance scorecard
+        run: node scripts/generate-scorecard.mjs --repo digitalcsa-kit --source https://github.com/Stackbilt-dev/charter
+
+      - name: Validate governance scorecard shape
+        run: node scripts/validate-scorecard.mjs --file governance/scorecard.json
+
+      - name: Upload scorecard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-scorecard
+          path: governance/scorecard.json
