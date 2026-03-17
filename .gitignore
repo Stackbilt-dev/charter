@@ -17,3 +17,8 @@ governance/
 
 # scenario harness results
 harness/results/
+# cc-taskrunner worktree protection
+C:*
+node_modules/
+.pnpm-store/
+__pycache__/
