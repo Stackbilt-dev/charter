@@ -5,6 +5,7 @@
  */
 
 const DEFAULT_BASE_URL = 'https://stackbilt-engine.blue-pine-edf6.workers.dev';
+const GATEWAY_BASE_URL = 'https://mcp.stackbilt.dev';
 
 export interface BuildRequest {
   description: string;
@@ -64,6 +65,20 @@ export interface BuildResult {
   };
 }
 
+export interface ScaffoldFile {
+  path: string;
+  content: string;
+}
+
+export interface ScaffoldResult {
+  files: ScaffoldFile[];
+  fileSource: 'engine' | 'basic' | 'none';
+  nextSteps: string[];
+  seed?: number;
+  receipt?: string;
+  facts?: Record<string, unknown>;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -103,6 +118,28 @@ export class EngineClient {
     }
 
     return res.json() as Promise<BuildResult>;
+  }
+
+  async scaffold(request: { description: string; project_type?: string; complexity?: string; seed?: number }): Promise<ScaffoldResult> {
+    if (!this.apiKey) {
+      throw new Error('API key required for scaffold. Run `charter login --key sb_live_xxx` first.');
+    }
+
+    const res = await fetch(`${GATEWAY_BASE_URL}/api/scaffold`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Scaffold failed (${res.status}): ${text}`);
+    }
+
+    return res.json() as Promise<ScaffoldResult>;
   }
 
   async catalog(category?: string): Promise<{ primitives: DrawnTech[]; total: number }> {

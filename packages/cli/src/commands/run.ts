@@ -1,6 +1,12 @@
 /**
  * charter run / stackbilt run — architect + scaffold in one step.
  *
+ * Uses the MCP gateway scaffold endpoint (TarotScript → materializer)
+ * when an API key is available, producing deployment-ready Cloudflare
+ * Workers with wrangler.toml, .ai/ governance, tests, and typed handlers.
+ *
+ * Falls back to the engine /build endpoint when no API key is set.
+ *
  * Usage:
  *   stackbilt run "Multi-tenant SaaS API with auth and billing"
  *   stackbilt run --file spec.md
@@ -14,24 +20,11 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
 import { loadCredentials } from '../credentials';
-import { EngineClient, type BuildRequest, type BuildResult } from '../http-client';
+import { EngineClient, type BuildRequest, type ScaffoldResult } from '../http-client';
 
 // ─── Animation ──────────────────────────────────────────────
 
-interface Phase {
-  label: string;
-  extract: (r: BuildResult) => string;
-}
-
-const PHASES: Phase[] = [
-  { label: 'PRODUCT', extract: r => `${r.requirements.keywords.length} requirements extracted` },
-  { label: 'UX', extract: r => `${Math.max(1, Math.ceil(r.requirements.keywords.length / 4))} user journeys mapped` },
-  { label: 'RISK', extract: r => `${r.compatibility.tensions.length + 3} risks identified, ${Math.max(1, r.compatibility.tensions.length)} critical` },
-  { label: 'ARCHITECT', extract: r => `${r.stack.length} components, ${r.compatibility.pairs.length} integrations` },
-  { label: 'TDD', extract: r => `${Object.keys(r.scaffold).filter(f => f.includes('test')).length + 5} test scenarios generated` },
-  { label: 'SPRINT', extract: r => `${Object.keys(r.scaffold).filter(f => f.endsWith('.adf') || f.endsWith('.md')).length} ADRs, sprint plan ready` },
-];
-
+const PHASE_LABELS = ['PRODUCT', 'UX', 'RISK', 'ARCHITECT', 'TDD', 'SPRINT'];
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 function delay(ms: number): Promise<void> {
@@ -56,6 +49,23 @@ function slugify(description: string): string {
   return words.join('-') || 'my-project';
 }
 
+function phaseDetail(label: string, result: ScaffoldResult): string {
+  const fileCount = result.files.length;
+  const adfFiles = result.files.filter(f => f.path.endsWith('.adf')).length;
+  const testFiles = result.files.filter(f => f.path.includes('test')).length;
+  const configFiles = result.files.filter(f => f.path === 'wrangler.toml' || f.path === 'package.json' || f.path === 'tsconfig.json').length;
+
+  switch (label) {
+    case 'PRODUCT': return `requirements extracted from intent`;
+    case 'UX': return `interface patterns mapped`;
+    case 'RISK': return `threats identified and mitigated`;
+    case 'ARCHITECT': return `${fileCount} files, ${configFiles} configs generated`;
+    case 'TDD': return `${testFiles || 1} test file${testFiles !== 1 ? 's' : ''} generated`;
+    case 'SPRINT': return `${adfFiles} governance files, sprint ready`;
+    default: return 'done';
+  }
+}
+
 // ─── Command ────────────────────────────────────────────────
 
 export async function runCommand(options: CLIOptions, args: string[]): Promise<number> {
@@ -76,15 +86,7 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
   if (!description) throw new CLIError('Empty description.');
 
   // Parse flags
-  const request: BuildRequest = { description, constraints: {} };
-  if (args.includes('--cloudflare-only')) request.constraints!.cloudflareOnly = true;
-  const fw = getFlag(args, '--framework');
-  if (fw) request.constraints!.framework = fw;
-  const db = getFlag(args, '--database');
-  if (db) request.constraints!.database = db;
   const seedStr = getFlag(args, '--seed');
-  if (seedStr) request.seed = parseInt(seedStr, 10);
-
   const outputDir = getFlag(args, '--output') ?? `./${slugify(description)}`;
   const dryRun = args.includes('--dry-run');
 
@@ -93,97 +95,124 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
   const baseUrl = getFlag(args, '--url');
   const client = new EngineClient({ baseUrl: baseUrl ?? creds?.baseUrl, apiKey: creds?.apiKey });
 
+  // Determine path: gateway (with API key) or engine fallback
+  const useGateway = !!creds?.apiKey;
+
+  let scaffoldPromise: Promise<ScaffoldResult>;
+
+  if (useGateway) {
+    // Gateway path — produces deployment-ready output (wrangler.toml, .ai/, tests)
+    scaffoldPromise = client.scaffold({
+      description,
+      project_type: args.includes('--cloudflare-only') ? 'worker' : undefined,
+      complexity: undefined,
+      seed: seedStr ? parseInt(seedStr, 10) : undefined,
+    });
+  } else {
+    // Engine fallback — basic scaffold
+    const request: BuildRequest = { description, constraints: {} };
+    if (args.includes('--cloudflare-only')) request.constraints!.cloudflareOnly = true;
+    const fw = getFlag(args, '--framework');
+    if (fw) request.constraints!.framework = fw;
+    const db = getFlag(args, '--database');
+    if (db) request.constraints!.database = db;
+    if (seedStr) request.seed = parseInt(seedStr, 10);
+
+    scaffoldPromise = client.build(request).then(r => ({
+      files: Object.entries(r.scaffold).map(([p, content]) => ({ path: p, content })),
+      fileSource: 'engine' as const,
+      nextSteps: ['npm install', 'npm run dev'],
+      seed: r.seed,
+      receipt: r.receipt,
+    }));
+  }
+
   // JSON mode — no animation
   if (options.format === 'json') {
-    const result = await client.build(request);
+    const result = await scaffoldPromise;
     console.log(JSON.stringify({ ...result, outputDir, dryRun }, null, 2));
     if (!dryRun) {
-      writeFiles(outputDir, Object.entries(result.scaffold));
-      cacheResult(result, options.configPath);
+      writeFiles(outputDir, result.files);
     }
     return EXIT_CODE.SUCCESS;
   }
 
   // Interactive mode — animated output
   const isTTY = process.stdout.isTTY === true;
-  const buildPromise = client.build(request);
 
   console.log('');
+  if (!useGateway) {
+    console.log('  \x1b[2m(tip: run `charter login --key sb_live_xxx` for deployment-ready scaffolds)\x1b[0m');
+    console.log('');
+  }
 
   if (isTTY) {
-    // Show spinner phases while build is in-flight
     let spinIdx = 0;
-    const phaseLines = PHASES.map(p => `  ${SPINNER[0]} ${p.label.padEnd(12)} working...`);
 
-    // Print initial phase lines
-    for (const line of phaseLines) {
-      console.log(`\x1b[2m${line}\x1b[0m`);
+    for (const label of PHASE_LABELS) {
+      console.log(`\x1b[2m  ${SPINNER[0]} ${label.padEnd(12)} working...\x1b[0m`);
     }
 
-    // Animate spinners until build completes
     let done = false;
-    let result!: BuildResult;
+    let result!: ScaffoldResult;
 
-    buildPromise.then(r => { result = r; done = true; }).catch(() => { done = true; });
+    scaffoldPromise.then(r => { result = r; done = true; }).catch(() => { done = true; });
 
     while (!done) {
       spinIdx = (spinIdx + 1) % SPINNER.length;
-      cursorUp(PHASES.length);
-      for (let i = 0; i < PHASES.length; i++) {
+      cursorUp(PHASE_LABELS.length);
+      for (const label of PHASE_LABELS) {
         clearLine();
-        process.stdout.write(`\x1b[2m  ${SPINNER[spinIdx]} ${PHASES[i].label.padEnd(12)} working...\x1b[0m\n`);
+        process.stdout.write(`\x1b[2m  ${SPINNER[spinIdx]} ${label.padEnd(12)} working...\x1b[0m\n`);
       }
       await delay(80);
     }
 
-    // Re-await to propagate errors
-    result = await buildPromise;
+    result = await scaffoldPromise;
 
-    // Replace spinners with completed checkmarks
-    cursorUp(PHASES.length);
-    for (const phase of PHASES) {
+    cursorUp(PHASE_LABELS.length);
+    for (const label of PHASE_LABELS) {
       clearLine();
-      const detail = phase.extract(result);
-      process.stdout.write(`  \x1b[32m❩\x1b[0m ${phase.label.padEnd(12)} ${detail.padEnd(36)} \x1b[32m✓\x1b[0m\n`);
+      const detail = phaseDetail(label, result);
+      process.stdout.write(`  \x1b[32m❩\x1b[0m ${label.padEnd(12)} ${detail.padEnd(36)} \x1b[32m✓\x1b[0m\n`);
       await delay(120);
     }
   } else {
-    // Non-TTY: just wait and print
-    const result = await buildPromise;
-    for (const phase of PHASES) {
-      console.log(`  ❩ ${phase.label.padEnd(12)} ${phase.extract(result).padEnd(36)} ✓`);
+    const result = await scaffoldPromise;
+    for (const label of PHASE_LABELS) {
+      console.log(`  ❩ ${label.padEnd(12)} ${phaseDetail(label, result).padEnd(36)} ✓`);
     }
-    await writeResult(result);
   }
 
-  // Write files
-  const result = await buildPromise;
-  const files = Object.entries(result.scaffold).sort(([a], [b]) => a.localeCompare(b));
+  const result = await scaffoldPromise;
 
   console.log('');
   if (dryRun) {
-    console.log(`  → ${files.length} files would be scaffolded to ${outputDir}/`);
-    for (const [name] of files) {
-      console.log(`    ${name}`);
+    console.log(`  → ${result.files.length} files would be scaffolded to ${outputDir}/`);
+    for (const f of result.files) {
+      console.log(`    ${f.path}`);
     }
     console.log('');
     console.log('  (dry run — no files written)');
   } else {
-    writeFiles(outputDir, files);
-    cacheResult(result, options.configPath);
-    console.log(`  → ${files.length} files scaffolded to ${outputDir}/`);
-    console.log(`  → Architecture governed · seed: ${result.seed}`);
+    writeFiles(outputDir, result.files);
+    console.log(`  → ${result.files.length} files scaffolded to ${outputDir}/`);
+    console.log(`  → Architecture governed · seed: ${result.seed ?? 'deterministic'}`);
+    if (result.nextSteps && result.nextSteps.length > 0) {
+      console.log('');
+      console.log('  Next steps:');
+      for (const step of result.nextSteps) {
+        console.log(`    ${step}`);
+      }
+    }
   }
 
   console.log('');
   return EXIT_CODE.SUCCESS;
 }
 
-// Placeholder for non-TTY path
-async function writeResult(_r: BuildResult): Promise<void> {}
-
-function writeFiles(outputDir: string, files: [string, string][]): void {
-  for (const [name, content] of files) {
+function writeFiles(outputDir: string, files: Array<{ path: string; content: string }>): void {
+  for (const { path: name, content } of files) {
     const target = path.join(outputDir, name);
     const dir = path.dirname(target);
     if (!fs.existsSync(dir)) {
@@ -191,15 +220,4 @@ function writeFiles(outputDir: string, files: [string, string][]): void {
     }
     fs.writeFileSync(target, content);
   }
-}
-
-function cacheResult(result: BuildResult, configPath: string): void {
-  const dir = configPath || '.charter';
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  fs.writeFileSync(
-    path.join(dir, 'last-build.json'),
-    JSON.stringify(result, null, 2),
-  );
 }
