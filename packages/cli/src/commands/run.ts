@@ -69,9 +69,19 @@ function phaseDetail(label: string, result: ScaffoldResult): string {
 // ─── Command ────────────────────────────────────────────────
 
 export async function runCommand(options: CLIOptions, args: string[]): Promise<number> {
-  // Parse description
+  // Parse flags first (getFlag consumes flag + value from args)
   const filePath = getFlag(args, '--file');
-  const positional = args.filter(a => !a.startsWith('-') && a !== filePath);
+  const outputDir = getFlag(args, '--output');
+  const seedStr = getFlag(args, '--seed');
+  const urlOverride = getFlag(args, '--url');
+  const fwOverride = getFlag(args, '--framework');
+  const dbOverride = getFlag(args, '--database');
+
+  // Collect flag values to exclude from positional args
+  const flagValues = new Set([filePath, outputDir, seedStr, urlOverride, fwOverride, dbOverride].filter(Boolean));
+
+  // Parse description from remaining positional args
+  const positional = args.filter(a => !a.startsWith('-') && !flagValues.has(a));
   let description: string;
 
   if (filePath) {
@@ -85,14 +95,12 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
 
   if (!description) throw new CLIError('Empty description.');
 
-  // Parse flags
-  const seedStr = getFlag(args, '--seed');
-  const outputDir = getFlag(args, '--output') ?? `./${slugify(description)}`;
+  const resolvedOutput = outputDir ?? `./${slugify(description)}`;
   const dryRun = args.includes('--dry-run');
 
   // Engine client
   const creds = loadCredentials();
-  const baseUrl = getFlag(args, '--url');
+  const baseUrl = urlOverride;
   const client = new EngineClient({ baseUrl: baseUrl ?? creds?.baseUrl, apiKey: creds?.apiKey });
 
   // Determine path: gateway (with API key) or engine fallback
@@ -112,10 +120,8 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
     // Engine fallback — basic scaffold
     const request: BuildRequest = { description, constraints: {} };
     if (args.includes('--cloudflare-only')) request.constraints!.cloudflareOnly = true;
-    const fw = getFlag(args, '--framework');
-    if (fw) request.constraints!.framework = fw;
-    const db = getFlag(args, '--database');
-    if (db) request.constraints!.database = db;
+    if (fwOverride) request.constraints!.framework = fwOverride;
+    if (dbOverride) request.constraints!.database = dbOverride;
     if (seedStr) request.seed = parseInt(seedStr, 10);
 
     scaffoldPromise = client.build(request).then(r => ({
@@ -130,9 +136,9 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
   // JSON mode — no animation
   if (options.format === 'json') {
     const result = await scaffoldPromise;
-    console.log(JSON.stringify({ ...result, outputDir, dryRun }, null, 2));
+    console.log(JSON.stringify({ ...result, outputDir: resolvedOutput, dryRun }, null, 2));
     if (!dryRun) {
-      writeFiles(outputDir, result.files);
+      writeFiles(resolvedOutput, result.files);
     }
     return EXIT_CODE.SUCCESS;
   }
@@ -188,15 +194,15 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
 
   console.log('');
   if (dryRun) {
-    console.log(`  → ${result.files.length} files would be scaffolded to ${outputDir}/`);
+    console.log(`  → ${result.files.length} files would be scaffolded to ${resolvedOutput}/`);
     for (const f of result.files) {
       console.log(`    ${f.path}`);
     }
     console.log('');
     console.log('  (dry run — no files written)');
   } else {
-    writeFiles(outputDir, result.files);
-    console.log(`  → ${result.files.length} files scaffolded to ${outputDir}/`);
+    writeFiles(resolvedOutput, result.files);
+    console.log(`  → ${result.files.length} files scaffolded to ${resolvedOutput}/`);
     console.log(`  → Architecture governed · seed: ${result.seed ?? 'deterministic'}`);
     if (result.nextSteps && result.nextSteps.length > 0) {
       console.log('');
