@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   publish-release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,18 +27,18 @@ jobs:
         id: tag
         shell: bash
         run: |
-        if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-          TAG="${{ inputs.tag }}"
-        else
-          TAG="${GITHUB_REF_NAME}"
-        fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
 
-        if [[ -z "${TAG}" ]]; then
-          echo "Tag could not be resolved." >&2
-          exit 1
-        fi
+          if [[ -z "${TAG}" ]]; then
+            echo "Tag could not be resolved." >&2
+            exit 1
+          fi
 
-        echo "value=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "value=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag
         shell: bash

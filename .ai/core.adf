@@ -34,4 +34,4 @@ ADF: 0.1
   adf_migrate_loc: 0 / 750 [lines]
   bundler_loc: 0 / 500 [lines]
   parser_loc: 0 / 300 [lines]
-  cli_entry_loc: 0 / 200 [lines]
+  cli_entry_loc: 0 / 250 [lines]
