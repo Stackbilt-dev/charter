@@ -196,8 +196,9 @@ charter adf init                     # Scaffold .ai/ context directory
 
 # Stack generation (Stackbilder engine)
 charter login --key sb_live_xxx      # Store API key
-charter architect "A real-time chat app on Cloudflare"
-charter architect --cloudflare-only --framework Hono --database D1
+stackbilt run "A real-time chat app on Cloudflare"   # Architect + scaffold in one step
+stackbilt run --cloudflare-only --framework Hono --database D1
+charter architect "A real-time chat app on Cloudflare"   # Or step-by-step:
 charter scaffold --output ./my-project
 ```
 
@@ -286,6 +287,8 @@ Charter works across WSL, PowerShell, CMD, macOS, and Linux. All git operations 
 - `charter architect --file <path>`: generate stack from spec file
 - `charter architect --cloudflare-only --framework <name> --database <name>`: constrained stack generation
 - `charter scaffold [--output <dir>] [--dry-run]`: write scaffold files from last `architect` build
+- `charter run <description>` / `stackbilt run <description>`: architect + scaffold in one animated step
+- `charter run --file <path>`: same, from spec file
 - `charter telemetry report [--period <30m|24h|7d>]`: summarize local CLI telemetry
 - `charter why`: explain adoption rationale and expected payoff
 

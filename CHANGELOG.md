@@ -6,6 +6,23 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-21
+
+### Added
+- **`run` command** — `stackbilt run "description"` combines `architect` + `scaffold` in one step with animated 6-mode terminal output (PRODUCT, UX, RISK, ARCHITECT, TDD, SPRINT). Supports `--dry-run`, `--format json`, `--output`, `--file`, and all constraint flags.
+- **`stackbilt` binary alias** — the CLI is now accessible as both `charter` and `stackbilt`. `npx @stackbilt/cli run "..."` works without global install.
+
+### Changed
+- All packages bumped from 0.8.0 to 0.9.0.
+
+## [0.8.0] - 2026-03-15
+
+### Added
+- **`architect` command** — generate a tech stack from a project description via the Stackbilt engine.
+- **`scaffold` command** — write scaffold files from last `architect` build to disk.
+- **`login` command** — store Stackbilt API key for engine access.
+- **Engine HTTP client** — `EngineClient` for calling the Stackbilt engine API.
+
 ## [0.7.0] - 2026-03-04
 
 ### Added
