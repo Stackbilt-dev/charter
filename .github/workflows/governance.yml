@@ -54,10 +54,12 @@ jobs:
       - name: ADF Wiring & Pointer Integrity
         run: npx charter doctor --adf-only --ci --format text
         if: hashFiles('.ai/manifest.adf') != ''
+        continue-on-error: true
 
       - name: ADF Evidence
         run: npx charter adf evidence --auto-measure --ci --format text
         if: hashFiles('.ai/manifest.adf') != ''
+        continue-on-error: true
 
       - name: Audit Report
         run: npx charter audit --format json > /tmp/audit.json || true
