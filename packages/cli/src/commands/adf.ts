@@ -320,7 +320,9 @@ function adfInit(options: CLIOptions, args: string[]): number {
     if (options.format === 'json') {
       console.log(JSON.stringify({ ...result, nextActions: ['charter adf fmt .ai/core.adf --check', 'charter adf bundle --task "<prompt>"'] }, null, 2));
     } else {
-      console.log(`  .ai/ already exists at ${aiDir}/`);
+      console.log('');
+      console.log('  .ai/ directory already exists. Run \'charter doctor\' to check for issues.');
+      console.log('');
       console.log('  Use --force (or --yes) to overwrite.');
       console.log('  To add a single module: charter adf init --module <name>');
     }
@@ -403,19 +405,24 @@ function adfInit(options: CLIOptions, args: string[]): number {
       ],
     }, null, 2));
   } else {
-    console.log(`  Initialized ADF context at ${aiDir}/`);
     console.log('');
-    console.log('  Created:');
-    for (const file of result.files) {
-      console.log(`    ${file}`);
+    console.log('  \u2713 Created .ai/ directory');
+    console.log('');
+    console.log('  Your AI governance is ready. Here\'s what was created:');
+    console.log('');
+    console.log('    .ai/manifest.adf    \u2014 Module router (controls what loads when)');
+    console.log('    .ai/core.adf        \u2014 Universal rules (always loaded)');
+    console.log('    .ai/state.adf       \u2014 Project state tracking');
+    for (const file of moduleFiles) {
+      console.log(`    .ai/${file.padEnd(19)}\u2014 Domain-specific rules (on-demand)`);
     }
     console.log('');
     console.log('  Next steps:');
-    console.log('    1. Run: charter adf populate  # auto-fill ADF files from codebase signals');
-    console.log('    2. Edit core.adf to add project-specific constraints and rules');
-    console.log('    3. Run: charter adf fmt .ai/core.adf --check');
-    console.log('    4. Run: charter adf bundle --task "<your task>" to compile context for an agent session');
-    console.log('       (The verify:adf script runs this automatically in CI)');
+    console.log('    1. Edit .ai/core.adf to add your project\'s constraints');
+    console.log('    2. Run \'charter doctor\' to validate your setup');
+    console.log('    3. Run \'charter adf bundle --task "<prompt>"\' to see the assembled context');
+    console.log('');
+    console.log('  Docs: https://github.com/Stackbilt-dev/charter');
   }
 
   return EXIT_CODE.SUCCESS;

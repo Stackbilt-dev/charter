@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as readline from 'node:readline';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -247,8 +248,15 @@ interface InitializeOptions {
 
 export async function initCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const force = options.yes || args.includes('--force');
+  const guided = args.includes('--guided');
   const presetFlag = getFlag(args, '--preset');
   const preset = isValidPreset(presetFlag) ? presetFlag : undefined;
+
+  // --guided: interactive mode that asks questions before scaffolding
+  if (guided) {
+    return guidedInit(options, force);
+  }
+
   const result = initializeCharter(options.configPath, force, { preset });
 
   if (options.format === 'json') {
@@ -257,22 +265,31 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   }
 
   if (!result.created) {
-    console.log(`  .charter/ already exists at ${result.configPath}`);
+    console.log('');
+    console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
+    console.log('');
     console.log('  Use --config <path> for a different location, or --force to overwrite templates.');
     return EXIT_CODE.SUCCESS;
   }
 
-  console.log(`  Initialized .charter/ at ${result.configPath}/`);
   console.log('');
-  console.log('  Created:');
-  for (const file of result.files) {
-    console.log(`    ${file}`);
-  }
+  console.log('  \u2713 Created .charter/ directory');
+  console.log('');
+  console.log('  Your governance config is ready. Here\'s what was created:');
+  console.log('');
+  console.log('    config.json              \u2014 Project settings and thresholds');
+  console.log('    patterns/blessed-stack.json \u2014 Technology stack patterns (' + (preset || 'fullstack') + ' preset)');
+  console.log('    policies/governance.md   \u2014 Commit governance and change classification');
   console.log('');
   console.log('  Next steps:');
   console.log('    1. Edit config.json with your project name and thresholds');
-  console.log('    2. Define your blessed stack in patterns/*.json');
-  console.log('    3. Run: charter validate');
+  console.log('    2. Customize patterns/blessed-stack.json for your stack');
+  console.log('    3. Run \'charter doctor\' to validate your setup');
+  console.log('    4. Run \'charter validate\' to check commit governance');
+  console.log('');
+  console.log('  Tip: Run \'charter adf init\' to also scaffold .ai/ context modules.');
+  console.log('');
+  console.log('  Docs: https://github.com/Stackbilt-dev/charter');
 
   return EXIT_CODE.SUCCESS;
 }
@@ -329,6 +346,133 @@ function writeIfChanged(targetPath: string, content: string): boolean {
 
 function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
+}
+
+// ============================================================================
+// --guided interactive init
+// ============================================================================
+
+function askQuestion(rl: readline.Interface, question: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => resolve(answer.trim()));
+  });
+}
+
+const LANGUAGE_PRESET_MAP: Record<string, StackPreset> = {
+  typescript: 'fullstack',
+  python: 'backend',
+  go: 'backend',
+  rust: 'backend',
+  java: 'backend',
+  react: 'frontend',
+  vue: 'frontend',
+  svelte: 'frontend',
+};
+
+async function guidedInit(options: CLIOptions, force: boolean): Promise<number> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    console.log('');
+    console.log('  Charter guided setup');
+    console.log('  --------------------');
+    console.log('');
+
+    // Q1: Primary language
+    const langAnswer = await askQuestion(
+      rl,
+      '  What\'s your primary language/framework? (TypeScript, Python, Go, React, etc.) '
+    );
+    const langKey = langAnswer.toLowerCase().replace(/\s+/g, '');
+    const detectedPreset = LANGUAGE_PRESET_MAP[langKey];
+
+    // Q2: Cloudflare Workers
+    const cfAnswer = await askQuestion(
+      rl,
+      '  Do you use Cloudflare Workers? (y/N) '
+    );
+    const useCloudflare = cfAnswer.toLowerCase() === 'y' || cfAnswer.toLowerCase() === 'yes';
+
+    // Q3: Auth governance
+    const authAnswer = await askQuestion(
+      rl,
+      '  Do you want auth governance patterns? (y/N) '
+    );
+    const useAuth = authAnswer.toLowerCase() === 'y' || authAnswer.toLowerCase() === 'yes';
+
+    rl.close();
+
+    // Determine preset
+    let preset: StackPreset;
+    if (useCloudflare) {
+      preset = 'worker';
+    } else if (detectedPreset) {
+      preset = detectedPreset;
+    } else {
+      preset = 'fullstack';
+    }
+
+    const initOpts: InitializeOptions = {
+      preset,
+      features: {
+        cloudflare: useCloudflare,
+      },
+    };
+
+    const result = initializeCharter(options.configPath, force, initOpts);
+
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ ...result, guided: true, preset, useCloudflare, useAuth }, null, 2));
+      return EXIT_CODE.SUCCESS;
+    }
+
+    if (!result.created) {
+      console.log('');
+      console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
+      return EXIT_CODE.SUCCESS;
+    }
+
+    // If auth governance was requested, add auth-specific patterns to governance.md
+    if (useAuth) {
+      const policyPath = path.join(options.configPath, 'policies', 'governance.md');
+      if (fs.existsSync(policyPath)) {
+        const existing = fs.readFileSync(policyPath, 'utf-8');
+        const authPolicy = `
+## Auth Governance
+
+Authentication and authorization changes are classified as CROSS_CUTTING.
+All auth changes require:
+- Explicit review from a security-aware reviewer
+- Documented threat model consideration
+- Session/token lifecycle validation
+`;
+        fs.writeFileSync(policyPath, existing + authPolicy);
+      }
+    }
+
+    console.log('');
+    console.log('  \u2713 Created .charter/ directory');
+    console.log('');
+    console.log('  Configuration:');
+    console.log(`    Preset: ${preset}${useCloudflare ? ' (with Cloudflare Workers)' : ''}`);
+    if (useAuth) {
+      console.log('    Auth governance: enabled');
+    }
+    console.log('');
+    console.log('  Next steps:');
+    console.log('    1. Review config.json and patterns/blessed-stack.json');
+    console.log('    2. Run \'charter doctor\' to validate your setup');
+    console.log('    3. Run \'charter validate\' to check commit governance');
+    console.log('');
+    console.log('  Docs: https://github.com/Stackbilt-dev/charter');
+
+    return EXIT_CODE.SUCCESS;
+  } finally {
+    rl.close();
+  }
 }
 
 function buildPatternTemplate(
