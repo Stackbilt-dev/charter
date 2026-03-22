@@ -37,8 +37,9 @@ Usage:
                                    One-command repo onboarding (detect + setup + ADF + install + doctor)
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
-  charter init [--preset <worker|frontend|backend|fullstack>]
+  charter init [--preset <worker|frontend|backend|fullstack>] [--guided]
                                    Scaffold .charter/ config directory
+                                   --guided: interactive mode that asks about your stack
   charter validate [--range <revset>]
                                    Validate git commits for governance trailers
   charter audit [--range <revset>]
