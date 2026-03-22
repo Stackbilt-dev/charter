@@ -2,7 +2,7 @@ param(
   [string]$TaskName = "StackbiltDocsOssSync",
   [string]$DailyAt = "09:17",
   [string]$WslDistro = "",
-  [string]$RepoPath = "/mnt/c/Users/kover/Documents/digitalcsa-kit"
+  [string]$RepoPath = "/mnt/c/Users/kover/Documents/charter"
 )
 
 $logPath = "$RepoPath/logs/docs-oss-auto.log"
@@ -23,7 +23,7 @@ Register-ScheduledTask `
   -Action $action `
   -Trigger $trigger `
   -Settings $settings `
-  -Description "Auto-sync OSS docs from digitalcsa-kit to stackbilt_docs_v2 and push" `
+  -Description "Auto-sync OSS docs from charter to docs-site and push" `
   -Force | Out-Null
 
 Write-Host "Installed/updated scheduled task: $TaskName"

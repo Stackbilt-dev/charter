@@ -4,7 +4,7 @@
  * Uses native fetch() (Node 18+). Zero external dependencies.
  */
 
-const DEFAULT_BASE_URL = 'https://stackbilt-engine.blue-pine-edf6.workers.dev';
+const DEFAULT_BASE_URL = process.env.STACKBILT_ENGINE_URL ?? 'https://api.stackbilt.dev/engine';
 const GATEWAY_BASE_URL = 'https://mcp.stackbilt.dev';
 
 export interface BuildRequest {

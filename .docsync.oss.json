@@ -4,7 +4,7 @@
     "localRoot": "./docs-snippets"
   },
   "target": {
-    "root": "../stackbilt_docs_v2/src/content/docs"
+    "root": "../docs-site/src/content/docs"
   },
   "mappings": [
     {

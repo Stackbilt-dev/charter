@@ -9,7 +9,7 @@ const driftPath = args.drift || 'governance/drift.json';
 
 const validate = await readJsonIfExists(validatePath);
 const drift = await readJsonIfExists(driftPath);
-const repoName = args.repo || process.env.SCORECARD_REPO_NAME || 'digitalcsa-kit';
+const repoName = args.repo || process.env.SCORECARD_REPO_NAME || 'charter';
 const scorecard = {
   repo: {
     name: repoName,

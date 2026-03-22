@@ -2,7 +2,7 @@
 title: "Agent DX Feedback: Install/Setup Automation Friction (Windows + PNPM Workspace)"
 feedback-id: ADX-003
 date: 2026-02-26
-source: "Codex (OpenAI) configuring digitalcsa-kit with @stackbilt/cli v0.3.2"
+source: "Codex (OpenAI) configuring charter with @stackbilt/cli v0.3.2"
 severity: high
 bucket: automation-ci
 status: planned

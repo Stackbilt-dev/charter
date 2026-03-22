@@ -79,7 +79,7 @@ function makeTempRepo(scenario: Scenario): string {
   tempDirs.push(tmp);
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tmp, stdio: 'pipe' });
-  execFileSync('git', ['config', 'user.email', 'harness@stackbilt.dev'], { cwd: tmp, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'harness@example.com'], { cwd: tmp, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.name', 'Harness'], { cwd: tmp, stdio: 'pipe' });
 
   const aiDir = path.join(tmp, '.ai');
@@ -423,7 +423,7 @@ async function runRealRepo(repoId: string): Promise<RealRepoResult> {
   tempDirs.push(tmp);
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tmp, stdio: 'pipe' });
-  execFileSync('git', ['config', 'user.email', 'harness@stackbilt.dev'], { cwd: tmp, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'harness@example.com'], { cwd: tmp, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.name', 'Harness'], { cwd: tmp, stdio: 'pipe' });
 
   // Copy real .ai/ directory

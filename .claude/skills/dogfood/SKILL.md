@@ -41,7 +41,7 @@ Creates a `papers/AGENT_DX_FEEDBACK_NNN.md` entry and optionally escalates to a 
    title: "Agent DX Feedback: <short title>"
    feedback-id: ADX-NNN
    date: YYYY-MM-DD
-   source: "Claude Code working on digitalcsa-kit"
+   source: "Claude Code working on charter"
    severity: <high|medium|low>
    bucket: <bucket>
    status: new
@@ -84,6 +84,6 @@ Creates a `papers/AGENT_DX_FEEDBACK_NNN.md` entry and optionally escalates to a 
 
 ## Notes
 - Write observations while the friction is fresh — don't reconstruct from memory
-- `source` should describe the working context: `"Claude Code working on digitalcsa-kit"`, `"Codex agent on edgestack_v2"`, etc.
+- `source` should describe the working context: `"Claude Code working on charter"`, `"Codex agent on edgestack_v2"`, etc.
 - Even small friction is worth capturing — low severity entries build the pattern record
 - If you file a GitHub issue, update `tracked-issues` in the paper before committing

@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'pkg=$(echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -oP \"packages/[^/]+\" | head -1); if [ -n \"$pkg\" ] && echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q \"/src/\"; then echo \"[hook] Type-checking $pkg...\"; cd /mnt/c/Users/kover/Documents/digitalcsa-kit && pnpm exec tsc --noEmit -p tsconfig.json 2>&1 | tail -20; fi'"
+            "command": "bash -c 'pkg=$(echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -oP \"packages/[^/]+\" | head -1); if [ -n \"$pkg\" ] && echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q \"/src/\"; then echo \"[hook] Type-checking $pkg...\"; pnpm exec tsc --noEmit -p tsconfig.json 2>&1 | tail -20; fi'"
           }
         ]
       },
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'if echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q \"\\.ai/.*\\.adf$\"; then echo \"[hook] Checking ADF evidence...\"; cd /mnt/c/Users/kover/Documents/digitalcsa-kit && node packages/cli/dist/bin.js adf evidence --auto-measure 2>&1 | tail -20; fi'"
+            "command": "bash -c 'if echo \"$CLAUDE_TOOL_INPUT_FILE_PATH\" | grep -q \"\\.ai/.*\\.adf$\"; then echo \"[hook] Checking ADF evidence...\"; node packages/cli/dist/bin.js adf evidence --auto-measure 2>&1 | tail -20; fi'"
           }
         ]
       }
