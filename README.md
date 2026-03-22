@@ -1,18 +1,56 @@
-# Charter Kit
+# Charter
 
 [![npm version](https://img.shields.io/npm/v/@stackbilt/cli?label=charter&color=5F7FFF&style=for-the-badge)](https://www.npmjs.com/package/@stackbilt/cli)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](./LICENSE)
 
-![Charter Kit hero](./stackbilt-charter-4.png)
+![Charter hero](./stackbilt-charter-4.png)
 
-## The Problem
+## Describe your app. Get a deployable project.
 
-You write a CLAUDE.md. You add a `.cursorrules`. You paste instructions into GEMINI.md. Your AI agent loads all of it into the context window -- 10,000 tokens of flat, unstructured rules competing with the actual work.
+```bash
+npx @stackbilt/cli run "A real-time chat app on Cloudflare Workers with D1, auth, and rate limiting"
+```
+
+One command. Architecture designed, stack selected, files scaffolded. No boilerplate, no templates, no inference cost — the engine is deterministic.
+
+```
+  ✓ Analyzing requirements...
+  ✓ Selecting stack (7 components, compatibility: 94/100)
+  ✓ Scaffolding project...
+
+  Created 12 files in ./realtime-chat/
+    src/index.ts        — Hono API with WebSocket upgrade
+    src/auth.ts         — JWT middleware + session management
+    src/chat-room.ts    — Durable Object for room state
+    wrangler.toml       — D1 binding, DO namespace, rate limiting
+    schema.sql          — Users, rooms, messages tables
+    ...
+
+  Run: cd realtime-chat && npm install && npx wrangler dev
+```
+
+Add constraints to narrow the output:
+
+```bash
+stackbilt run "Invoice processing API" --cloudflare-only --framework Hono --database D1
+stackbilt run --file spec.md   # Or feed a full spec
+```
+
+**Free to try.** `charter login --key sb_live_xxx` to connect your [Stackbilt](https://stackbilt.dev) API key.
+
+---
+
+## Also: AI agent governance
+
+Charter also replaces monolithic agent config files with **ADF (Attention-Directed Format)** — a modular context system where agents load only the rules they need for the current task.
+
+### The Problem
+
+You write a CLAUDE.md. You add a `.cursorrules`. You paste instructions into GEMINI.md. Your AI agent loads all of it into the context window — 10,000 tokens of flat, unstructured rules competing with the actual work.
 
 Half get ignored. You don't know which half.
 
-## The Solution
-
-Charter is an open-source CLI that replaces monolithic agent config files with **ADF (Attention-Directed Format)** -- a modular context system where agents load only the rules they need for the current task.
+### The Solution
 
 Instead of one big file, you get a manifest. The manifest declares modules, trigger keywords that load them on demand, token budgets, and weighted sections that tell the agent what's load-bearing vs. advisory.
 
@@ -183,7 +221,20 @@ For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm ins
 
 ## Getting Started
 
-### Human Workflow
+### Build a project
+
+```bash
+# One-step: describe → architect → scaffold
+stackbilt run "A real-time chat app on Cloudflare"
+stackbilt run --cloudflare-only --framework Hono --database D1
+
+# Or step-by-step:
+charter login --key sb_live_xxx       # Store API key (one-time)
+charter architect "A real-time chat app on Cloudflare"
+charter scaffold --output ./my-project
+```
+
+### Govern a project
 
 ```bash
 charter                              # Repo risk/value snapshot
@@ -193,13 +244,6 @@ charter validate                     # Check commit governance
 charter drift                        # Scan for stack drift
 charter audit                        # Governance summary
 charter adf init                     # Scaffold .ai/ context directory
-
-# Stack generation (Stackbilder engine)
-charter login --key sb_live_xxx      # Store API key
-stackbilt run "A real-time chat app on Cloudflare"   # Architect + scaffold in one step
-stackbilt run --cloudflare-only --framework Hono --database D1
-charter architect "A real-time chat app on Cloudflare"   # Or step-by-step:
-charter scaffold --output ./my-project
 ```
 
 ### Claude Code Integration (MCP)
