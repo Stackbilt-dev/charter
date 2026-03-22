@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@stackbilt/cli?label=charter&color=5F7FFF&style=for-the-badge)](https://www.npmjs.com/package/@stackbilt/cli)
 
-![Charter Kit hero](./stackbilt-charter-2.png)
+![Charter Kit hero](./stackbilt-charter-3.png)
 
 ## The Problem
 
