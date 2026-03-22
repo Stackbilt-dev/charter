@@ -48,5 +48,6 @@
     "@stackbilt/types": "workspace:^",
     "@stackbilt/validate": "workspace:^"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "author": "Stackbilt LLC"
 }

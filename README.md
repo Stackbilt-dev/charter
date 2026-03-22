@@ -416,6 +416,10 @@ The [`papers/`](./papers/) directory contains Charter's research narrative:
 
 Apache-2.0. See [LICENSE](./LICENSE).
 
+---
+
+Built by [Stackbilt](https://stackbilt.dev) — Apache-2.0 License
+
 <p>
   <a href="https://www.buymeacoffee.com/kurto" target="_blank" rel="noopener noreferrer">
     <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-5F7FFF?style=for-the-badge&logo=buymeacoffee&logoColor=FFDD00" alt="Buy me a coffee" />
