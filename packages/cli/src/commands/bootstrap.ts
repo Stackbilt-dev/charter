@@ -77,7 +77,10 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const presetFlag = getFlag(args, '--preset');
   const skipInstall = args.includes('--skip-install');
   const skipDoctor = args.includes('--skip-doctor');
-  const force = options.yes;
+  // --yes = non-interactive (accept defaults), --force = overwrite existing content
+  // Separated per #65: --yes without --force should NOT destroy existing ADF files
+  const force = args.includes('--force');
+  const nonInteractive = options.yes || force;
 
   if (ciTarget && ciTarget !== 'github') {
     throw new CLIError(`Unsupported CI target: ${ciTarget}. Supported: github`);
@@ -122,7 +125,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 2: Setup
   // ========================================================================
-  const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, force);
+  const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, nonInteractive);
   result.steps.push(setupResult.step);
   if (setupResult.step.status === 'fail') warnings++;
 
@@ -158,7 +161,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 4: Migrate Agent Configs
   // ========================================================================
-  const migrateResult = runMigratePhase(options, force);
+  const migrateResult = runMigratePhase(options, nonInteractive);
   result.steps.push(migrateResult.step);
   if (migrateResult.step.status === 'fail') warnings++;
 
@@ -235,14 +238,19 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
 
   // Build next steps
   result.nextSteps.push({
-    cmd: 'Review .charter/patterns/ and customize for your stack',
-    required: false,
-    reason: 'Customize blessed stack patterns',
-  });
-  result.nextSteps.push({
     cmd: 'charter adf populate  # auto-fill ADF files from codebase signals',
     required: false,
     reason: 'Populate ADF context from package.json, README, and stack detection',
+  });
+  result.nextSteps.push({
+    cmd: 'charter serve  # start MCP server for Claude Code / Cursor integration',
+    required: false,
+    reason: 'Enable real-time governance via MCP (add to .claude/settings.json)',
+  });
+  result.nextSteps.push({
+    cmd: 'Review .charter/patterns/ and customize for your stack',
+    required: false,
+    reason: 'Customize blessed stack patterns',
   });
   result.nextSteps.push({
     cmd: 'git add .charter .ai CLAUDE.md .cursorrules agents.md && git commit -m "chore: bootstrap charter governance"',
@@ -499,9 +507,22 @@ function runAdfInitPhase(
     } else if (hasCustomContent && !force) {
       // Custom ADF content exists — don't overwrite, suggest migrate
       warnings.push('.ai/ contains custom ADF content; skipping scaffold overwrite');
-      warnings.push("Run 'charter adf migrate' to consolidate agent configs into ADF");
+      warnings.push("Run 'charter adf migrate' to consolidate agent configs into ADF, or use --force to overwrite");
     } else if (force) {
-      // Force overwrite (preset-aware on-demand modules)
+      // Force overwrite — backup existing ADF files first (#65)
+      const backupDir = path.join(aiDir, '.backup');
+      fs.mkdirSync(backupDir, { recursive: true });
+      const existingFiles = fs.readdirSync(aiDir).filter(f => f.endsWith('.adf'));
+      for (const f of existingFiles) {
+        const src = path.join(aiDir, f);
+        const dst = path.join(backupDir, `${f}.pre-bootstrap`);
+        fs.copyFileSync(src, dst);
+      }
+      if (existingFiles.length > 0) {
+        warnings.push(`Backed up ${existingFiles.length} existing ADF file(s) to .ai/.backup/`);
+      }
+
+      // Write scaffolds (preset-aware on-demand modules)
       files.push(...writeAdfScaffolds(aiDir, preset));
 
       const lockData: Record<string, string> = {};
@@ -512,7 +533,29 @@ function runAdfInitPhase(
       fs.writeFileSync(path.join(aiDir, '.adf.lock'), JSON.stringify(lockData, null, 2) + '\n');
       files.push('.ai/.adf.lock');
     } else {
-      warnings.push('.ai/ already exists; skipping scaffold (use --yes to overwrite)');
+      warnings.push('.ai/ already exists; skipping scaffold (use --force to overwrite)');
+    }
+
+    // Detect orphaned ADF modules not registered in manifest (#65)
+    const manifestPath2 = path.join(aiDir, 'manifest.adf');
+    if (fs.existsSync(manifestPath2)) {
+      try {
+        const manifestContent = fs.readFileSync(manifestPath2, 'utf-8');
+        const allAdfFiles = fs.readdirSync(aiDir).filter(f => f.endsWith('.adf') && f !== 'manifest.adf');
+        // Extract module names from manifest content (lines like "| module.adf |")
+        const registeredModules = new Set<string>();
+        for (const line of manifestContent.split('\n')) {
+          const match = line.match(/\|\s*(\S+\.adf)\s*\|/);
+          if (match) registeredModules.add(match[1]);
+        }
+        const orphans = allAdfFiles.filter(f => !registeredModules.has(f));
+        if (orphans.length > 0) {
+          warnings.push(`Found ${orphans.length} unregistered ADF module(s): ${orphans.join(', ')}`);
+          warnings.push("Run 'charter adf register' to add them to the manifest, or add manually");
+        }
+      } catch {
+        // Non-critical — manifest parse failure shouldn't block bootstrap
+      }
     }
 
     // Generate pointer files (CLAUDE.md uses hybrid template with module index)
