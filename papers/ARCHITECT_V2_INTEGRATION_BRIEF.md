@@ -9,7 +9,7 @@ status: proposal
 
 ## TL;DR
 
-The scaffold engine should emit `.ai/` (ADF context modules) alongside `.charter/` in every generated project. This turns every StackBilt-scaffolded repo into a governed project from line zero — and creates a measurement loop that no competitor has.
+The scaffold engine should emit `.ai/` (ADF context modules) alongside `.charter/` in every generated project. This turns every Stackbilt-scaffolded repo into a governed project from line zero — and creates a measurement loop that no competitor has.
 
 ## What Changes
 
@@ -54,7 +54,7 @@ Architect plans → scaffold + ADF generated → developer builds with ADF gover
     └──── evidence data feeds back ◄──── Charter measures everything
 ```
 
-1. Every StackBilt project starts governed. No manual setup.
+1. Every Stackbilt project starts governed. No manual setup.
 2. Charter captures evidence at every CI run (LOC, tokens, ceiling utilization).
 3. That evidence data tells us which scaffolds produce healthy projects and which don't.
 4. We improve scaffold generation using real build data — not guesses.

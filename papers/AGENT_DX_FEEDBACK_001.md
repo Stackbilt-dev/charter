@@ -2,7 +2,7 @@
 title: "Agent DX Feedback: Codex Lockfile Archaeology"
 feedback-id: ADX-001
 date: 2026-02-26
-source: "Codex (OpenAI) working on edgestack_v2"
+source: "Codex (OpenAI) working on a private repository"
 severity: high
 bucket: daily-use
 status: shipped

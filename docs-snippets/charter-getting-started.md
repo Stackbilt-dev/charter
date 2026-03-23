@@ -100,4 +100,4 @@ npx charter adf evidence --auto-measure --ci --format json
 
 - [CLI Reference](/cli-reference) — full command surface
 - [CI Integration](/ci-integration) — GitHub Actions workflow with evidence gating
-- [Ecosystem](/ecosystem) — how Charter fits into the StackBilt platform
+- [Ecosystem](/ecosystem) — how Charter fits into the Stackbilt platform

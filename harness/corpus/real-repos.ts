@@ -2,10 +2,16 @@
  * Real ecosystem repo definitions for harness testing.
  *
  * Instead of synthetic archetypes, these point at the actual .ai/ directories
- * from aegis and bizops-internal. The harness copies the real ADF structure
- * into a temp repo, generates realistic CLAUDE.md bloat grounded in the actual
- * codebase, and applies tidy for real — letting us inspect ADF health after
- * accumulation against the actual module structure.
+ * from sibling private repositories in the Stackbilt ecosystem. The harness
+ * copies the real ADF structure into a temp repo, generates realistic CLAUDE.md
+ * bloat grounded in the actual codebase, and applies tidy for real — letting us
+ * inspect ADF health after accumulation against the actual module structure.
+ *
+ * NOTE: These definitions reference local paths to private Stackbilt repos
+ * (expected to be cloned as siblings to this repo). They are example
+ * configurations — external contributors should use the synthetic archetype
+ * harness (`harness:archetype` / `harness:ollama`) instead. The `harness:real`
+ * scripts will fail without these sibling repos present.
  */
 
 import * as path from 'node:path';

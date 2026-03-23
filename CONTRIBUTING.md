@@ -62,17 +62,17 @@ PR checklist:
 - Pure functions preferred; side effects in CLI command handlers only
 - No LLM API calls in this kit (heuristic-only runtime)
 
-## What Belongs Here vs CSA Cloud
+## What Belongs Here vs External Services
 
-Belongs here:
+Belongs here (offline, local-first):
 - Heuristic classifiers and validators
 - Schema definitions and validation
 - Git integration logic
 - ADF context format parsing, formatting, and patching
 - CLI commands and local config parsing
 
-Stays in CSA Cloud:
-- LLM-powered analysis
+Handled by external services (not in this repo):
+- LLM-powered analysis requiring cloud API calls
 - Database operations and multi-tenant runtime features
 - AuthN/AuthZ and hosted frontend concerns
 
