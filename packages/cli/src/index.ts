@@ -33,7 +33,7 @@ charter - repo-level governance toolkit
 
 Usage:
   charter                          Show immediate governance value + risk snapshot
-  charter bootstrap [--ci github] [--preset <name>] [--yes] [--skip-install] [--skip-doctor]
+  charter bootstrap [--ci github] [--preset <name>] [--yes] [--force] [--skip-install] [--skip-doctor]
                                    One-command repo onboarding (detect + setup + ADF + install + doctor)
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
@@ -71,7 +71,8 @@ Options:
   --config <path>    Path to .charter/ directory (default: .charter/)
   --format <type>    Output format: text, json (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
-  --yes              Auto-accept safe setup overwrites
+  --yes              Non-interactive bootstrap; accept default actions
+  --force            Overwrite existing custom files during bootstrap (.ai/*.adf are backed up first)
   --preset <name>    Stack preset: worker, frontend, backend, fullstack
   --detect-only      Setup only: print detected stack/preset and exit
   --no-dependency-sync
@@ -218,4 +219,3 @@ export async function run(args: string[]): Promise<number> {
     throw err;
   }
 }
-

@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as readline from 'node:readline';
 import * as crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
@@ -77,10 +78,9 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const presetFlag = getFlag(args, '--preset');
   const skipInstall = args.includes('--skip-install');
   const skipDoctor = args.includes('--skip-doctor');
-  // --yes = non-interactive (accept defaults), --force = overwrite existing content
-  // Separated per #65: --yes without --force should NOT destroy existing ADF files
   const force = args.includes('--force');
-  const nonInteractive = options.yes || force;
+  const nonInteractive = options.yes;
+  const setupOverwrite = options.yes || force;
 
   if (ciTarget && ciTarget !== 'github') {
     throw new CLIError(`Unsupported CI target: ${ciTarget}. Supported: github`);
@@ -103,7 +103,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   const detectResult = runDetectPhase(options, presetFlag);
   result.steps.push(detectResult.step);
-  if (detectResult.step.status === 'fail') warnings++;
+  warnings += detectResult.step.warnings.length;
 
   const selectedPreset: StackPreset = detectResult.selectedPreset;
   const detection = detectResult.detection;
@@ -125,9 +125,9 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 2: Setup
   // ========================================================================
-  const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, nonInteractive);
+  const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, setupOverwrite);
   result.steps.push(setupResult.step);
-  if (setupResult.step.status === 'fail') warnings++;
+  warnings += setupResult.step.warnings.length;
 
   if (options.format === 'text') {
     console.log('[2/6] Setting up governance...');
@@ -145,7 +145,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   const adfResult = runAdfInitPhase(options, force, selectedPreset);
   result.steps.push(adfResult.step);
-  if (adfResult.step.status === 'fail') warnings++;
+  warnings += adfResult.step.warnings.length;
 
   if (options.format === 'text') {
     console.log('[3/6] Initializing ADF context...');
@@ -155,7 +155,26 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     for (const f of (adfResult.step.details.pointers as string[] || [])) {
       console.log(`  Generated ${f}`);
     }
+    const backedUp = adfResult.step.details.backedUp as number | undefined;
+    if (backedUp && backedUp > 0) {
+      console.log(`  Backed up ${backedUp} files to .ai/.backup/`);
+    }
+    for (const warning of adfResult.step.warnings) {
+      console.log(`  Warning: ${warning}`);
+    }
     console.log('');
+  }
+
+  // Orphan registration prompt (interactive only)
+  const orphans = adfResult.step.details.orphans as string[] || [];
+  if (orphans.length > 0 && !nonInteractive && options.format === 'text') {
+    const shouldRegister = await promptYesNo('  Register these modules now? (y/N) ');
+    if (shouldRegister) {
+      registerOrphansInManifest(path.join('.ai', 'manifest.adf'), orphans);
+      updateModuleIndex('CLAUDE.md', '.ai');
+      console.log(`  Registered ${orphans.length} module(s) as ON_DEMAND in manifest.adf`);
+      console.log('');
+    }
   }
 
   // ========================================================================
@@ -163,7 +182,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   const migrateResult = runMigratePhase(options, nonInteractive);
   result.steps.push(migrateResult.step);
-  if (migrateResult.step.status === 'fail') warnings++;
+  warnings += migrateResult.step.warnings.length;
 
   if (options.format === 'text') {
     console.log('[4/6] Migrating agent configs...');
@@ -185,7 +204,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   const installResult = runInstallPhase(options, skipInstall);
   result.steps.push(installResult.step);
-  if (installResult.step.status === 'fail') warnings++;
+  warnings += installResult.step.warnings.length;
 
   if (options.format === 'text') {
     console.log('[5/6] Installing dependencies...');
@@ -214,7 +233,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   const doctorResult = runDoctorPhase(options, skipDoctor);
   result.steps.push(doctorResult.step);
-  if (doctorResult.step.status === 'fail') warnings++;
+  warnings += doctorResult.step.warnings.length;
 
   if (options.format === 'text') {
     console.log('[6/6] Running health check...');
@@ -447,33 +466,92 @@ function runSetupPhase(
 // Phase 3: ADF Init
 // ============================================================================
 
-function writeAdfScaffolds(aiDir: string, preset?: StackPreset): string[] {
-  fs.mkdirSync(aiDir, { recursive: true });
-  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), manifestForPreset(preset));
-  fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
-  fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
-
-  const files = ['.ai/manifest.adf', '.ai/core.adf', '.ai/state.adf'];
+function getAdfScaffolds(preset?: StackPreset): Array<{ name: string; content: string }> {
+  const scaffolds = [
+    { name: 'manifest.adf', content: manifestForPreset(preset) },
+    { name: 'core.adf', content: CORE_SCAFFOLD },
+    { name: 'state.adf', content: STATE_SCAFFOLD },
+  ];
 
   if (preset === 'docs') {
-    fs.writeFileSync(path.join(aiDir, 'content.adf'), CONTENT_SCAFFOLD);
-    fs.writeFileSync(path.join(aiDir, 'decisions.adf'), DECISIONS_SCAFFOLD);
-    fs.writeFileSync(path.join(aiDir, 'planning.adf'), PLANNING_SCAFFOLD);
-    files.push('.ai/content.adf', '.ai/decisions.adf', '.ai/planning.adf');
+    scaffolds.push(
+      { name: 'content.adf', content: CONTENT_SCAFFOLD },
+      { name: 'decisions.adf', content: DECISIONS_SCAFFOLD },
+      { name: 'planning.adf', content: PLANNING_SCAFFOLD },
+    );
   } else if (preset === 'frontend') {
-    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-    files.push('.ai/frontend.adf');
+    scaffolds.push({ name: 'frontend.adf', content: FRONTEND_SCAFFOLD });
   } else if (preset === 'backend' || preset === 'worker') {
-    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-    files.push('.ai/backend.adf');
+    scaffolds.push({ name: 'backend.adf', content: BACKEND_SCAFFOLD });
   } else {
-    // fullstack or undefined — both frontend + backend
-    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-    files.push('.ai/frontend.adf', '.ai/backend.adf');
+    scaffolds.push(
+      { name: 'frontend.adf', content: FRONTEND_SCAFFOLD },
+      { name: 'backend.adf', content: BACKEND_SCAFFOLD },
+    );
   }
 
-  return files;
+  return scaffolds;
+}
+
+function buildAdfLockContent(aiDir: string): string {
+  const lockData: Record<string, string> = {};
+  for (const mod of ['core.adf', 'state.adf']) {
+    const modPath = path.join(aiDir, mod);
+    if (!fs.existsSync(modPath)) continue;
+    lockData[mod] = hashContent(fs.readFileSync(modPath, 'utf-8'));
+  }
+  return JSON.stringify(lockData, null, 2) + '\n';
+}
+
+function writeAdfScaffolds(
+  aiDir: string,
+  force: boolean,
+  preset?: StackPreset,
+): { files: string[]; warnings: string[]; backedUp: number } {
+  fs.mkdirSync(aiDir, { recursive: true });
+
+  const files: string[] = [];
+  const warnings: string[] = [];
+  let backedUp = 0;
+  let backupDir: string | undefined;
+
+  for (const scaffold of getAdfScaffolds(preset)) {
+    const targetPath = path.join(aiDir, scaffold.name);
+    const label = `.ai/${scaffold.name}`;
+
+    if (!fs.existsSync(targetPath)) {
+      fs.writeFileSync(targetPath, scaffold.content);
+      files.push(label);
+      continue;
+    }
+
+    const existing = fs.readFileSync(targetPath, 'utf-8');
+    if (existing.trim() === scaffold.content.trim()) {
+      continue;
+    }
+
+    if (!force) {
+      warnings.push(`${label} has custom content; skipping scaffold overwrite`);
+      continue;
+    }
+
+    backupDir ||= path.join(aiDir, '.backup');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.copyFileSync(targetPath, path.join(backupDir, scaffold.name));
+    backedUp++;
+
+    fs.writeFileSync(targetPath, scaffold.content);
+    files.push(label);
+  }
+
+  const lockPath = path.join(aiDir, '.adf.lock');
+  const lockContent = buildAdfLockContent(aiDir);
+  if (!fs.existsSync(lockPath) || fs.readFileSync(lockPath, 'utf-8') !== lockContent) {
+    fs.writeFileSync(lockPath, lockContent);
+    files.push('.ai/.adf.lock');
+  }
+
+  return { files, warnings, backedUp };
 }
 
 function runAdfInitPhase(
@@ -484,57 +562,13 @@ function runAdfInitPhase(
   const warnings: string[] = [];
   const files: string[] = [];
   const pointers: string[] = [];
+  const detectedOrphans: string[] = [];
 
   try {
     const aiDir = '.ai';
-    const manifestPath = path.join(aiDir, 'manifest.adf');
-
-    // Create .ai/ scaffolds
-    const alreadyExists = fs.existsSync(manifestPath);
-    const hasCustomContent = alreadyExists && hasCustomAdfContent(aiDir);
-    if (!alreadyExists) {
-      // Greenfield: write scaffolds (preset-aware on-demand modules)
-      files.push(...writeAdfScaffolds(aiDir, preset));
-
-      // Write .adf.lock
-      const lockData: Record<string, string> = {};
-      for (const mod of ['core.adf', 'state.adf']) {
-        const content = fs.readFileSync(path.join(aiDir, mod), 'utf-8');
-        lockData[mod] = hashContent(content);
-      }
-      fs.writeFileSync(path.join(aiDir, '.adf.lock'), JSON.stringify(lockData, null, 2) + '\n');
-      files.push('.ai/.adf.lock');
-    } else if (hasCustomContent && !force) {
-      // Custom ADF content exists — don't overwrite, suggest migrate
-      warnings.push('.ai/ contains custom ADF content; skipping scaffold overwrite');
-      warnings.push("Run 'charter adf migrate' to consolidate agent configs into ADF, or use --force to overwrite");
-    } else if (force) {
-      // Force overwrite — backup existing ADF files first (#65)
-      const backupDir = path.join(aiDir, '.backup');
-      fs.mkdirSync(backupDir, { recursive: true });
-      const existingFiles = fs.readdirSync(aiDir).filter(f => f.endsWith('.adf'));
-      for (const f of existingFiles) {
-        const src = path.join(aiDir, f);
-        const dst = path.join(backupDir, `${f}.pre-bootstrap`);
-        fs.copyFileSync(src, dst);
-      }
-      if (existingFiles.length > 0) {
-        warnings.push(`Backed up ${existingFiles.length} existing ADF file(s) to .ai/.backup/`);
-      }
-
-      // Write scaffolds (preset-aware on-demand modules)
-      files.push(...writeAdfScaffolds(aiDir, preset));
-
-      const lockData: Record<string, string> = {};
-      for (const mod of ['core.adf', 'state.adf']) {
-        const content = fs.readFileSync(path.join(aiDir, mod), 'utf-8');
-        lockData[mod] = hashContent(content);
-      }
-      fs.writeFileSync(path.join(aiDir, '.adf.lock'), JSON.stringify(lockData, null, 2) + '\n');
-      files.push('.ai/.adf.lock');
-    } else {
-      warnings.push('.ai/ already exists; skipping scaffold (use --force to overwrite)');
-    }
+    const scaffoldResult = writeAdfScaffolds(aiDir, force, preset);
+    files.push(...scaffoldResult.files);
+    warnings.push(...scaffoldResult.warnings);
 
     // Detect orphaned ADF modules not registered in manifest (#65)
     const manifestPath2 = path.join(aiDir, 'manifest.adf');
@@ -542,16 +576,17 @@ function runAdfInitPhase(
       try {
         const manifestContent = fs.readFileSync(manifestPath2, 'utf-8');
         const allAdfFiles = fs.readdirSync(aiDir).filter(f => f.endsWith('.adf') && f !== 'manifest.adf');
-        // Extract module names from manifest content (lines like "| module.adf |")
-        const registeredModules = new Set<string>();
-        for (const line of manifestContent.split('\n')) {
-          const match = line.match(/\|\s*(\S+\.adf)\s*\|/);
-          if (match) registeredModules.add(match[1]);
-        }
+        const doc = parseAdf(manifestContent);
+        const manifest = parseManifest(doc);
+        const registeredModules = new Set<string>([
+          ...manifest.defaultLoad,
+          ...manifest.onDemand.map(m => m.path),
+        ]);
         const orphans = allAdfFiles.filter(f => !registeredModules.has(f));
         if (orphans.length > 0) {
-          warnings.push(`Found ${orphans.length} unregistered ADF module(s): ${orphans.join(', ')}`);
-          warnings.push("Run 'charter adf register' to add them to the manifest, or add manually");
+          detectedOrphans.push(...orphans);
+          warnings.push(`Found ${orphans.length} unregistered .adf module(s): ${orphans.join(', ')}`);
+          warnings.push('Run `charter adf register` to add them to the manifest.');
         }
       } catch {
         // Non-critical — manifest parse failure shouldn't block bootstrap
@@ -573,14 +608,14 @@ function runAdfInitPhase(
       if (!exists) {
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
-      } else if (exists && !isAlreadyThinPointer(pointerPath)) {
-        // File has custom content — don't overwrite, suggest migrate
-        warnings.push(`${pf.name} has custom content; skipping pointer (use 'charter adf migrate' first)`);
       } else if (force) {
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
+      } else if (!isAlreadyThinPointer(pointerPath)) {
+        // File has custom content — don't overwrite, suggest migrate
+        warnings.push(`${pf.name} has custom content; skipping pointer (run 'charter adf migrate' first or use --force to overwrite)`);
       } else {
-        warnings.push(`${pf.name} already exists; skipping (use --yes to overwrite)`);
+        warnings.push(`${pf.name} already exists; skipping (use --force to overwrite)`);
       }
     }
 
@@ -591,7 +626,7 @@ function runAdfInitPhase(
       step: {
         name: 'adf-init',
         status: 'pass',
-        details: { files, pointers },
+        details: { files, pointers, backedUp: scaffoldResult.backedUp, orphans: detectedOrphans },
         warnings,
       },
     };
@@ -602,7 +637,7 @@ function runAdfInitPhase(
       step: {
         name: 'adf-init',
         status: 'fail',
-        details: { files, pointers, error: msg },
+        details: { files, pointers, orphans: detectedOrphans, error: msg },
         warnings,
       },
     };
@@ -890,22 +925,6 @@ function hashContent(content: string): string {
 }
 
 /**
- * Check if .ai/core.adf has content beyond the scaffold template.
- */
-function hasCustomAdfContent(aiDir: string): boolean {
-  const coreAdfPath = path.join(aiDir, 'core.adf');
-  if (!fs.existsSync(coreAdfPath)) return false;
-  try {
-    const content = fs.readFileSync(coreAdfPath, 'utf-8');
-    // Check if the file has been modified from default scaffold
-    // A custom file will have different content than the CORE_SCAFFOLD
-    return content.trim() !== CORE_SCAFFOLD.trim();
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if a file is already a thin ADF pointer.
  */
 function isAlreadyThinPointer(filePath: string): boolean {
@@ -915,4 +934,57 @@ function isAlreadyThinPointer(filePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Prompt user for a yes/no answer via readline.
+ */
+function promptYesNo(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === 'y');
+    });
+  });
+}
+
+/**
+ * Append orphaned modules to the ON_DEMAND section of manifest.adf.
+ */
+function registerOrphansInManifest(manifestPath: string, orphans: string[]): void {
+  const content = fs.readFileSync(manifestPath, 'utf-8');
+  const lines = content.split('\n');
+
+  // Find ON_DEMAND section
+  const onDemandIdx = lines.findIndex(l => l.includes('ON_DEMAND:'));
+
+  if (onDemandIdx === -1) {
+    // No ON_DEMAND section — append one
+    const newEntries = orphans.map(name => {
+      const stem = name.replace('.adf', '');
+      return `  - ${name} (Triggers on: ${stem})`;
+    });
+    fs.writeFileSync(
+      manifestPath,
+      content.trimEnd() + '\n\n📂 ON_DEMAND:\n' + newEntries.join('\n') + '\n',
+    );
+    return;
+  }
+
+  // Find end of ON_DEMAND entries
+  let insertIdx = onDemandIdx + 1;
+  while (insertIdx < lines.length && lines[insertIdx].match(/^\s+-\s/)) {
+    insertIdx++;
+  }
+
+  const newEntries = orphans.map(name => {
+    const stem = name.replace('.adf', '');
+    return `  - ${name} (Triggers on: ${stem})`;
+  });
+  lines.splice(insertIdx, 0, ...newEntries);
+  fs.writeFileSync(manifestPath, lines.join('\n'));
 }
