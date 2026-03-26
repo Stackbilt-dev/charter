@@ -299,7 +299,7 @@ See .ai/manifest.adf for the module routing manifest.
 `;
 
 function adfInit(options: CLIOptions, args: string[]): number {
-  const force = options.yes || args.includes('--force');
+  const force = args.includes('--force');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const moduleFlag = getFlag(args, '--module');
   const presetFlag = getFlag(args, '--preset');
@@ -323,7 +323,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
       console.log('');
       console.log('  .ai/ directory already exists. Run \'charter doctor\' to check for issues.');
       console.log('');
-      console.log('  Use --force (or --yes) to overwrite.');
+      console.log('  Use --force to overwrite existing files.');
       console.log('  To add a single module: charter adf init --module <name>');
     }
     return EXIT_CODE.SUCCESS;
@@ -566,7 +566,7 @@ function adfCreate(options: CLIOptions, args: string[]): number {
   }
 
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
-  const force = options.yes || args.includes('--force');
+  const force = args.includes('--force');
   const load = (getFlag(args, '--load') || 'on-demand').toLowerCase();
   if (load !== 'default' && load !== 'on-demand') {
     throw new CLIError(`Invalid --load value: ${load}. Use default or on-demand.`);

@@ -52,7 +52,9 @@ CONTEXT:
     expect(fs.existsSync(path.join('.ai', '.backup'))).toBe(false);
     expect(fs.existsSync(path.join('.ai', 'manifest.adf'))).toBe(true);
     expect(fs.existsSync(path.join('.ai', 'state.adf'))).toBe(true);
-    expect(logs).toContain('  Warning: .ai/core.adf has custom content; skipping scaffold overwrite');
+    const skipWarning = logs.find(l => l.includes('.ai/core.adf has custom content') && l.includes('skipping scaffold overwrite'));
+    expect(skipWarning).toBeDefined();
+    expect(skipWarning).toMatch(/\d+ bytes/);
   });
 
   it('backs up and overwrites custom ADF files when run with --force', async () => {
@@ -75,15 +77,26 @@ STATE:
     );
 
     expect(exitCode).toBe(0);
-    expect(fs.readFileSync(path.join('.ai', '.backup', 'core.adf'), 'utf-8')).toBe(customCore);
-    expect(fs.readFileSync(path.join('.ai', '.backup', 'state.adf'), 'utf-8')).toBe(customState);
+
+    // Backup files should exist with timestamp suffix
+    const backupDir = path.join('.ai', '.backup');
+    expect(fs.existsSync(backupDir)).toBe(true);
+    const backupFiles = fs.readdirSync(backupDir);
+    const coreBackup = backupFiles.find(f => f.startsWith('core.adf.'));
+    const stateBackup = backupFiles.find(f => f.startsWith('state.adf.'));
+    expect(coreBackup).toBeDefined();
+    expect(stateBackup).toBeDefined();
+    expect(fs.readFileSync(path.join(backupDir, coreBackup!), 'utf-8')).toBe(customCore);
+    expect(fs.readFileSync(path.join(backupDir, stateBackup!), 'utf-8')).toBe(customState);
+
+    // Originals should be overwritten with scaffold content
     expect(fs.readFileSync(path.join('.ai', 'core.adf'), 'utf-8')).not.toBe(customCore);
     expect(fs.readFileSync(path.join('.ai', 'state.adf'), 'utf-8')).not.toBe(customState);
     expect(logs).toContain('  Backed up 2 files to .ai/.backup/');
   });
 
-  it('detects orphaned .adf modules not in manifest (--yes mode prints warning)', async () => {
-    // Pre-create .ai/ with an extra module that won't be in the scaffold manifest
+  it('detects orphaned .adf modules and auto-registers them in --yes mode', async () => {
+    // Pre-create .ai/ with extra modules that won't be in the scaffold manifest
     fs.mkdirSync('.ai', { recursive: true });
     fs.writeFileSync(path.join('.ai', 'agent.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Agent rules\n');
     fs.writeFileSync(path.join('.ai', 'persona.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Persona rules\n');
@@ -99,8 +112,14 @@ STATE:
     expect(orphanWarning).toBeDefined();
     expect(orphanWarning).toContain('agent.adf');
     expect(orphanWarning).toContain('persona.adf');
-    // Should suggest the register command
-    const registerHint = logs.find(l => l.includes('charter adf register'));
-    expect(registerHint).toBeDefined();
+
+    // In --yes mode, orphans should be auto-registered in manifest
+    const registerLog = logs.find(l => l.includes('Registered 2 module(s) as ON_DEMAND'));
+    expect(registerLog).toBeDefined();
+
+    // Verify manifest contains the orphan entries
+    const manifest = fs.readFileSync(path.join('.ai', 'manifest.adf'), 'utf-8');
+    expect(manifest).toContain('agent.adf');
+    expect(manifest).toContain('persona.adf');
   });
 });
