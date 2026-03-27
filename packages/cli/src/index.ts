@@ -22,6 +22,7 @@ import { loginCommand } from './commands/login';
 import { architectCommand } from './commands/architect';
 import { scaffoldCommand } from './commands/scaffold';
 import { runCommand } from './commands/run';
+import { scoreCommand } from './commands/score';
 import { recordTelemetryEvent } from './telemetry';
 import { getFlag } from './flags';
 import packageJson from '../package.json';
@@ -61,6 +62,7 @@ Usage:
                                    Write scaffold files from last build
   charter run <description>      Architect + scaffold in one step (animated)
   charter run --file <path>      Same, from spec file
+  charter score [--ai-dir <dir>] AI-readiness audit for the current repo
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
@@ -205,6 +207,9 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'run':
         exitCode = await runCommand(options, restArgs);
+        break;
+      case 'score':
+        exitCode = await scoreCommand(options, restArgs);
         break;
       default:
         throw new CLIError(`Unknown command: ${command}\n${HELP}`);
