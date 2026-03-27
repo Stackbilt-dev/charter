@@ -165,15 +165,22 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     console.log('');
   }
 
-  // Orphan registration prompt (interactive only)
+  // Orphan registration: auto-register in --yes mode, prompt interactively otherwise
   const orphans = adfResult.step.details.orphans as string[] || [];
-  if (orphans.length > 0 && !nonInteractive && options.format === 'text') {
-    const shouldRegister = await promptYesNo('  Register these modules now? (y/N) ');
+  if (orphans.length > 0) {
+    let shouldRegister = false;
+    if (nonInteractive) {
+      shouldRegister = true;
+    } else if (options.format === 'text') {
+      shouldRegister = await promptYesNo('  Register these modules now? (y/N) ');
+    }
     if (shouldRegister) {
       registerOrphansInManifest(path.join('.ai', 'manifest.adf'), orphans);
       updateModuleIndex('CLAUDE.md', '.ai');
-      console.log(`  Registered ${orphans.length} module(s) as ON_DEMAND in manifest.adf`);
-      console.log('');
+      if (options.format === 'text') {
+        console.log(`  Registered ${orphans.length} module(s) as ON_DEMAND in manifest.adf`);
+        console.log('');
+      }
     }
   }
 
@@ -514,6 +521,7 @@ function writeAdfScaffolds(
   const warnings: string[] = [];
   let backedUp = 0;
   let backupDir: string | undefined;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   for (const scaffold of getAdfScaffolds(preset)) {
     const targetPath = path.join(aiDir, scaffold.name);
@@ -530,14 +538,18 @@ function writeAdfScaffolds(
       continue;
     }
 
+    const byteCount = Buffer.byteLength(existing, 'utf-8');
+
     if (!force) {
-      warnings.push(`${label} has custom content; skipping scaffold overwrite`);
+      warnings.push(`${label} has custom content (${byteCount} bytes); skipping scaffold overwrite`);
       continue;
     }
 
     backupDir ||= path.join(aiDir, '.backup');
     fs.mkdirSync(backupDir, { recursive: true });
-    fs.copyFileSync(targetPath, path.join(backupDir, scaffold.name));
+    const backupName = `${scaffold.name}.${timestamp}`;
+    fs.copyFileSync(targetPath, path.join(backupDir, backupName));
+    warnings.push(`Backed up ${label} (${byteCount} bytes) → .ai/.backup/${backupName}`);
     backedUp++;
 
     fs.writeFileSync(targetPath, scaffold.content);

@@ -178,7 +178,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const presetFlag = getFlag(args, '--preset');
   const detectOnly = args.includes('--detect-only');
   const explicitForce = args.includes('--force');
-  const force = options.yes || explicitForce;
+  const force = explicitForce;
   const noDependencySync = args.includes('--no-dependency-sync');
 
   if (ciMode && ciMode !== 'github') {
@@ -645,7 +645,7 @@ export function detectStack(contexts: PackageContext[]): DetectionResult {
 export function loadPackageContexts(): PackageContext[] {
   const candidates = new Set<string>(['package.json']);
 
-  for (const dir of ['client', 'frontend', 'web']) {
+  for (const dir of ['client', 'frontend', 'web', 'worker', 'src', 'app']) {
     candidates.add(path.join(dir, 'package.json'));
   }
   candidates.add(path.join('apps', 'web', 'package.json'));
