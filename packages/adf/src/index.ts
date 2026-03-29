@@ -19,5 +19,6 @@ export type {
   TriggerMap,
   ClassifierConfig,
 } from './content-classifier';
+export { stripCharterSentinels, isCharterSentinel } from './sentinels';
 export * from './types';
 export * from './errors';

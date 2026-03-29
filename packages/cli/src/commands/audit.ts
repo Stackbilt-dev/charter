@@ -155,7 +155,23 @@ function generateAuditReport(
   const patternScore = Math.min(100, activePatterns.length * 20);
   const policyScore = policyCoverage.coveragePercent;
 
-  const overall = Math.round((trailerScore * 0.5) + (patternScore * 0.3) + (policyScore * 0.2));
+  // Scale trailer weight by project maturity (#73). Greenfield projects with
+  // few commits shouldn't be penalized for missing trailers on infra/CI commits.
+  // Weight ramps linearly: 0.2 at ≤20 commits → 0.5 at ≥100 commits.
+  const commitCount = commits.length;
+  const trailerWeight = commitCount >= 100
+    ? 0.5
+    : commitCount <= 20
+      ? 0.2
+      : 0.2 + 0.3 * ((commitCount - 20) / 80);
+  const remainingWeight = 1 - trailerWeight;
+  // Pattern and policy share the remaining weight in their original 3:2 ratio.
+  const patternWeight = remainingWeight * 0.6;
+  const policyWeight = remainingWeight * 0.4;
+
+  const overall = Math.round(
+    (trailerScore * trailerWeight) + (patternScore * patternWeight) + (policyScore * policyWeight),
+  );
   const scoreInputs = {
     coveragePercent,
     activePatterns: activePatterns.length,
@@ -196,9 +212,9 @@ function generateAuditReport(
         policyDocumentation: Math.round(policyScore),
       },
       criteria: {
-        trailerCoverage: 'coverage_percent * 1.5 (max 100). 67%+ coverage earns full points.',
-        patternDefinitions: 'active_pattern_count * 20 (max 100). 5+ active patterns earns full points.',
-        policyDocumentation: 'policy section coverage percent from config.audit.policyCoverage.requiredSections (max 100).',
+        trailerCoverage: `coverage_percent * 1.5 (max 100). 67%+ coverage earns full points. Weight: ${Math.round(trailerWeight * 100)}% (scales by commit count: 20% at ≤20 commits, 50% at ≥100).`,
+        patternDefinitions: `active_pattern_count * 20 (max 100). 5+ active patterns earns full points. Weight: ${Math.round(patternWeight * 100)}%.`,
+        policyDocumentation: `policy section coverage percent from config.audit.policyCoverage.requiredSections (max 100). Weight: ${Math.round(policyWeight * 100)}%.`,
       },
       recommendations: getRecommendations(scoreInputs),
     },
@@ -238,9 +254,13 @@ function printReport(report: AuditReport): void {
   }
   console.log('');
   console.log('  Score Breakdown');
-  console.log(`    Trailer coverage:     ${report.score.breakdown.trailerCoverage}/100 (50% weight)`);
-  console.log(`    Pattern definitions:  ${report.score.breakdown.patternDefinitions}/100 (30% weight)`);
-  console.log(`    Policy documentation: ${report.score.breakdown.policyDocumentation}/100 (20% weight)`);
+  // Extract weights from criteria strings (they include the dynamic weight %)
+  const twMatch = report.score.criteria.trailerCoverage.match(/Weight:\s*(\d+)%/);
+  const pwMatch = report.score.criteria.patternDefinitions.match(/Weight:\s*(\d+)%/);
+  const dwMatch = report.score.criteria.policyDocumentation.match(/Weight:\s*(\d+)%/);
+  console.log(`    Trailer coverage:     ${report.score.breakdown.trailerCoverage}/100 (${twMatch?.[1] ?? '50'}% weight)`);
+  console.log(`    Pattern definitions:  ${report.score.breakdown.patternDefinitions}/100 (${pwMatch?.[1] ?? '30'}% weight)`);
+  console.log(`    Policy documentation: ${report.score.breakdown.policyDocumentation}/100 (${dwMatch?.[1] ?? '20'}% weight)`);
   console.log('');
   console.log('  Scoring Criteria');
   console.log(`    - Trailer coverage: ${report.score.criteria.trailerCoverage}`);

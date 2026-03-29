@@ -16,6 +16,7 @@ import {
   parseMarkdownSections,
   isDuplicateItem,
   buildMigrationPlan,
+  stripCharterSentinels,
 } from '@stackbilt/adf';
 import type { AdfDocument, PatchOperation, MigrationItem, TriggerMap } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -269,7 +270,9 @@ function extractBeyondPointer(content: string, fileName: string): string {
 
   if (!template) return '';
 
-  const lines = content.split('\n');
+  // Strip charter-managed sentinel blocks before scanning for bloat.
+  // Without this, tidy treats the module index table as user-authored content.
+  const lines = stripCharterSentinels(content).split('\n');
   const bloatLines: string[] = [];
   let inEnvironmentSection = false;
   let inPointerHeader = true; // Start true — skip the pointer preamble
