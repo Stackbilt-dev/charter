@@ -5,6 +5,8 @@
  * and detects rule strength (imperative vs advisory).
  */
 
+import { stripCharterSentinels } from './sentinels';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -83,7 +85,9 @@ function detectStrength(text: string, config?: StrengthConfig): RuleStrength {
  * are classified as rules, code blocks, table rows, or prose.
  */
 export function parseMarkdownSections(input: string, config?: StrengthConfig): MarkdownSection[] {
-  const lines = input.split('\n');
+  // Strip charter-managed sentinel blocks (e.g., module index tables) before
+  // parsing so migrate/tidy never classify charter's own rendered output.
+  const lines = stripCharterSentinels(input).split('\n');
   const sections: MarkdownSection[] = [];
 
   let currentHeading = '';

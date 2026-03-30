@@ -58,6 +58,8 @@ npm install --save-dev @stackbilt/cli
 
 For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm install -g @stackbilt/cli`.
 
+> **WSL2 note:** If your project lives on the Windows filesystem (`/mnt/c/...`), pnpm may fail with `EACCES` permission errors due to WSL2/NTFS cross-filesystem limitations with atomic renames. Use `pnpm add --force` to work around this, or move your project to a Linux-native path (e.g., `~/projects/`) for best performance.
+
 **Free to try.** `charter login --key sb_live_xxx` to connect your [Stackbilt](https://stackbilt.dev) API key for full scaffold output.
 
 ## AI agent governance with ADF

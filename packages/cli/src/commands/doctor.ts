@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { loadPatterns } from '../config';
-import { parseAdf, parseManifest } from '@stackbilt/adf';
+import { parseAdf, parseManifest, stripCharterSentinels } from '@stackbilt/adf';
 import { isGitRepo } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
 
@@ -207,7 +207,9 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       }
 
       for (const { file, content } of pointerFiles) {
-        const lines = content.split('\n');
+        // Strip charter-managed sentinel blocks before scanning for bloat/keywords.
+        const strippedContent = stripCharterSentinels(content);
+        const lines = strippedContent.split('\n');
         const lineCount = lines.length;
         const fileWarnings: string[] = [];
 
@@ -279,11 +281,16 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       // Cold-start check: thin pointers with no architectural orientation (#41)
       // A pointer that's <15 lines and contains no stack/framework keywords gives
       // agents zero context about the project. Soft [info] — does not fail doctor.
+      //
+      // HOWEVER: if the file is a validated thin pointer to a populated .ai/
+      // directory with modules, the pointer IS doing its job — agents get context
+      // from .ai/ modules, not from the pointer file. Suppress in that case (#72).
       const STACK_KEYWORDS = /\b(react|vue|svelte|next|nuxt|astro|remix|angular|node|bun|deno|python|go|rust|postgres|mysql|sqlite|d1|prisma|drizzle|hono|express|fastify|trpc|cloudflare|vercel|railway|docker|kubernetes)\b/i;
+      const hasPopulatedModules = allModulePaths.length > 0;
       for (const { file, content } of pointerFiles) {
         const lineCount = content.split('\n').filter(l => l.trim()).length;
         const hasStackHint = STACK_KEYWORDS.test(content);
-        if (lineCount < 15 && !hasStackHint) {
+        if (lineCount < 15 && !hasStackHint && !hasPopulatedModules) {
           checks.push({
             name: 'adf cold start',
             status: 'INFO',
