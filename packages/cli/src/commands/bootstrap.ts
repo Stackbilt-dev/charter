@@ -53,7 +53,7 @@ import type { SourceMigrationResult } from './adf-migrate';
 // Types
 // ============================================================================
 
-type StepName = 'detect' | 'setup' | 'adf-init' | 'migrate' | 'install' | 'doctor';
+type StepName = 'detect' | 'setup' | 'adf-init' | 'migrate' | 'install' | 'populate' | 'doctor';
 type StepStatus = 'pass' | 'fail' | 'skip';
 
 interface StepResult {
@@ -111,7 +111,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const packageManager = detectResult.packageManager;
 
   if (options.format === 'text') {
-    console.log('[1/6] Detecting stack...');
+    console.log('[1/7] Detecting stack...');
     console.log(`  Stack: ${selectedPreset} (${detection.confidence} confidence)`);
     console.log(`  Monorepo: ${detection.monorepo ? 'yes' : 'no'}${detection.monorepo && detection.signals.hasPnpm ? ' (pnpm workspace)' : ''}`);
     if (detection.warnings.length > 0) {
@@ -130,7 +130,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += setupResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[2/6] Setting up governance...');
+    console.log('[2/7] Setting up governance...');
     for (const f of (setupResult.step.details.created as string[] || [])) {
       console.log(`  Created ${f}`);
     }
@@ -148,7 +148,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += adfResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[3/6] Initializing ADF context...');
+    console.log('[3/7] Initializing ADF context...');
     for (const f of (adfResult.step.details.files as string[] || [])) {
       console.log(`  Created ${f}`);
     }
@@ -192,7 +192,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += migrateResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[4/6] Migrating agent configs...');
+    console.log('[4/7] Migrating agent configs...');
     if (migrateResult.step.status === 'skip') {
       console.log('  Skipped (no migratable files)');
     } else if (migrateResult.step.details.dryRun) {
@@ -214,7 +214,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += installResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[5/6] Installing dependencies...');
+    console.log('[5/7] Installing dependencies...');
     if (skipInstall) {
       console.log('  Skipped (--skip-install)');
     } else {
@@ -236,14 +236,33 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   }
 
   // ========================================================================
-  // Phase 6: Doctor
+  // Phase 6: Populate (#89)
+  // ========================================================================
+  const populateResult = await runPopulatePhase(options);
+  result.steps.push(populateResult.step);
+  warnings += populateResult.step.warnings.length;
+
+  if (options.format === 'text') {
+    console.log('[6/7] Auto-populating ADF modules...');
+    const populated = populateResult.step.details.populated as number;
+    const skipped = populateResult.step.details.skipped as number;
+    if (populated > 0) {
+      console.log(`  Populated ${populated} module(s), skipped ${skipped} (already customized)`);
+    } else {
+      console.log('  No scaffold content to replace');
+    }
+    console.log('');
+  }
+
+  // ========================================================================
+  // Phase 7: Doctor
   // ========================================================================
   const doctorResult = runDoctorPhase(options, skipDoctor);
   result.steps.push(doctorResult.step);
   warnings += doctorResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[6/6] Running health check...');
+    console.log('[7/7] Running health check...');
     if (skipDoctor) {
       console.log('  Skipped (--skip-doctor)');
     } else {
@@ -263,11 +282,6 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   result.status = failCount === 0 ? 'success' : failCount < result.steps.length ? 'partial' : 'failure';
 
   // Build next steps
-  result.nextSteps.push({
-    cmd: 'charter adf populate  # auto-fill ADF files from codebase signals',
-    required: false,
-    reason: 'Populate ADF context from package.json, README, and stack detection',
-  });
   result.nextSteps.push({
     cmd: 'charter serve  # start MCP server for Claude Code / Cursor integration',
     required: false,
@@ -810,7 +824,54 @@ function detectPackageManagerFromLockfiles(): 'pnpm' | 'npm' | 'yarn' {
 }
 
 // ============================================================================
-// Phase 6: Doctor
+// Phase 6: Populate (#89)
+// ============================================================================
+
+async function runPopulatePhase(
+  options: CLIOptions,
+): Promise<{ step: StepResult }> {
+  const warnings: string[] = [];
+  const aiDir = '.ai';
+
+  if (!fs.existsSync(path.join(aiDir, 'manifest.adf'))) {
+    return {
+      step: {
+        name: 'populate',
+        status: 'skip',
+        details: { populated: 0, skipped: 0, reason: 'no manifest.adf' },
+        warnings,
+      },
+    };
+  }
+
+  try {
+    const { adfPopulateCommand } = require('./adf-populate');
+    const code = await adfPopulateCommand(options, ['--force']);
+
+    return {
+      step: {
+        name: 'populate',
+        status: code === 0 ? 'pass' : 'fail',
+        details: { populated: code === 0 ? 1 : 0, skipped: 0 },
+        warnings,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    warnings.push(`Populate failed (non-fatal): ${msg}`);
+    return {
+      step: {
+        name: 'populate',
+        status: 'pass', // non-fatal — bootstrap shouldn't fail on populate
+        details: { populated: 0, skipped: 0, error: msg },
+        warnings,
+      },
+    };
+  }
+}
+
+// ============================================================================
+// Phase 7: Doctor
 // ============================================================================
 
 function runDoctorPhase(
