@@ -234,11 +234,18 @@ export function classifyElement(
   let module = headingModule;
   let routingTrace: RoutingTrace | undefined;
 
-  // Content-based fallback: when heading routes to core.adf, check element
-  // content against ON_DEMAND trigger keywords from the manifest.
-  if (module === 'core.adf' && triggerMap) {
+  // Content-based routing: check element content against ON_DEMAND trigger
+  // keywords from the manifest. When heading routes to core.adf, always apply.
+  // When heading routes elsewhere, still check — if content scores ≥2 for a
+  // different module, let content routing win (#88: prevents on-demand modules
+  // from staying as empty scaffolds when content clearly belongs there).
+  if (triggerMap) {
     const { module: contentModule, phraseOverride, scores } = contentToModule(text, triggerMap);
-    module = contentModule;
+    if (module === 'core.adf') {
+      module = contentModule;
+    } else if (contentModule !== 'core.adf' && contentModule !== module && (scores[contentModule] ?? 0) >= 2) {
+      module = contentModule;
+    }
     routingTrace = { headingModule, phraseOverride, candidateScores: scores };
   }
 
@@ -266,16 +273,30 @@ export function classifyElement(
     };
   }
 
+  // Heading-context guard: documentation/reference headings should route to
+  // CONTEXT even when content contains imperative keywords (#86).
+  const isDocHeading = /\b(reference|constant|metric|format|example|glossary|api|endpoint|schema|overview|summary|description|note)\b/i.test(heading);
+
   // Route by element type and strength
   switch (element.type) {
     case 'rule': {
-      if (element.strength === 'imperative') {
+      if (element.strength === 'imperative' && !isDocHeading) {
         return {
           decision: 'MIGRATE',
           targetSection: 'CONSTRAINTS',
           targetModule: module,
           weight: 'load-bearing',
           reason: 'Imperative rule (NEVER/ALWAYS/MUST)',
+          routingTrace,
+        };
+      }
+      if (element.strength === 'imperative' && isDocHeading) {
+        return {
+          decision: 'MIGRATE',
+          targetSection: 'CONTEXT',
+          targetModule: module,
+          weight: 'advisory',
+          reason: 'Imperative keyword in documentation heading — treated as reference (#86)',
           routingTrace,
         };
       }

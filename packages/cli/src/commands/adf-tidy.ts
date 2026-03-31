@@ -310,12 +310,13 @@ function extractBeyondPointer(content: string, fileName: string): string {
 
     // Section detection
     if (trimmed.startsWith('## ')) {
-      if (trimmed === '## Environment') {
+      // Environment and Module Index are charter-managed retained sections — not bloat (#71)
+      if (trimmed === '## Environment' || trimmed === '## Module Index') {
         inEnvironmentSection = true;
         continue;
       } else {
         inEnvironmentSection = false;
-        // Non-Environment H2 section = bloat
+        // Non-retained H2 section = bloat
         bloatLines.push(line);
         continue;
       }

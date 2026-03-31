@@ -190,6 +190,20 @@ export function parseMarkdownSections(input: string, config?: StrengthConfig): M
       continue;
     }
 
+    // Numbered list items: lines starting with `1. `, `2. `, etc.
+    // Treated as individual rule elements to prevent prose accumulation (#87).
+    const numberedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (numberedMatch) {
+      flushTable();
+      const ruleText = numberedMatch[1];
+      currentElements.push({
+        type: 'rule',
+        content: ruleText,
+        strength: detectStrength(ruleText, config),
+      });
+      continue;
+    }
+
     // Table rows: buffer consecutive `| ... |` lines into a single table-block
     if (/^\s*\|.*\|/.test(line)) {
       tableLines.push(line.trim());
