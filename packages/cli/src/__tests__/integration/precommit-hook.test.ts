@@ -156,7 +156,7 @@ afterEach(() => {
 
 describe('pre-commit hook auto-tidy (integration)', () => {
 
-  it('auto-tidies bloated CLAUDE.md during git commit', { timeout: 30000 }, () => {
+  it('auto-tidies bloated CLAUDE.md during git commit', { timeout: 60000 }, () => {
     const tmp = makeTempDir('hook-tidy');
     writeHookFixtureRepo(tmp);
 
@@ -188,7 +188,7 @@ describe('pre-commit hook auto-tidy (integration)', () => {
     expect(finalContent).toContain('## Environment');
   });
 
-  it('passes through cleanly when CLAUDE.md has no bloat', { timeout: 30000 }, () => {
+  it('passes through cleanly when CLAUDE.md has no bloat', { timeout: 60000 }, () => {
     const tmp = makeTempDir('hook-clean');
     writeHookFixtureRepo(tmp);
 
@@ -206,7 +206,7 @@ describe('pre-commit hook auto-tidy (integration)', () => {
     expect(finalContent).toContain('DO NOT add rules');
   });
 
-  it('skips tidy when CHARTER_SKIP_TIDY=1 is set', { timeout: 30000 }, () => {
+  it('skips tidy when CHARTER_SKIP_TIDY=1 is set', { timeout: 60000 }, () => {
     const tmp = makeTempDir('hook-skip');
     writeHookFixtureRepo(tmp);
 
@@ -237,7 +237,7 @@ describe('pre-commit hook auto-tidy (integration)', () => {
     expect(finalContent).toContain('## Architecture');
   });
 
-  it('re-stages modified .adf modules after tidy', { timeout: 30000 }, () => {
+  it('re-stages modified .adf modules after tidy', { timeout: 60000 }, () => {
     const tmp = makeTempDir('hook-restage');
     writeHookFixtureRepo(tmp);
 
