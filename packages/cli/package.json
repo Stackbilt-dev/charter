@@ -39,7 +39,7 @@
     "build": "pnpm exec tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@stackbilt/adf": "workspace:^",
     "@stackbilt/classify": "workspace:^",
     "@stackbilt/core": "workspace:^",
