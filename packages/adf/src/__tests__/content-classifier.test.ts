@@ -340,9 +340,12 @@ describe('routing trace (#46)', () => {
     expect('qa.adf' in scores).toBe(true);
   });
 
-  it('does not attach routingTrace when heading-based routing resolves without fallback', () => {
-    // Heading "UI Components" resolves to frontend.adf directly — no content fallback runs
+  it('attaches routingTrace even when heading-based routing resolves without fallback (#88)', () => {
+    // Heading "UI Components" resolves to frontend.adf directly — content routing still
+    // runs for override checks (#88), so routingTrace is always populated when triggerMap
+    // is provided.
     const result = classifyElement(rule('Use PascalCase'), 'UI Components', traceMap);
-    expect(result.routingTrace).toBeUndefined();
+    expect(result.routingTrace).toBeDefined();
+    expect(result.routingTrace!.headingModule).toBe('frontend.adf');
   });
 });
