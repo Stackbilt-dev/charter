@@ -125,7 +125,7 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
     if (seedStr) request.seed = parseInt(seedStr, 10);
 
     scaffoldPromise = client.build(request).then(r => ({
-      files: Object.entries(r.scaffold).map(([p, content]) => ({ path: p, content })),
+      files: Object.entries(r.scaffold).map(([p, content]) => ({ path: p, content, role: 'scaffold' as const })),
       fileSource: 'engine' as const,
       nextSteps: ['npm install', 'npm run dev'],
       seed: r.seed,

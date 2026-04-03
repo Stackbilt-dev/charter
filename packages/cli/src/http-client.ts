@@ -4,6 +4,12 @@
  * Uses native fetch() (Node 18+). Zero external dependencies.
  */
 
+import type {
+  ScaffoldFileType,
+  GovernanceDocsType,
+  PromptContextType,
+} from '@stackbilt/contracts/dist/scaffold-response';
+
 const DEFAULT_BASE_URL = process.env.STACKBILT_ENGINE_URL ?? 'https://api.stackbilt.dev/engine';
 const GATEWAY_BASE_URL = 'https://mcp.stackbilt.dev';
 
@@ -65,11 +71,17 @@ export interface BuildResult {
   };
 }
 
-export interface ScaffoldFile {
-  path: string;
-  content: string;
-}
+/** Canonical scaffold file shape — sourced from @stackbilt/contracts. */
+export type ScaffoldFile = ScaffoldFileType;
 
+/**
+ * CLI-specific superset of MaterializerResult.
+ *
+ * Includes the contract's shape (files with role, nextSteps, promptContext,
+ * governance) plus CLI-only fields (fileSource, seed, receipt, facts).
+ * promptContext and governance are optional because the engine fallback
+ * path does not produce them.
+ */
 export interface ScaffoldResult {
   files: ScaffoldFile[];
   fileSource: 'engine' | 'basic' | 'none';
@@ -77,6 +89,8 @@ export interface ScaffoldResult {
   seed?: number;
   receipt?: string;
   facts?: Record<string, unknown>;
+  promptContext?: PromptContextType;
+  governance?: GovernanceDocsType;
 }
 
 export interface HealthResponse {
