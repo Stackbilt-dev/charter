@@ -21,3 +21,5 @@ Rules:
 3. **Strict semver** — patch for fixes, minor for new features, major for breaking changes
 4. **Tests travel with code** — every public export must have test coverage
 5. **Validate at boundaries** — all external API responses validated before returning to consumers
+
+Full policy: `stackbilt_llc/policies/oss-infrastructure-update-policy.md`
