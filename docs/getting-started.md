@@ -22,6 +22,8 @@ Global (optional, puts `charter` on your PATH):
 npm install -g @stackbilt/cli
 ```
 
+> **WSL2 users:** If your project lives on the Windows filesystem (`/mnt/c/...`), see [WSL2 + Windows Filesystem](./wsl2-install.md) for path considerations, pnpm workarounds, and line-ending setup.
+
 ## Bootstrap a Repo
 
 ```bash
@@ -96,4 +98,5 @@ npx charter adf evidence --auto-measure --ci --format json
 
 - [CLI Reference](/cli-reference) — full command surface
 - [CI Integration](/ci-integration) — GitHub Actions workflow with evidence gating
+- [WSL2 + Windows Filesystem](/wsl2-install) — installation and path guidance for WSL2
 - [Ecosystem](/ecosystem) — how Charter fits into the Stackbilt platform
