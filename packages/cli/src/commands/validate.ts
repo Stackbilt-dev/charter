@@ -6,12 +6,13 @@
  */
 
 import type { CLIOptions } from '../index';
-import { EXIT_CODE } from '../index';
+import { CLIError, EXIT_CODE } from '../index';
 import type { GitCommit } from '@stackbilt/types';
 import { loadConfig } from '../config';
 import { parseAllTrailers } from '@stackbilt/git';
 import { assessCommitRisk, generateSuggestions } from '@stackbilt/git';
 import { runGit, hasCommits, getGitErrorMessage, parseCommitMetadata, parseChangedFilesByCommit, getRecentCommitRange } from '../git-helpers';
+import { getFlag } from '../flags';
 
 interface LocalValidationResult {
   status: 'PASS' | 'WARN' | 'FAIL';
@@ -66,6 +67,19 @@ interface GitCommitLoadResult {
 }
 
 export async function validateCommand(options: CLIOptions, args: string[]): Promise<number> {
+  // Policy dispatch: --policy typed-data-access runs the ontology check
+  // instead of the default trailer validation.
+  const policy = getFlag(args, '--policy');
+  if (policy === 'typed-data-access') {
+    const { runOntologyPolicyCheck } = await import('./validate-ontology');
+    return runOntologyPolicyCheck(options, args);
+  }
+  if (policy && policy !== 'typed-data-access') {
+    throw new CLIError(
+      `Unknown policy: ${policy}. Supported: typed-data-access`
+    );
+  }
+
   const config = loadConfig(options.configPath);
 
   if (!hasCommits()) {
