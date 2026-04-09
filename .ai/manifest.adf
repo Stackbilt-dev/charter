@@ -16,6 +16,7 @@ ADF: 0.1
   - governance.adf (Triggers on: validate, drift, audit, trailer, risk, governance)
   - classifier.adf (Triggers on: classifier, routing, auto-route, adf add, classify, rule placement)
   - analysis.adf (Triggers on: blast, surface, dependency graph, blast radius, route extraction, schema extraction)
+  - typed-data-access.adf (Triggers on: tenant, user, subscription, quota, credit, mrr, pii, sensitivity, data registry, ontology, disambiguation, DATA_AUTHORITY, raw D1, service boundary, auth_scoped, billing_critical)
 
 💰 BUDGET:
   MAX_TOKENS: 4000

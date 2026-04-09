@@ -24,6 +24,17 @@ import { adfMetricsCommand } from './adf-metrics';
 import { adfTidyCommand } from './adf-tidy';
 import { adfPopulateCommand } from './adf-populate';
 import { adfContextCommand } from './adf-context';
+import {
+  NAMED_MODULE_SCAFFOLDS,
+  NAMED_MODULE_DEFAULT_TRIGGERS,
+} from './adf-named-scaffolds';
+
+// Re-export named-scaffold registry for programmatic consumers and tests.
+export {
+  TYPED_DATA_ACCESS_SCAFFOLD,
+  NAMED_MODULE_SCAFFOLDS,
+  NAMED_MODULE_DEFAULT_TRIGGERS,
+} from './adf-named-scaffolds';
 
 // ============================================================================
 // Scaffold Content
@@ -602,7 +613,12 @@ function adfCreate(options: CLIOptions, args: string[]): number {
 
   const manifestDoc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
   const sectionKey = load === 'default' ? 'DEFAULT_LOAD' : 'ON_DEMAND';
-  const triggers = parseTriggers(getFlag(args, '--triggers'));
+  const explicitTriggers = parseTriggers(getFlag(args, '--triggers'));
+  // Named-module modules can ship default triggers; explicit --triggers wins.
+  const moduleName = path.basename(moduleRelPath, '.adf');
+  const triggers = explicitTriggers.length > 0
+    ? explicitTriggers
+    : (NAMED_MODULE_DEFAULT_TRIGGERS[moduleName] ?? []);
   const manifestEntry = load === 'on-demand' && triggers.length > 0
     ? `${moduleRelPath} (Triggers on: ${triggers.join(', ')})`
     : moduleRelPath;
@@ -762,6 +778,14 @@ function parseModulePathFromEntry(entry: string): string {
 
 function buildModuleScaffold(modulePath: string): string {
   const name = path.basename(modulePath, '.adf');
+
+  // Named-module registry: rich scaffolds for canonical policy modules.
+  // Falls back to the generic placeholder below for user-defined modules.
+  const named = NAMED_MODULE_SCAFFOLDS[name];
+  if (named) {
+    return named;
+  }
+
   return `ADF: 0.1
 \u{1F3AF} TASK: ${name} module
 
