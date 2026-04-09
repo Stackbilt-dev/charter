@@ -65,6 +65,32 @@ export interface CharterConfig {
       }>;
     };
   };
+
+  /**
+   * Ontology / typed-data-access policy settings.
+   * Used by `charter validate --policy typed-data-access` to load a data
+   * registry file that declares canonical business concepts, sensitivity
+   * tiers, and aliases. See Stackbilt-dev/charter#69.
+   */
+  ontology?: {
+    /**
+     * Path to a data-registry YAML file. Absolute, or relative to the
+     * .charter/ config directory. When unset, defaults to
+     * `.charter/data-registry.yaml`.
+     */
+    registry?: string;
+    /**
+     * Alias tokens to suppress from violation reporting in this repo.
+     * Useful when a generic alias (e.g., `token`, `key`, `usage`) collides
+     * with common programming vocabulary in this codebase. Each entry is
+     * matched against normalized tokens (lowercased, underscores removed).
+     *
+     * Does not affect canonical name matching — only silences the specific
+     * alias-form collision. Prefer fixing the registry upstream when the
+     * alias is globally noisy; use this list for repo-local overrides.
+     */
+    ignoreAliases?: string[];
+  };
 }
 
 const DEFAULT_CONFIG: CharterConfig = {
@@ -149,6 +175,7 @@ export function loadConfig(configPath: string): CharterConfig {
           requiredSections: parsed.audit?.policyCoverage?.requiredSections || DEFAULT_CONFIG.audit.policyCoverage.requiredSections,
         },
       },
+      ontology: parsed.ontology,
     };
   } catch (err) {
     console.warn(`Warning: Failed to parse ${configFile}, using defaults`);
