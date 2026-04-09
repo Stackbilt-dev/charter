@@ -1,7 +1,7 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: v0.8.0 ready with #50-53 folded in. Hybrid CLAUDE.md, auto-loading, parser fixes, preset-aware scaffolding.
-  NEXT: M3 — Guided Authoring (charter adf add --rule --auto-route --dry-run). Requires focused routing engine design session.
-  BLOCKED_ON: Routing engine classifier design — must grow from the rule-routing decision tree (packages/adf/README.md), not be bolted on.
-  COMPLETED: Phase 1-7, M0-M2, #50 (bootstrap UX), #51 (migrate parser), #52 (auto-loading), #53 (CLAUDE.md coexistence)
+  CURRENT: v0.10.0 published to npm (2026-04-09) — all 11 `@stackbilt/*` packages live. Publish identity: stackbilt-kovermier. Added blast + surface subsystems (deterministic codebase analysis, zero-LLM). First cross-linked consumer is cc-taskrunner 1.5.0 via CC_BLAST_* env var gate.
+  NEXT: #94 (blast: exclude .claude/worktrees/ ghost paths — Claude Code consumers see inflated blast radius from ephemeral worktree clones). #90 (package ecosystem — configurable dependency orchestration via charter config). #69 (typed data access disambiguation policy).
+  BLOCKED_ON: Nothing critical. #94 is a quick win, #90 + #69 are larger design-first efforts.
+  COMPLETED: Phase 1-7, M0-M2, #50-53 (bootstrap UX, migrate parser, auto-loading, CLAUDE.md coexistence), blast + surface subsystems (new in 0.10.0), first npm publish of @stackbilt/blast + @stackbilt/surface, vendor fix for cli scaffold-response types (#93 — dropped file: dep on unpublished @stackbilt/contracts to unblock publish).

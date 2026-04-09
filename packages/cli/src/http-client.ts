@@ -71,7 +71,7 @@ export interface BuildResult {
   };
 }
 
-/** Canonical scaffold file shape — sourced from @stackbilt/contracts. */
+/** Canonical scaffold file shape — vendored from @stackbilt/contracts (see ./types/scaffold-contract-types). */
 export type ScaffoldFile = ScaffoldFileType;
 
 /**
