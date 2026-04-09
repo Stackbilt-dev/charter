@@ -1,0 +1,49 @@
+ADF: 0.1
+
+🎯 TASK: Typed data access and ontology enforcement policy
+
+📋 CONTEXT:
+  - Business concepts (tenant, user, subscription, quota, credit, mrr, etc.) are defined in a canonical data registry — the single source of truth for ownership, sensitivity, and access shape across the ecosystem
+  - Reference registry location: Stackbilt-dev/stackbilt_llc/policies/data-registry.yaml (22+ concepts, 6 sensitivity tiers)
+  - Each concept declares: owner service, D1 table, sensitivity tier, definition, aliases, rpc_method, mcp_tool
+  - Consumer services derive their KNOWN_CONCEPTS and alias maps from the registry at build time (see aegis-web/src/lib/data-registry.ts pattern — compiled-const snapshot)
+  - AEGIS disambiguation firewall halts on undefined concepts rather than guessing
+  - CodeBeast DATA_AUTHORITY sensitivity class escalates raw D1 access to owned tables
+  - This charter policy module ties the three mechanisms together: registry → enforcement → disambiguation
+
+🔐 SENSITIVITY TIERS [load-bearing]:
+  - public            — readable from any service, no auth required (e.g., blog_post)
+  - service_internal  — readable/writable only by the owning service, raw D1 access is fine within the owner (e.g., conversation, memory, llm_trace)
+  - cross_service_rpc — accessible via declared RPC method or Service Binding, never raw D1 from a non-owning service (e.g., tenant, quota, generation)
+  - pii_scoped        — accessible only via owning service + audit_log entry required at the call site (e.g., user)
+  - billing_critical  — writable only by the owning service plus the Stripe webhook handler; never leaves the owning service boundary even via RPC (e.g., subscription, mrr)
+  - secrets           — never leaves the owning service boundary under any circumstance (e.g., api_key)
+
+⚠ CONSTRAINTS [load-bearing]:
+  - New code referencing a business concept MUST check the canonical registry first; terms not in the registry or its aliases MUST be added before the code lands
+  - Non-owning services reading or writing `cross_service_rpc` concepts MUST use the declared rpc_method or mcp_tool — raw D1 binding access to another service's table is a DATA_AUTHORITY violation
+  - `pii_scoped` access requires an audit_log entry at the call site — no silent reads
+  - `billing_critical` and `secrets` tiers NEVER cross the owning service boundary, even via RPC — treat as in-process only
+  - When encountering an undefined data concept in requirements, tasks, or user prompts, HALT and ask for clarification rather than guessing shape, ownership, or sensitivity
+  - Aliases (e.g., "credits" for "quota") are semantically equivalent; prefer the canonical form in new code, accept aliases in user-facing copy
+  - Registry updates MUST come before consumer code updates — the source of truth leads, consumers follow
+  - When promoting a concept to a higher sensitivity tier (e.g., service_internal → cross_service_rpc), all existing consumers of raw D1 access to that concept must migrate to RPC in the same change set
+
+📖 ADVISORY:
+  - Check the registry before reaching for a new type definition: the concept may already exist with a canonical shape
+  - Use `charter surface --format json` to discover what D1 tables a service currently exposes — cross-reference against registry ownership
+  - Unregistered-concept warnings from `charter validate` are early signals that ontology drift is beginning; address them immediately
+  - The disambiguation protocol is load-bearing for autonomous agents (AEGIS, cc-taskrunner, etc.) — these systems cannot safely guess business term semantics, and ambiguity compounds across sessions
+
+📊 METRICS:
+  REGISTRY_PATH: stackbilt_llc/policies/data-registry.yaml
+  REGISTRY_REPO: Stackbilt-dev/stackbilt_llc
+  SENSITIVITY_TIERS: 6
+  DOCUMENTED_CONCEPTS: 22
+  CONSUMER_PATTERN: web/src/lib/data-registry.ts (compile-from-yaml snapshot)
+
+🔗 REFERENCES:
+  - Stackbilt-dev/charter#69 — typed data access policy umbrella issue
+  - codebeast#9 — DATA_AUTHORITY sensitivity class (enforcement side)
+  - Stackbilt-dev/aegis#344 — disambiguation firewall (runtime halt mechanism)
+  - Stackbilt-dev/aegis#334 — adversarial reasoning (complementary quality layer)
