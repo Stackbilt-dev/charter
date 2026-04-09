@@ -3,7 +3,7 @@ import {
   NAMED_MODULE_SCAFFOLDS,
   NAMED_MODULE_DEFAULT_TRIGGERS,
   TYPED_DATA_ACCESS_SCAFFOLD,
-} from '../commands/adf';
+} from '../commands/adf-named-scaffolds';
 
 describe('NAMED_MODULE_SCAFFOLDS registry', () => {
   it('contains typed-data-access scaffold entry', () => {
