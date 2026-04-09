@@ -248,14 +248,33 @@ export function parseInlineFlowSequence(raw: string): string[] {
 
 /**
  * Strip common comment syntax from a line before token extraction.
- * Supports `// ...` (JS/TS/C), `# ...` (YAML/Python/shell/TOML),
- * `-- ...` (SQL), and inline `/* ... *\/` (JS/C). Multi-line block
- * comments are left to the caller since we process one line at a time.
+ * Supports:
+ *   - `// ...` (JS/TS/C)
+ *   - `# ...` (YAML/Python/shell/TOML)
+ *   - `-- ...` (SQL)
+ *   - Inline `/* ... *\/` (JS/C)
+ *   - JSDoc/block-comment interior lines starting with ` * ` or `/** `
  *
  * Also strips string literals (single, double, backtick-quoted) to avoid
  * matching business terms that happen to appear in user-facing copy.
+ *
+ * Note: multi-line block comments without a leading `*` on each line are
+ * not fully handled — we process lines independently, so content between
+ * an opening `/*` and closing `*\/` on separate lines without interior
+ * leading stars will still be tokenized. In practice this is rare since
+ * most block-comment conventions (JSDoc, TSDoc, JavaDoc) prefix continuation
+ * lines with `*`.
  */
 export function stripCommentsAndStrings(line: string): string {
+  // JSDoc/block-comment interior line: leading whitespace + `*` + content.
+  // Also catches the `/**` opening line. Matches `\t* text`, `   * text`,
+  // `/** text`, and similar patterns. Does not match bare `*` (multiplication).
+  if (/^\s*(?:\/\*+|\*+)(?:\s|$)/.test(line)) {
+    // Keep any non-comment content after a closing */ on the same line
+    const closeIdx = line.indexOf('*/');
+    return closeIdx >= 0 ? line.slice(closeIdx + 2) : '';
+  }
+
   // Remove inline block comments /* ... */
   let result = line.replace(/\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\//g, ' ');
   // Remove trailing // ... line comments (must not be inside a URL like http://)
@@ -301,11 +320,17 @@ export function extractIdentifiersFromLine(line: string): string[] {
  *
  * Caller is responsible for filtering the diff to NEW lines only if that's
  * the desired scope. This function treats every input line as in-scope.
+ *
+ * `options.ignoreAliasViolations` suppresses ALL alias warnings (reports
+ * references but produces no violations). `options.ignoredAliasTokens`
+ * suppresses specific alias tokens — normalized form, same as the
+ * aliasTokens set. Useful for repo-local overrides of generic aliases
+ * (token, key, usage) that collide with common programming vocabulary.
  */
 export function checkOntologyDiff(
   changedLines: OntologyChangedLine[],
   registry: OntologyRegistry,
-  options: { ignoreAliasViolations?: boolean } = {}
+  options: { ignoreAliasViolations?: boolean; ignoredAliasTokens?: Set<string> } = {}
 ): OntologyCheckResult {
   const references: OntologyReference[] = [];
   const violations: OntologyViolation[] = [];
@@ -350,18 +375,24 @@ export function checkOntologyDiff(
         // doesn't count as a violation — it's the canonical itself.
         if (normalizeToken(canonicalName) === token) continue;
 
-        references.push({
-          identifier: token,
-          canonical: canonicalName,
-          owner: concept.owner,
-          sensitivity: concept.sensitivity,
-          isAlias: true,
-          file: line.file,
-          line: line.line,
-        });
-        referencedConcepts.set(canonicalName, (referencedConcepts.get(canonicalName) ?? 0) + 1);
+        // Per-repo ignore list: suppress noisy aliases that collide with
+        // common programming vocabulary (token, key, usage, etc.)
+        const isIgnored = options.ignoredAliasTokens?.has(token) ?? false;
 
-        if (!options.ignoreAliasViolations) {
+        if (!isIgnored) {
+          references.push({
+            identifier: token,
+            canonical: canonicalName,
+            owner: concept.owner,
+            sensitivity: concept.sensitivity,
+            isAlias: true,
+            file: line.file,
+            line: line.line,
+          });
+          referencedConcepts.set(canonicalName, (referencedConcepts.get(canonicalName) ?? 0) + 1);
+        }
+
+        if (!options.ignoreAliasViolations && !isIgnored) {
           violations.push({
             type: 'NON_CANONICAL_ALIAS',
             severity: 'WARN',

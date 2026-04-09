@@ -44,5 +44,19 @@
         }
       ]
     }
+  },
+  "ontology": {
+    "ignoreAliases": [
+      "token",
+      "tokens",
+      "key",
+      "keys",
+      "usage",
+      "audit",
+      "tier",
+      "plan",
+      "limit",
+      "limits"
+    ]
   }
 }

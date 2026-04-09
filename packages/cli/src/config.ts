@@ -79,6 +79,17 @@ export interface CharterConfig {
      * `.charter/data-registry.yaml`.
      */
     registry?: string;
+    /**
+     * Alias tokens to suppress from violation reporting in this repo.
+     * Useful when a generic alias (e.g., `token`, `key`, `usage`) collides
+     * with common programming vocabulary in this codebase. Each entry is
+     * matched against normalized tokens (lowercased, underscores removed).
+     *
+     * Does not affect canonical name matching — only silences the specific
+     * alias-form collision. Prefer fixing the registry upstream when the
+     * alias is globally noisy; use this list for repo-local overrides.
+     */
+    ignoreAliases?: string[];
   };
 }
 

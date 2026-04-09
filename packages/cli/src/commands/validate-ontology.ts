@@ -15,6 +15,7 @@ import * as path from 'node:path';
 import {
   parseOntologyRegistry,
   checkOntologyDiff,
+  normalizeToken,
   type OntologyRegistry,
   type OntologyChangedLine,
   type OntologyCheckResult,
@@ -56,10 +57,11 @@ interface OntologyValidateOutput {
 
 export function runOntologyPolicyCheck(options: CLIOptions, args: string[]): number {
   const ciMode = options.ciMode;
+  const config = loadConfig(options.configPath);
 
   // ---- Load registry --------------------------------------------------------
 
-  const registryInfo = resolveRegistryPath(args, options);
+  const registryInfo = resolveRegistryPath(args, options, config);
   let registry: OntologyRegistry;
   try {
     const yamlText = fs.readFileSync(registryInfo.path, 'utf-8');
@@ -78,7 +80,7 @@ export function runOntologyPolicyCheck(options: CLIOptions, args: string[]): num
   let changedLines: OntologyChangedLine[];
   const scannedFiles = new Set<string>();
   try {
-    changedLines = collectChangedLines(range, scannedFiles);
+    changedLines = collectChangedLines(range, scannedFiles, args);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new CLIError(
@@ -87,9 +89,17 @@ export function runOntologyPolicyCheck(options: CLIOptions, args: string[]): num
     );
   }
 
+  // ---- Resolve per-repo alias ignore list -----------------------------------
+
+  const ignoredAliasTokens = new Set<string>(
+    (config.ontology?.ignoreAliases ?? []).map(normalizeToken)
+  );
+
   // ---- Run the check --------------------------------------------------------
 
-  const result = checkOntologyDiff(changedLines, registry);
+  const result = checkOntologyDiff(changedLines, registry, {
+    ignoredAliasTokens: ignoredAliasTokens.size > 0 ? ignoredAliasTokens : undefined,
+  });
 
   // ---- Format output --------------------------------------------------------
 
@@ -124,14 +134,14 @@ export function runOntologyPolicyCheck(options: CLIOptions, args: string[]): num
 
 function resolveRegistryPath(
   args: string[],
-  options: CLIOptions
+  options: CLIOptions,
+  config: ReturnType<typeof loadConfig>
 ): { path: string; source: 'explicit-flag' | 'config' | 'default' } {
   const explicitFlag = getFlag(args, '--registry');
   if (explicitFlag) {
     return { path: path.resolve(explicitFlag), source: 'explicit-flag' };
   }
 
-  const config = loadConfig(options.configPath);
   const configured = config.ontology?.registry;
   if (configured && configured.length > 0) {
     // Resolve relative to the .charter/ config dir
@@ -175,12 +185,38 @@ function getDiffRange(args: string[]): string {
 }
 
 /**
+ * Default skip patterns: test files and fixture directories whose alias
+ * content is expected and shouldn't trigger violations. Controlled by
+ * `--scan-tests` (opts back in) and `--include-fixtures` flags.
+ */
+const DEFAULT_SKIP_PATTERNS = [
+  /(?:^|\/)__tests__\//,
+  /(?:^|\/)__fixtures__\//,
+  /(?:^|\/)__mocks__\//,
+  /\.test\.(?:ts|tsx|js|jsx|mjs|cjs)$/,
+  /\.spec\.(?:ts|tsx|js|jsx|mjs|cjs)$/,
+  /(?:^|\/)fixtures\//,
+  /(?:^|\/)test-fixtures\//,
+];
+
+function shouldSkipFile(filePath: string, args: string[]): boolean {
+  if (args.includes('--scan-tests')) return false;
+  return DEFAULT_SKIP_PATTERNS.some(re => re.test(filePath));
+}
+
+/**
  * Run git diff --unified=0 for the given range and return added lines
  * (lines starting with + in the hunk body, excluding the +++ file header).
+ *
+ * Files matching DEFAULT_SKIP_PATTERNS (test files, fixture dirs) are
+ * filtered out unless `--scan-tests` is passed. Test fixtures intentionally
+ * contain alias strings (e.g., `aliases: [workspace, organization]` in a
+ * registry YAML fixture) and should not count as production alias usage.
  */
 function collectChangedLines(
   range: string,
-  scannedFilesOut: Set<string>
+  scannedFilesOut: Set<string>,
+  args: string[] = []
 ): OntologyChangedLine[] {
   // --unified=0 yields hunks with no context lines, so every +line is a real
   // added line. Exclude the "+++ b/file" header line explicitly.
@@ -189,6 +225,7 @@ function collectChangedLines(
   const lines: OntologyChangedLine[] = [];
   let currentFile: string | null = null;
   let currentAddLine = 0;
+  let skipCurrentFile = false;
 
   for (const raw of diffOutput.split(/\r?\n/)) {
     // File header: "+++ b/path/to/file.ts"
@@ -196,9 +233,13 @@ function collectChangedLines(
       const match = raw.match(/^\+\+\+ (?:b\/)?(.+)$/);
       if (match && match[1] !== '/dev/null') {
         currentFile = match[1];
-        scannedFilesOut.add(currentFile);
+        skipCurrentFile = shouldSkipFile(currentFile, args);
+        if (!skipCurrentFile) {
+          scannedFilesOut.add(currentFile);
+        }
       } else {
         currentFile = null;
+        skipCurrentFile = false;
       }
       continue;
     }
@@ -224,7 +265,7 @@ function collectChangedLines(
     }
 
     // Added line: "+content" (not "+++" which is caught above)
-    if (raw.startsWith('+') && currentFile) {
+    if (raw.startsWith('+') && currentFile && !skipCurrentFile) {
       const text = raw.slice(1);
       lines.push({ file: currentFile, line: currentAddLine, text });
       currentAddLine++;

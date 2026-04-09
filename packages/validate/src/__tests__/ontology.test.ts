@@ -321,6 +321,37 @@ describe('stripCommentsAndStrings', () => {
     const result = stripCommentsAndStrings('#include <header>');
     expect(result).toContain('#include');
   });
+
+  it('strips JSDoc interior lines starting with * ', () => {
+    const result = stripCommentsAndStrings('   * tiers and sensitivity levels.');
+    // Whole line is treated as comment
+    const tokens = extractIdentifiersFromLine('   * tiers and sensitivity levels.');
+    expect(tokens).not.toContain('tiers');
+    expect(tokens).not.toContain('sensitivity');
+  });
+
+  it('strips JSDoc opener lines (/** ...)', () => {
+    const tokens = extractIdentifiersFromLine('/** Describes tenant and quota.');
+    expect(tokens).not.toContain('tenant');
+    expect(tokens).not.toContain('quota');
+  });
+
+  it('does not strip multiplication lines like 2 * tier', () => {
+    // Leading `*` only triggers if it's the first non-whitespace char
+    const tokens = extractIdentifiersFromLine('const result = 2 * tier;');
+    expect(tokens).toContain('tier');
+    expect(tokens).toContain('result');
+  });
+
+  it('handles block comment closer on same line as content', () => {
+    const result = stripCommentsAndStrings(' * close comment */ const tenant = 1;');
+    // Content after */ is preserved
+    const tokens = extractIdentifiersFromLine(' * close comment */ const tenant = 1;');
+    expect(tokens).toContain('tenant');
+    // The pre-*/ text is stripped
+    expect(tokens).not.toContain('close');
+    expect(tokens).not.toContain('comment');
+  });
 });
 
 // ============================================================================
