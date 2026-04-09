@@ -60,6 +60,22 @@ app.get('/users', h);
     expect(routes[0].prefix).toBe('/api/v1');
   });
 
+  it('ignores route patterns inside comments', () => {
+    const src = `
+import { Hono } from 'hono';
+const app = new Hono();
+// Example usage: app.get('/fake-from-comment', handler)
+/* Another example:
+ *   app.post('/also-fake', h);
+ *   router.delete('/nope', h);
+ */
+app.get('/real', handler);
+`;
+    const routes = extractRoutes(src, 'app.ts');
+    expect(routes).toHaveLength(1);
+    expect(routes[0].path).toBe('/real');
+  });
+
   it('handles router. prefix', () => {
     const src = `
 const router = new Hono();
@@ -156,6 +172,17 @@ app.post('/api/users', createUser);
     expect(surface.summary.schemaTableCount).toBe(1);
     expect(surface.summary.routesByFramework.hono).toBe(2);
     expect(surface.schemas[0].name).toBe('users');
+  });
+
+  it('ignores test/spec files and __tests__ dirs', () => {
+    write('src/app.ts', `import { Hono } from 'hono';\napp.get('/real', h);`);
+    write('src/app.test.ts', `app.get('/fake-from-test', h);`);
+    write('src/__tests__/fixtures.ts', `app.get('/fake-from-tests-dir', h);`);
+    write('src/handler.spec.ts', `app.post('/fake-from-spec', h);`);
+
+    const surface = extractSurface({ root: tmpRoot });
+    expect(surface.summary.routeCount).toBe(1);
+    expect(surface.routes[0].path).toBe('/real');
   });
 
   it('ignores node_modules and dist', () => {

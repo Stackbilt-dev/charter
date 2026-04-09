@@ -74,6 +74,30 @@ describe('buildGraph', () => {
     expect(graph.imports.get(consumerPath)?.has(libIndex)).toBe(true);
   });
 
+  it('resolves alias to package dir via src/index.ts fallback', () => {
+    // Simulates monorepo layout: @stackbilt/types → packages/types
+    write('packages/types/src/index.ts', `export type X = number;`);
+    write('packages/cli/src/index.ts', `import type { X } from '@stackbilt/types';`);
+
+    const graph = buildGraph(tmpRoot, { aliases: { '@stackbilt/types': 'packages/types' } });
+    const consumerPath = path.join(tmpRoot, 'packages', 'cli', 'src', 'index.ts');
+    const libPath = path.join(tmpRoot, 'packages', 'types', 'src', 'index.ts');
+
+    expect(graph.imports.get(consumerPath)?.has(libPath)).toBe(true);
+  });
+
+  it('resolves alias to package dir via package.json main', () => {
+    write('packages/lib/package.json', `{"main":"./lib/entry.ts"}`);
+    write('packages/lib/lib/entry.ts', `export const x = 1;`);
+    write('consumer.ts', `import { x } from '@scope/lib';`);
+
+    const graph = buildGraph(tmpRoot, { aliases: { '@scope/lib': 'packages/lib' } });
+    const consumerPath = path.join(tmpRoot, 'consumer.ts');
+    const entryPath = path.join(tmpRoot, 'packages', 'lib', 'lib', 'entry.ts');
+
+    expect(graph.imports.get(consumerPath)?.has(entryPath)).toBe(true);
+  });
+
   it('resolves path aliases', () => {
     write('src/consumer.ts', `import { x } from '@/lib';`);
     write('src/lib.ts', `export const x = 1;`);

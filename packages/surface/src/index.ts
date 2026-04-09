@@ -82,6 +82,9 @@ const DEFAULT_IGNORE_DIRS = new Set([
   '.turbo',
   '.wrangler',
   'coverage',
+  '__tests__',
+  '__mocks__',
+  '__fixtures__',
 ]);
 
 const HTTP_METHODS = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head', 'all'];
@@ -130,14 +133,18 @@ function walkFiles(
  */
 export function extractRoutes(source: string, filePath: string): Route[] {
   const routes: Route[] = [];
-  const lines = source.split('\n');
+  // Strip block comments and line comments before scanning.
+  // Preserves line numbers by replacing comment bodies with spaces.
+  const stripped = stripComments(source);
+  const lines = stripped.split('\n');
 
   // Detect basePath (applies to this router within the file)
   let basePath: string | undefined;
-  const basePathMatch = source.match(/\.basePath\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/);
+  const basePathMatch = stripped.match(/\.basePath\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/);
   if (basePathMatch) basePath = basePathMatch[1];
 
-  // Framework detection from import statements
+  // Framework detection from import statements (use original source —
+  // detectFramework only looks at import lines which aren't commented out)
   const framework = detectFramework(source);
 
   // Pattern: <identifier>.METHOD('/path', ...)
@@ -167,6 +174,63 @@ export function extractRoutes(source: string, filePath: string): Route[] {
   }
 
   return routes;
+}
+
+/**
+ * Strip block and line comments from source, preserving line numbers
+ * by replacing stripped content with equivalent whitespace.
+ */
+function stripComments(source: string): string {
+  let result = '';
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    // Block comment
+    if (ch === '/' && next === '*') {
+      result += '  ';
+      i += 2;
+      while (i < n - 1 && !(source[i] === '*' && source[i + 1] === '/')) {
+        result += source[i] === '\n' ? '\n' : ' ';
+        i++;
+      }
+      result += '  ';
+      i += 2;
+      continue;
+    }
+    // Line comment
+    if (ch === '/' && next === '/') {
+      while (i < n && source[i] !== '\n') {
+        result += ' ';
+        i++;
+      }
+      continue;
+    }
+    // String literal — preserve contents (contains real route paths)
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      result += ch;
+      i++;
+      while (i < n && source[i] !== quote) {
+        if (source[i] === '\\' && i + 1 < n) {
+          result += source[i] + source[i + 1];
+          i += 2;
+          continue;
+        }
+        result += source[i];
+        i++;
+      }
+      if (i < n) {
+        result += source[i];
+        i++;
+      }
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
 }
 
 function detectFramework(source: string): Route['framework'] {
@@ -320,6 +384,10 @@ export function extractSurface(options: ExtractOptions = {}): Surface {
   const sourceFiles = walkFiles(root, extensions, ignoreDirs);
   const routes: Route[] = [];
   for (const file of sourceFiles) {
+    // Skip test/spec files — their route strings are fixtures, not real routes
+    const base = path.basename(file);
+    if (/\.(test|spec)\.[mc]?[tj]sx?$/i.test(base)) continue;
+
     let content: string;
     try {
       content = fs.readFileSync(file, 'utf8');

@@ -15,8 +15,9 @@ import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { buildGraph, blastRadius } from '@stackbilt/blast';
 
-// Flags that consume a value (so the next positional should not be treated as a seed file)
-const VALUE_FLAGS = new Set(['--root', '--depth']);
+// Flags that consume a value (so the next positional should not be treated as a seed file).
+// Includes local flags (--root, --depth) and global CLI flags (--format, --config).
+const VALUE_FLAGS = new Set(['--root', '--depth', '--format', '--config']);
 
 export async function blastCommand(options: CLIOptions, args: string[]): Promise<number> {
   const seedArgs: string[] = [];
@@ -121,29 +122,88 @@ export async function blastCommand(options: CLIOptions, args: string[]): Promise
 // tsconfig path alias detection
 // ============================================================================
 
-function detectTsconfigAliases(root: string): Record<string, string> {
-  const tsconfigPath = path.join(root, 'tsconfig.json');
-  if (!fs.existsSync(tsconfigPath)) return {};
+interface MinimalTsconfig {
+  extends?: string | string[];
+  compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> };
+}
+
+function readTsconfig(tsconfigPath: string): MinimalTsconfig | null {
+  if (!fs.existsSync(tsconfigPath)) return null;
   try {
     const raw = fs.readFileSync(tsconfigPath, 'utf8');
     // Strip JSON comments (tsconfig allows them)
     const cleaned = raw.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    const parsed = JSON.parse(cleaned) as {
-      compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> };
-    };
-    const paths = parsed.compilerOptions?.paths;
-    const baseUrl = parsed.compilerOptions?.baseUrl ?? '.';
-    if (!paths) return {};
-    const aliases: Record<string, string> = {};
-    for (const [key, targets] of Object.entries(paths)) {
-      if (!targets || targets.length === 0) continue;
-      // Normalize "@/*" -> "@/", "src/*" -> "src/"
-      const aliasKey = key.replace(/\*$/, '');
-      const targetPath = targets[0].replace(/\*$/, '');
-      aliases[aliasKey] = path.join(baseUrl, targetPath);
-    }
-    return aliases;
+    return JSON.parse(cleaned) as MinimalTsconfig;
   } catch {
-    return {};
+    return null;
   }
+}
+
+/**
+ * Walk the tsconfig `extends` chain and merge compilerOptions.paths from
+ * parents into the child. Shallower (closer to the child) wins on conflicts.
+ */
+function loadTsconfigChain(tsconfigPath: string, seen = new Set<string>()): MinimalTsconfig {
+  const abs = path.resolve(tsconfigPath);
+  if (seen.has(abs)) return {};
+  seen.add(abs);
+
+  const parsed = readTsconfig(abs);
+  if (!parsed) return {};
+
+  const merged: MinimalTsconfig = { compilerOptions: { baseUrl: '.', paths: {} } };
+
+  // Resolve extends first, then overlay current file's options on top
+  const extendsRaw = parsed.extends;
+  const extendsList = Array.isArray(extendsRaw) ? extendsRaw : extendsRaw ? [extendsRaw] : [];
+  for (const ext of extendsList) {
+    let extPath = ext;
+    if (!extPath.endsWith('.json')) extPath += '.json';
+    if (!path.isAbsolute(extPath)) extPath = path.resolve(path.dirname(abs), extPath);
+    const parent = loadTsconfigChain(extPath, seen);
+    if (parent.compilerOptions?.paths) {
+      Object.assign(merged.compilerOptions!.paths!, parent.compilerOptions.paths);
+    }
+    if (parent.compilerOptions?.baseUrl) {
+      // baseUrl is relative to the tsconfig that declared it
+      merged.compilerOptions!.baseUrl = path.resolve(
+        path.dirname(extPath),
+        parent.compilerOptions.baseUrl
+      );
+    }
+  }
+
+  if (parsed.compilerOptions?.paths) {
+    Object.assign(merged.compilerOptions!.paths!, parsed.compilerOptions.paths);
+  }
+  if (parsed.compilerOptions?.baseUrl) {
+    merged.compilerOptions!.baseUrl = path.resolve(
+      path.dirname(abs),
+      parsed.compilerOptions.baseUrl
+    );
+  }
+
+  return merged;
+}
+
+function detectTsconfigAliases(root: string): Record<string, string> {
+  const tsconfigPath = path.join(root, 'tsconfig.json');
+  const merged = loadTsconfigChain(tsconfigPath);
+  const paths = merged.compilerOptions?.paths;
+  const baseUrl = merged.compilerOptions?.baseUrl ?? root;
+  if (!paths || Object.keys(paths).length === 0) return {};
+  const aliases: Record<string, string> = {};
+  for (const [key, targets] of Object.entries(paths)) {
+    if (!targets || targets.length === 0) continue;
+    // Normalize "@/*" -> "@/", "src/*" -> "src/"
+    const aliasKey = key.replace(/\*$/, '');
+    const targetPath = targets[0].replace(/\*$/, '');
+    // baseUrl is already absolute after loadTsconfigChain; produce an absolute alias target
+    const absoluteTarget = path.isAbsolute(targetPath)
+      ? targetPath
+      : path.resolve(baseUrl, targetPath);
+    // Express target as relative to root so buildGraph's resolveSpecifier can join it
+    aliases[aliasKey] = path.relative(root, absoluteTarget) || '.';
+  }
+  return aliases;
 }

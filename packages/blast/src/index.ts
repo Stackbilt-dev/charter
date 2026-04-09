@@ -208,12 +208,38 @@ function resolveWithExtensions(base: string, extensions: string[]): string | nul
     const candidate = base + ext;
     if (fs.existsSync(candidate)) return candidate;
   }
-  // Index file in directory
+  // Directory resolution. Source-first, then package.json as fallback.
+  // Rationale: in monorepos with TS workspaces, we want dep-graph edges
+  // pointing at .ts source files, not compiled .d.ts declarations.
   try {
     if (fs.statSync(base).isDirectory()) {
+      // 1. src/index.* — standard monorepo source layout
+      for (const ext of extensions) {
+        const srcIndex = path.join(base, 'src', 'index' + ext);
+        if (fs.existsSync(srcIndex)) return srcIndex;
+      }
+      // 2. bare index.*
       for (const ext of extensions) {
         const candidate = path.join(base, 'index' + ext);
         if (fs.existsSync(candidate)) return candidate;
+      }
+      // 3. package.json source/types/main (for packages without src/)
+      const pkgPath = path.join(base, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+            main?: string;
+            types?: string;
+            source?: string;
+          };
+          const candidates = [pkg.source, pkg.types, pkg.main].filter(Boolean) as string[];
+          for (const c of candidates) {
+            const resolved = resolveWithExtensions(path.join(base, c), extensions);
+            if (resolved) return resolved;
+          }
+        } catch {
+          /* malformed package.json */
+        }
       }
     }
   } catch {
