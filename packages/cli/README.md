@@ -69,6 +69,8 @@ charter adf migrate --dry-run  # preview agent config → ADF migration
 charter adf sync --check     # verify .adf files match locked hashes
 charter adf evidence --auto-measure --format json  # validate metric ceilings
 charter telemetry report --period 24h --format json  # passive local usage summary
+charter blast src/foo.ts --depth 3  # reverse dep graph → files affected by changing this seed
+charter surface --markdown          # extract routes (Hono/Express) + D1 schema as markdown
 ```
 
 ## Human Onboarding (Copy/Paste)
@@ -299,6 +301,44 @@ charter adf migrate [--dry-run] [--source <file>] [--no-backup]
 - `metrics recalibrate`: Re-measure current LOC from manifest metric sources, propose and apply new ceilings using configurable headroom, and append rationale records to `BUDGET_RATIONALES`. Requires explicit rationale (`--reason`) unless `--auto-rationale` is used.
 - `migrate`: Scan existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md, copilot-instructions.md), classify content using the ADX-002 decision tree, and migrate into ADF modules. `--dry-run` previews the migration plan without writing files. `--source <file>` targets a single file. `--no-backup` skips `.pre-adf-migrate.bak` creation. `--merge-strategy` controls deduplication: `dedupe` (default, skip items already in ADF), `append` (always add), or `replace`. Environment-specific rules (WSL, PATH, credential helpers) are retained in the thin pointer.
 
+### `charter blast`
+
+Compute the blast radius of a change: which files transitively depend on the given seed files? Builds a reverse dependency graph (TS/JS imports — handles ESM `.js → .ts`, tsconfig path aliases including `extends` chains, `src/index.*` fallback, cycles, comments) and BFS-traverses up to a configurable depth.
+
+```bash
+charter blast src/kernel/dispatch.ts            # default depth 3
+charter blast src/a.ts src/b.ts --depth 4       # multi-seed
+charter blast src/foo.ts --format json          # structured output
+charter blast src/foo.ts --root ./packages/x    # scan a subdirectory
+```
+
+Reports:
+- `affected` — relative paths of transitively dependent files
+- `hotFiles` — top 20 most-imported files in the graph (architectural hubs)
+- `summary.totalAffected`, `summary.depthHistogram`
+
+Blast radius ≥20 files triggers a `CROSS_CUTTING` warning — a signal for governance gates to escalate the change. Pure heuristic, no LLM calls, zero runtime dependencies. Backed by `@stackbilt/blast`.
+
+### `charter surface`
+
+Extract the API surface of a project: HTTP routes and database schema. Designed for Cloudflare Worker projects but works on any Node.js HTTP backend.
+
+```bash
+charter surface                                 # text summary
+charter surface --format json                   # machine-readable
+charter surface --markdown                      # for .ai/surface.adf injection
+charter surface --root ./packages/worker        # scan a subdirectory
+charter surface --schema db/schema.sql          # explicit schema path
+```
+
+Detects:
+- **Routes** — Hono, Express, itty-router via regex (requires `/` path prefix; strips comments before scanning)
+- **Schema** — D1/SQLite `CREATE TABLE` statements with column flags (pk, unique, nullable, default)
+
+Ignores `__tests__/`, `*.test.*`, `*.spec.*` to avoid false positives from test fixtures.
+
+Use cases: breaking change detection (diff surfaces before/after a PR), auto-generated AI context maps, deploy pipeline gates, mission brief fingerprinting for autonomous task runners. Backed by `@stackbilt/surface`.
+
 ### `charter telemetry`
 
 Passive local observability for Charter/ADF usage. Every CLI run appends command metadata (timestamp, command path, flags, duration, exit code) to `.charter/telemetry/events.ndjson`.
@@ -372,6 +412,8 @@ Setup-only options:
 - `@stackbilt/drift` -- blessed-stack pattern drift detection
 - `@stackbilt/validate` -- citation validation and intent classification
 - `@stackbilt/adf` -- ADF parser, formatter, patcher, and bundler
+- `@stackbilt/blast` -- reverse dependency graph + blast radius analysis
+- `@stackbilt/surface` -- API surface extraction (routes + D1 schema)
 - `@stackbilt/ci` -- GitHub Actions integration helpers
 
 ## License

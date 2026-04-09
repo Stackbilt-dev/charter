@@ -22,6 +22,8 @@ packages/
   classify/   Heuristic change classification
   validate/   Citation and governance validation
   drift/      Anti-pattern drift scanning
+  blast/      Reverse dependency graph + blast radius analysis
+  surface/    API surface extraction (routes + D1 schema)
   cli/        CLI tool (`charter`)
   ci/         GitHub Actions integration helpers
 ```

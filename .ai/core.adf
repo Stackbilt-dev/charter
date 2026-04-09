@@ -4,7 +4,8 @@ ADF: 0.1
 
 📋 CONTEXT:
   - PNPM monorepo with project references
-  - Package flow: types <- git, classify, validate, drift, ci <- cli
+  - Package flow: types <- git, classify, validate, drift, blast, surface, ci <- cli
+  - blast and surface are zero-dependency analysis packages (no @stackbilt/types)
   - ADF package is zero-dependency and self-contained
   - Repo uses SemVer for published packages and machine-facing governance contracts
   - Conventional Commits: feat(scope):, fix(scope):, docs:, chore:

@@ -6,14 +6,34 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [0.10.0] - 2026-04-09
 
+Synchronized version bump for all `@stackbilt/*` packages to 0.10.0.
+
 ### Added
-- **`charter blast <files>`** — Compute blast radius for a set of seed files. Builds a reverse dependency graph by walking TS/JS imports (handles ESM `.js → .ts` rewrite, tsconfig path aliases, index files, cycles) and BFS-traverses up to a configurable depth. Reports affected files, hot files (most imported), and warns on ≥20-file blast radius as a CROSS_CUTTING signal. Zero dependencies.
-- **`charter surface`** — Extract the API surface of a Worker project. Detects HTTP routes from Hono/Express/itty-router (regex-based, requires `/` prefix to reduce false positives) and parses D1/SQLite `CREATE TABLE` statements with column flags (pk, unique, nullable, default). Supports `--markdown` output mode for injection into `.ai/` modules or AI mission briefs. Zero dependencies.
-- **`@stackbilt/blast`** — New standalone package exporting `buildGraph`, `blastRadius`, `extractImports`, `resolveSpecifier`, `topHotFiles`. 17 tests.
-- **`@stackbilt/surface`** — New standalone package exporting `extractSurface`, `extractRoutes`, `extractSchema`, `formatSurfaceMarkdown`. 12 tests.
+- **`charter blast <files>`** — Compute blast radius for a set of seed files. Builds a reverse dependency graph by walking TS/JS imports and BFS-traverses up to a configurable depth. Reports affected files, hot files (most imported), and warns on ≥20-file blast radius as a `CROSS_CUTTING` signal.
+
+  Import resolution handles: ES modules, CommonJS `require`, dynamic `import()`, re-exports, ESM `.js → .ts` rewrite, tsconfig path aliases (including `extends` chains), `src/index.*` monorepo fallback, `package.json` `source`/`types`/`main` fields, index files, cycles, and comment stripping. Zero runtime dependencies.
+- **`charter surface`** — Extract the API surface of a project. Detects HTTP routes from Hono, Express, and itty-router (regex-based, requires `/` prefix to reduce false positives) and parses D1/SQLite `CREATE TABLE` statements with column flags (pk, unique, nullable, default). Strips block and line comments before scanning. Ignores `__tests__/`, `*.test.*`, `*.spec.*` files. Supports `--markdown` output for injection into `.ai/` modules or AI mission briefs. Zero runtime dependencies.
+- **`@stackbilt/blast`** — New standalone package exporting `buildGraph`, `blastRadius`, `extractImports`, `resolveSpecifier`, `topHotFiles`. 19 tests.
+- **`@stackbilt/surface`** — New standalone package exporting `extractSurface`, `extractRoutes`, `extractSchema`, `formatSurfaceMarkdown`. 14 tests.
+- **`.ai/analysis.adf`** — New on-demand ADF module documenting the analysis subsystem (blast + surface). Triggers on `blast`, `surface`, `dependency graph`, `blast radius`, `route extraction`, `schema extraction`.
 
 ### Rationale
-Originally inspired by analysis of the CodeSight project's blast-radius and route-detection patterns. Extracted the two highest-value algorithms into Charter as deterministic (no LLM) commands that feed into governance workflows: blast radius for CROSS_CUTTING classification, surface extraction for auto-generated `.ai/surface.adf` modules and cc-taskrunner mission-brief fingerprinting.
+Originally inspired by analysis of the CodeSight project's blast-radius and route-detection patterns. Extracted the two highest-value algorithms into Charter as deterministic (no LLM) commands that feed into governance workflows: blast radius for `CROSS_CUTTING` classification, surface extraction for auto-generated `.ai/surface.adf` modules and cc-taskrunner mission-brief fingerprinting.
+
+### Validated on
+Real-world dogfooding caught six bugs that made it into the first commit and were fixed before release:
+1. Global CLI flags (`--format`, `--config`) being swept into positional seed list
+2. JSDoc example strings matching as real routes
+3. Test fixture routes matching as real routes
+4. tsconfig `extends` chain not being followed, breaking monorepo alias resolution
+5. Package alias resolving to compiled `.d.ts` instead of source `.ts`
+6. ESM `.js → .ts` extension rewrite missing for TypeScript ESM projects
+
+Validation runs:
+- AEGIS web Worker (263 files): 95 routes + 50 D1 tables extracted in ~15s. `dispatch.ts` blast radius = 72, `types.ts` = 127, PWA fix files = 1.
+- Charter monorepo (121 files): 0 routes (correctly identifies as CLI, not Worker). `packages/types/src/index.ts` blast radius = 27 files across cli/adf/git/validate/drift.
+
+All 345 existing tests pass.
 
 ## [0.9.3] - 2026-03-22
 

@@ -232,6 +232,48 @@ npx charter telemetry report --period 7d --format json
 - Captured automatically on each CLI run: timestamp, command path, flags, duration, exit code.
 - No prompt/code content capture; metadata only.
 
+## Analysis Commands
+
+### charter blast
+
+Computes the blast radius of a change: which files transitively depend on the given seed files?
+
+```bash
+npx charter blast src/kernel/dispatch.ts                    # default depth 3
+npx charter blast src/a.ts src/b.ts --depth 4               # multi-seed
+npx charter blast src/foo.ts --format json                  # structured output
+npx charter blast src/foo.ts --root ./packages/server       # scan a subdirectory
+```
+
+- `<file>` — one or more seed file paths (positional, required)
+- `--depth <n>` — max BFS depth through the reverse dependency graph (default: `3`)
+- `--root <dir>` — project root to scan (default: `.`)
+
+Walks the source tree under `--root`, extracts imports from every TS/JS file (ES modules, CommonJS, dynamic `import()`, re-exports; comments stripped), and BFS-traverses the reverse graph from each seed. Auto-detects tsconfig path aliases including `extends` chains. Handles ESM `.js → .ts` rewrite, `src/index.*` monorepo fallback, cycles.
+
+Output reports affected files, `hotFiles` (top 20 most-imported — architectural hubs), and a depth histogram. Blast radius ≥20 files triggers a `CROSS_CUTTING` warning in text mode.
+
+Zero runtime dependencies. No LLM calls. No TypeScript compiler API.
+
+### charter surface
+
+Extracts the API surface of a project: HTTP routes and database schema tables.
+
+```bash
+npx charter surface                                 # text summary
+npx charter surface --format json                   # machine-readable
+npx charter surface --markdown                      # for .ai/surface.adf injection
+npx charter surface --root ./packages/worker        # scan a subdirectory
+npx charter surface --schema db/schema.sql          # explicit schema path
+```
+
+- Detects routes in Hono, Express, and itty-router (requires path prefix `/`; strips comments before scanning).
+- Parses D1/SQLite `CREATE TABLE` statements with column flags (`PRIMARY KEY`, `NOT NULL`, `UNIQUE`, `DEFAULT`, parameterized types).
+- Ignores `__tests__/`, `*.test.*`, `*.spec.*` to avoid false positives from fixtures.
+- `--markdown` output is ideal for auto-generating `.ai/surface.adf` modules or injecting API context into autonomous task runner mission briefs.
+
+Returns exit code `2` if no routes or schema tables are detected (surface is designed for Cloudflare Worker / Hono / Express projects).
+
 ## Global Flags
 
 | Flag | Effect |

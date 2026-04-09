@@ -1,0 +1,129 @@
+# @stackbilt/surface
+
+API surface extraction for [Charter Kit](https://github.com/Stackbilt-dev/charter) — a local-first governance toolkit for software repos. Extracts two things from a project:
+
+1. **HTTP routes** — Hono, Express, itty-router
+2. **Database schema** — D1 / SQLite `CREATE TABLE` statements
+
+Pure heuristic — no LLM calls, no AST, zero runtime dependencies. Designed for Cloudflare Worker projects, but works on any Node.js HTTP backend with compatible routing conventions.
+
+> **Want the full toolkit?** Just install the CLI — it includes everything:
+> ```bash
+> npm install -g @stackbilt/cli
+> ```
+> Only install this package directly if you need surface extraction without the CLI.
+
+## Install
+
+```bash
+npm install @stackbilt/surface
+```
+
+## CLI Usage
+
+Via the Charter CLI:
+
+```bash
+charter surface                                    # Text summary
+charter surface --format json                      # JSON for tooling
+charter surface --markdown                         # Markdown for .ai/surface.adf
+charter surface --root ./packages/worker           # Scan a subdirectory
+charter surface --schema db/schema.sql             # Explicit schema path
+```
+
+## Programmatic Usage
+
+```ts
+import { extractSurface, formatSurfaceMarkdown } from '@stackbilt/surface';
+
+const surface = extractSurface({ root: './packages/worker' });
+
+console.log(surface.summary);
+// { routeCount: 95, schemaTableCount: 50, routesByMethod: {...}, routesByFramework: {...} }
+
+console.log(formatSurfaceMarkdown(surface));
+// # API Surface
+// **Routes:** 95
+// **Tables:** 50
+// ...
+```
+
+## API Reference
+
+### `extractSurface(options?: ExtractOptions): Surface`
+
+Scans a project directory and returns its full API surface (routes + schemas).
+
+**Options:**
+- `root` — project root (default: `cwd`)
+- `extensions` — file extensions to scan for routes (default: `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`)
+- `ignoreDirs` — additional directories to skip
+- `schemaPaths` — explicit schema file paths (default: auto-detect `*schema*.sql` under root)
+
+**Returns:** `{ root, routes, schemas, summary }`
+
+Automatically ignores `node_modules`, `dist`, `build`, `.git`, `.next`, `.turbo`, `.wrangler`, `coverage`, `__tests__`, `__mocks__`, `__fixtures__`, and all `*.test.*` / `*.spec.*` files.
+
+### `extractRoutes(source: string, filePath: string): Route[]`
+
+Extracts HTTP routes from a single source file.
+
+**Detects:**
+- `app.get('/path', handler)`, `router.post('/path', ...)`, etc.
+- `.basePath('/api/v1')` for router prefixes
+- Framework import detection: Hono, Express, itty-router
+- Strips block and line comments before scanning (jsdoc examples don't match)
+- Requires route paths to start with `/` to avoid matching unrelated method calls like `list.post(item)`
+
+**Returns:** `{ method, path, file, line, framework, prefix? }[]`
+
+### `extractSchema(source: string, filePath: string): SchemaTable[]`
+
+Parses `CREATE TABLE` statements from a SQL source string.
+
+**Handles:**
+- `CREATE TABLE` and `CREATE TABLE IF NOT EXISTS`
+- Column types including parameterized (e.g. `VARCHAR(255)`)
+- Column flags: `PRIMARY KEY`, `NOT NULL`, `UNIQUE`, `DEFAULT`
+- Skips table-level constraints (`FOREIGN KEY`, `CHECK`, `CONSTRAINT`)
+- Nested parens (balanced paren matching, not regex bracket soup)
+
+**Returns:** `SchemaTable[]` where each table has `{ name, columns, file, line }` and each column has `{ name, type, nullable, primaryKey, unique, defaultValue? }`.
+
+### `formatSurfaceMarkdown(surface: Surface): string`
+
+Renders a surface as a compact markdown summary suitable for injection into AI context maps (e.g. an auto-generated `.ai/surface.adf` module) or mission briefs for autonomous task runners.
+
+## Use Cases
+
+- **Breaking change detection** — diff surfaces before and after a PR to identify removed endpoints or dropped columns
+- **Auto-generated AI context** — emit markdown for `.ai/surface.adf` so agents always know the API shape
+- **Deploy pipeline gates** — force a major version bump when the surface shrinks
+- **Mission brief fingerprinting** — inject route + schema summaries into autonomous task runner prompts so agents don't burn turns exploring layout
+- **Documentation scaffolding** — seed `API.md` from the current codebase
+
+## Supported Frameworks
+
+| Framework | Route detection | Framework label |
+|---|---|---|
+| [Hono](https://hono.dev) | ✓ | `hono` |
+| [Express](https://expressjs.com) | ✓ | `express` |
+| [itty-router](https://itty.dev/itty-router) | ✓ | `itty` |
+| Others | ✓ (via regex, framework shown as `unknown`) | `unknown` |
+
+Any router with the `router.METHOD('/path', handler)` pattern will work; only the framework label depends on import detection.
+
+## Requirements
+
+- Node >= 18
+- Zero runtime dependencies
+
+## License
+
+Apache-2.0
+
+## Links
+
+- [Repository](https://github.com/Stackbilt-dev/charter)
+- [Issues](https://github.com/Stackbilt-dev/charter/issues)
+- [Charter CLI](https://github.com/Stackbilt-dev/charter/tree/main/packages/cli)

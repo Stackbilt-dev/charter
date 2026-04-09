@@ -12,6 +12,8 @@ Publishable packages:
 - `@stackbilt/classify`
 - `@stackbilt/validate`
 - `@stackbilt/drift`
+- `@stackbilt/blast`
+- `@stackbilt/surface`
 - `@stackbilt/ci`
 - `@stackbilt/cli`
 
@@ -70,6 +72,8 @@ pnpm --filter @stackbilt/git pack --dry-run
 pnpm --filter @stackbilt/classify pack --dry-run
 pnpm --filter @stackbilt/validate pack --dry-run
 pnpm --filter @stackbilt/drift pack --dry-run
+pnpm --filter @stackbilt/blast pack --dry-run
+pnpm --filter @stackbilt/surface pack --dry-run
 pnpm --filter @stackbilt/ci pack --dry-run
 pnpm --filter @stackbilt/cli pack --dry-run
 ```
@@ -90,6 +94,8 @@ node packages/cli/dist/bin.js audit --format json
 node packages/cli/dist/bin.js adf init
 node packages/cli/dist/bin.js adf fmt .ai/core.adf
 node packages/cli/dist/bin.js adf bundle --task "test task" --format json
+node packages/cli/dist/bin.js blast packages/types/src/index.ts --format json
+node packages/cli/dist/bin.js surface --format json
 ```
 
 When reviewing detect output, confirm:
@@ -101,8 +107,10 @@ When reviewing detect output, confirm:
 Publish in this order:
 
 1. `@stackbilt/types`
-2. `@stackbilt/core`, `@stackbilt/adf`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/ci`
+2. `@stackbilt/core`, `@stackbilt/adf`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/blast`, `@stackbilt/surface`, `@stackbilt/ci`
 3. `@stackbilt/cli`
+
+`@stackbilt/blast` and `@stackbilt/surface` are zero-dependency and can be published in any order relative to the other standalone analyzers. They are only required at publish time by `@stackbilt/cli`.
 
 ```bash
 # All packages declare publishConfig.access: "public", so --access flag is not needed.
@@ -114,6 +122,8 @@ pnpm --filter @stackbilt/git publish
 pnpm --filter @stackbilt/classify publish
 pnpm --filter @stackbilt/validate publish
 pnpm --filter @stackbilt/drift publish
+pnpm --filter @stackbilt/blast publish
+pnpm --filter @stackbilt/surface publish
 pnpm --filter @stackbilt/ci publish
 pnpm --filter @stackbilt/cli publish
 ```

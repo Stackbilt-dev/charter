@@ -1,0 +1,26 @@
+ADF: 0.1
+
+🎯 TASK: Codebase analysis subsystem development context
+
+📋 CONTEXT:
+  - packages: blast (reverse dependency graph + BFS blast radius), surface (route + D1 schema extraction)
+  - Both packages are zero-dependency: no @stackbilt/types, no runtime deps at all
+  - Both are deterministic: no LLM calls, no AST — regex-based scanning for universality
+  - CLI command handlers in packages/cli/src/commands/blast.ts and surface.ts
+  - Feed governance signals: blast radius ≥20 files → CROSS_CUTTING warning
+
+⚠ CONSTRAINTS [load-bearing]:
+  - blast and surface commands must support --format json for stable machine output
+  - blast: --root and --depth flags must be in VALUE_FLAGS to avoid positional sweep
+  - blast must handle ESM .js → .ts rewrite, tsconfig extends chains, src/index.* fallback
+  - surface must strip block and line comments before route scanning (jsdoc false positives)
+  - surface must ignore __tests__, __mocks__, __fixtures__, *.test.*, *.spec.* files
+  - Route detection requires path to start with / to avoid matching list.post(item) etc.
+  - blastRadius BFS must track visited set to handle import cycles without infinite loop
+  - Exit codes: 0 success, 1 reserved for future governance thresholds, 2 usage error
+
+📊 METRICS:
+  BLAST_PKG_LOC: packages/blast/src/index.ts
+  SURFACE_PKG_LOC: packages/surface/src/index.ts
+  BLAST_CMD_LOC: packages/cli/src/commands/blast.ts
+  SURFACE_CMD_LOC: packages/cli/src/commands/surface.ts

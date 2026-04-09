@@ -160,6 +160,17 @@ charter adf metrics recalibrate          # Adjust ceilings to current state
 charter serve                            # MCP server for Claude Code
 ```
 
+### Analyze
+
+```bash
+charter blast src/foo.ts                 # Blast radius: files that transitively import the seed
+charter blast src/a.ts src/b.ts --depth 4  # Multi-seed, custom BFS depth
+charter surface                          # Extract routes (Hono/Express) + D1 schema
+charter surface --markdown               # Emit as markdown for .ai/surface.adf or AI context
+```
+
+Deterministic codebase analysis — no LLM calls, zero runtime dependencies. `blast` warns on large radiuses (≥20 files) as a CROSS_CUTTING signal; `surface` is a lightweight alternative to full AST walks for Cloudflare Worker projects.
+
 All commands support `--format json` with `nextActions` hints for agent workflows.
 
 ### Exit codes
@@ -179,6 +190,8 @@ Charter is built as a monorepo. Individual packages are published to npm and usa
 | `@stackbilt/classify` | Heuristic change classification |
 | `@stackbilt/validate` | Governance validation |
 | `@stackbilt/drift` | Anti-pattern scanning |
+| `@stackbilt/blast` | Reverse dependency graph + blast radius analysis |
+| `@stackbilt/surface` | API surface extraction (routes + D1 schema) |
 | `@stackbilt/core` | Schemas, sanitization, error contracts |
 | `@stackbilt/types` | Shared TypeScript contracts |
 | `@stackbilt/ci` | GitHub Actions integration helpers |

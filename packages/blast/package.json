@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/blast",
   "sideEffects": false,
-  "version": "0.1.0",
+  "version": "0.10.0",
   "description": "Blast radius analysis via reverse dependency graph + BFS traversal",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

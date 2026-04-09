@@ -295,6 +295,64 @@ npx charter adf metrics recalibrate --auto-rationale --format json     # machine
 
 One of `--reason` or `--auto-rationale` is required.
 
+### charter blast
+
+Compute the blast radius of a change: which files transitively depend on the given seed files?
+
+```bash
+npx charter blast src/kernel/dispatch.ts                    # default depth 3
+npx charter blast src/a.ts src/b.ts --depth 4               # multi-seed, custom depth
+npx charter blast src/foo.ts --format json                  # structured output
+npx charter blast src/foo.ts --root ./packages/server       # scan a subdirectory
+```
+
+- `<file>` — one or more seed file paths (required, positional)
+- `--depth <n>` — max BFS depth through the reverse dependency graph (default: `3`)
+- `--root <dir>` — project root to scan (default: `.`)
+- `--format json` — emit structured JSON instead of the text summary
+
+**How it works:** Walks the source tree under `--root`, extracts imports from every TS/JS file (ES modules, CommonJS, dynamic `import()`, re-exports; comments stripped), builds forward and reverse adjacency maps, and BFS-traverses the reverse graph from each seed up to `--depth`. Auto-detects tsconfig path aliases (including `extends` chains) so monorepo `@scope/package` imports resolve correctly.
+
+**Output includes:**
+- `affected` — relative paths of files that transitively import the seeds (excludes seeds themselves)
+- `hotFiles` — top 20 most-imported files in the graph (architectural hubs)
+- `summary.totalAffected`, `summary.seedCount`, `summary.depthHistogram`
+
+**Governance signal:** blast radius ≥20 files triggers a `CROSS_CUTTING` warning in text mode. Use this as a gate to escalate wide-reaching changes to architectural review.
+
+**Semantics:** zero runtime dependencies, no LLM calls, no TypeScript compiler API. Regex-based import extraction — trades some precision for universality across JavaScript/TypeScript/ESM/CommonJS projects.
+
+### charter surface
+
+Extract the API surface of a project: HTTP routes and database schema tables.
+
+```bash
+npx charter surface                                 # text summary
+npx charter surface --format json                   # machine-readable
+npx charter surface --markdown                      # for .ai/surface.adf injection
+npx charter surface --root ./packages/worker        # scan a subdirectory
+npx charter surface --schema db/schema.sql          # explicit schema path
+```
+
+- `--root <dir>` — project root to scan (default: `.`)
+- `--schema <path>` — explicit schema SQL file (default: auto-detect `*schema*.sql` under root)
+- `--markdown` / `--md` — emit markdown suitable for `.ai/surface.adf` or AI mission brief injection
+- `--format json` — emit structured JSON
+
+**Detects:**
+- **Routes** — Hono, Express, itty-router via regex. Requires path arguments to start with `/` to avoid false positives from unrelated method calls. Strips block and line comments before scanning so jsdoc examples don't match.
+- **Schema** — D1/SQLite `CREATE TABLE` statements, column types (including parameterized like `VARCHAR(255)`), column flags: `PRIMARY KEY`, `NOT NULL`, `UNIQUE`, `DEFAULT`. Skips table-level constraints (`FOREIGN KEY`, `CHECK`).
+- **Prefixes** — `.basePath('/api/v1')` annotations on Hono routers
+
+**Ignores:** `__tests__/`, `__mocks__/`, `__fixtures__/`, and any `*.test.*` / `*.spec.*` files — test fixtures contain route-like strings that aren't real routes.
+
+**Exit codes:** returns `2` with a usage error if no routes or schema tables are detected (surface is designed for Cloudflare Worker / Hono / Express projects with a `schema.sql` file; falling through silently on a non-Worker project would be misleading).
+
+**Use cases:**
+- **Breaking-change detection** — diff the JSON output before and after a PR to identify removed endpoints or dropped columns. Feeds into version-bump automation.
+- **Auto-generated AI context** — pipe `--markdown` output into `.ai/surface.adf` so LLM agents always know the API shape.
+- **Mission brief fingerprinting** — inject the markdown output into autonomous task runner prompts so agents don't burn turns exploring project layout.
+
 ## Global Flags
 
 | Flag | Effect |
