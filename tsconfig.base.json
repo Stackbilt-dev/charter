@@ -13,6 +13,8 @@
       "@stackbilt/drift": ["packages/drift"],
       "@stackbilt/ci": ["packages/ci"],
       "@stackbilt/adf": ["packages/adf"],
+      "@stackbilt/blast": ["packages/blast"],
+      "@stackbilt/surface": ["packages/surface"],
       "@stackbilt/cli": ["packages/cli"]
     },
     "lib": ["ES2022"],

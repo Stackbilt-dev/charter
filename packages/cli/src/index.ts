@@ -23,6 +23,8 @@ import { architectCommand } from './commands/architect';
 import { scaffoldCommand } from './commands/scaffold';
 import { runCommand } from './commands/run';
 import { scoreCommand } from './commands/score';
+import { blastCommand } from './commands/blast';
+import { surfaceCommand } from './commands/surface';
 import { recordTelemetryEvent } from './telemetry';
 import { getFlag } from './flags';
 import packageJson from '../package.json';
@@ -63,6 +65,10 @@ Usage:
   charter run <description>      Architect + scaffold in one step (animated)
   charter run --file <path>      Same, from spec file
   charter score [--ai-dir <dir>] AI-readiness audit for the current repo
+  charter blast <file> [<file> ...] [--root <dir>] [--depth <n>]
+                                   Compute blast radius: which files transitively depend on the seeds
+  charter surface [--root <dir>] [--schema <path>]
+                                   Extract API surface: routes (Hono/Express) + D1 schema tables
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
@@ -210,6 +216,12 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'score':
         exitCode = await scoreCommand(options, restArgs);
+        break;
+      case 'blast':
+        exitCode = await blastCommand(options, restArgs);
+        break;
+      case 'surface':
+        exitCode = await surfaceCommand(options, restArgs);
         break;
       default:
         throw new CLIError(`Unknown command: ${command}\n${HELP}`);

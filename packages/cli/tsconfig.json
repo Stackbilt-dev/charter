@@ -11,7 +11,9 @@
     { "path": "../classify" },
     { "path": "../validate" },
     { "path": "../adf" },
-    { "path": "../drift" }
+    { "path": "../drift" },
+    { "path": "../blast" },
+    { "path": "../surface" }
   ],
   "include": ["src/**/*.ts"]
 }

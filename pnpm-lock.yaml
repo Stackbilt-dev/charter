@@ -29,6 +29,8 @@ importers:
 
   packages/adf: {}
 
+  packages/blast: {}
+
   packages/ci:
     dependencies:
       '@stackbilt/types':
@@ -45,10 +47,13 @@ importers:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
-        version: 1.29.0(zod@3.25.76)
+        version: 1.29.0(zod@4.3.6)
       '@stackbilt/adf':
         specifier: workspace:^
         version: link:../adf
+      '@stackbilt/blast':
+        specifier: workspace:^
+        version: link:../blast
       '@stackbilt/classify':
         specifier: workspace:^
         version: link:../classify
@@ -64,6 +69,9 @@ importers:
       '@stackbilt/git':
         specifier: workspace:^
         version: link:../git
+      '@stackbilt/surface':
+        specifier: workspace:^
+        version: link:../surface
       '@stackbilt/types':
         specifier: workspace:^
         version: link:../types
@@ -88,6 +96,8 @@ importers:
       '@stackbilt/types':
         specifier: workspace:^
         version: link:../types
+
+  packages/surface: {}
 
   packages/types: {}
 
@@ -990,6 +1000,9 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
+  zod@4.3.6:
+    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+
 snapshots:
 
   '@esbuild/aix-ppc64@0.27.3':
@@ -1076,7 +1089,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.29.0(zod@4.3.6)':
     dependencies:
       '@hono/node-server': 1.19.12(hono@4.12.9)
       ajv: 8.18.0
@@ -1093,8 +1106,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.3.6
+      zod-to-json-schema: 3.25.2(zod@4.3.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -1175,7 +1188,7 @@ snapshots:
 
   '@stackbilt/contracts@file:../contracts':
     dependencies:
-      zod: 3.25.76
+      zod: 4.3.6
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -1780,8 +1793,10 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@4.3.6):
     dependencies:
-      zod: 3.25.76
+      zod: 4.3.6
 
   zod@3.25.76: {}
+
+  zod@4.3.6: {}

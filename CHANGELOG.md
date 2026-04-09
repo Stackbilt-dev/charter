@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.10.0] - 2026-04-09
+
+### Added
+- **`charter blast <files>`** — Compute blast radius for a set of seed files. Builds a reverse dependency graph by walking TS/JS imports (handles ESM `.js → .ts` rewrite, tsconfig path aliases, index files, cycles) and BFS-traverses up to a configurable depth. Reports affected files, hot files (most imported), and warns on ≥20-file blast radius as a CROSS_CUTTING signal. Zero dependencies.
+- **`charter surface`** — Extract the API surface of a Worker project. Detects HTTP routes from Hono/Express/itty-router (regex-based, requires `/` prefix to reduce false positives) and parses D1/SQLite `CREATE TABLE` statements with column flags (pk, unique, nullable, default). Supports `--markdown` output mode for injection into `.ai/` modules or AI mission briefs. Zero dependencies.
+- **`@stackbilt/blast`** — New standalone package exporting `buildGraph`, `blastRadius`, `extractImports`, `resolveSpecifier`, `topHotFiles`. 17 tests.
+- **`@stackbilt/surface`** — New standalone package exporting `extractSurface`, `extractRoutes`, `extractSchema`, `formatSurfaceMarkdown`. 12 tests.
+
+### Rationale
+Originally inspired by analysis of the CodeSight project's blast-radius and route-detection patterns. Extracted the two highest-value algorithms into Charter as deterministic (no LLM) commands that feed into governance workflows: blast radius for CROSS_CUTTING classification, surface extraction for auto-generated `.ai/surface.adf` modules and cc-taskrunner mission-brief fingerprinting.
+
 ## [0.9.3] - 2026-03-22
 
 ### Fixed
