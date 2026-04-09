@@ -43,7 +43,6 @@
     "@stackbilt/adf": "workspace:^",
     "@stackbilt/blast": "workspace:^",
     "@stackbilt/classify": "workspace:^",
-    "@stackbilt/contracts": "file:../../../contracts",
     "@stackbilt/core": "workspace:^",
     "@stackbilt/drift": "workspace:^",
     "@stackbilt/git": "workspace:^",

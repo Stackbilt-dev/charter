@@ -8,7 +8,7 @@ import type {
   ScaffoldFileType,
   GovernanceDocsType,
   PromptContextType,
-} from '@stackbilt/contracts/dist/scaffold-response';
+} from './types/scaffold-contract-types';
 
 const DEFAULT_BASE_URL = process.env.STACKBILT_ENGINE_URL ?? 'https://api.stackbilt.dev/engine';
 const GATEWAY_BASE_URL = 'https://mcp.stackbilt.dev';
