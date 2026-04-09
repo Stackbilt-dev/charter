@@ -113,6 +113,16 @@ Renders a surface as a compact markdown summary suitable for injection into AI c
 
 Any router with the `router.METHOD('/path', handler)` pattern will work; only the framework label depends on import detection.
 
+## Downstream integrations
+
+### cc-taskrunner — mission brief fingerprinting
+
+[cc-taskrunner](https://github.com/Stackbilt-dev/cc-taskrunner) runs Claude Code in unattended sessions. Starting in **1.4.0**, it calls `charter surface --markdown` on the target repo and injects the result as a `## Project Context (auto-generated)` section in every mission brief. This gives the agent an immediate routes + schema map so it doesn't burn exploration turns figuring out the codebase layout.
+
+Output is capped at 80 lines to protect the prompt budget, and the whole feature no-ops gracefully when charter isn't installed. Opt out via `CC_DISABLE_FINGERPRINT=1`.
+
+See [cc-taskrunner/taskrunner.sh](https://github.com/Stackbilt-dev/cc-taskrunner/blob/main/taskrunner.sh) — look for `build_fingerprint()` and the "Project fingerprint" comment block.
+
 ## Requirements
 
 - Node >= 18

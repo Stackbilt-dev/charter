@@ -104,6 +104,23 @@ Resolves a single import specifier to an absolute file path, or `null` for bare 
 - **Code review automation** — surface hot files to reviewers who might otherwise miss architectural impact
 - **Self-improvement bots** — require blast radius <N before auto-queueing fix tasks
 
+## Downstream integrations
+
+### cc-taskrunner — autonomous agent safety gate
+
+[cc-taskrunner](https://github.com/Stackbilt-dev/cc-taskrunner) runs Claude Code in unattended sessions to execute queued tasks. Starting in **1.5.0**, it calls `charter blast --format json` on files referenced by each task prompt and classifies the result on a 4-level severity ladder:
+
+| Affected files | Severity | Behavior |
+|---|---|---|
+| 0–4 | `low` | silent |
+| 5–19 | `medium` | silent |
+| 20–49 | `high` | warning injected into mission brief |
+| 50+ | `critical` | warning injected; **`auto_safe` execution refused** |
+
+Critical severity downgrades `auto_safe` tasks to "requires operator approval" **before** spawning Claude Code, preventing catastrophic blast-radius changes from silently landing in autonomous pipelines. Thresholds are tunable via `CC_BLAST_WARN` and `CC_BLAST_BLOCK` env vars.
+
+This is the reference implementation for wiring `@stackbilt/blast` into a governance workflow. See [cc-taskrunner/taskrunner.sh](https://github.com/Stackbilt-dev/cc-taskrunner/blob/main/taskrunner.sh) — look for `compute_blast_radius()` and the "Blast radius preflight gate" comment block.
+
 ## Requirements
 
 - Node >= 18
