@@ -76,6 +76,7 @@ const DEFAULT_IGNORE_DIRS = new Set([
   '.cache',
   'coverage',
   '.wrangler',
+  '.claude',
 ]);
 
 // Matches: import X from '...', import { X } from '...', import '...', export ... from '...', require('...')
