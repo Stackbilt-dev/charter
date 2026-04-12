@@ -29,16 +29,20 @@ export async function loginCommand(options: CLIOptions, args: string[]): Promise
     } else {
       console.log('Not logged in.');
       console.log('');
-      console.log('Usage: charter login --key sb_live_xxx');
+      console.log('Usage: charter login --key ea_xxx');
+      console.log('       charter login --key sb_live_xxx');
       console.log('       charter login --key sb_test_xxx');
       console.log('');
-      console.log('Get your API key from the Stackbilt dashboard.');
+      console.log('Get your API key from auth.stackbilt.dev (ea_) or the Stackbilt dashboard (sb_).');
     }
     return EXIT_CODE.SUCCESS;
   }
 
-  if (!key.startsWith('sb_live_') && !key.startsWith('sb_test_')) {
-    throw new CLIError('Invalid API key format. Keys must start with sb_live_ or sb_test_.');
+  const VALID_PREFIXES = ['ea_', 'sb_live_', 'sb_test_'];
+  if (!VALID_PREFIXES.some((p) => key.startsWith(p))) {
+    throw new CLIError(
+      `Invalid API key format. Keys must start with one of: ${VALID_PREFIXES.join(', ')}.`
+    );
   }
 
   const baseUrl = getFlag(args, '--url');
