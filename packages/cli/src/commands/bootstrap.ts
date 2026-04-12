@@ -298,10 +298,70 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     reason: 'Commit governance baseline',
   });
 
+  // ========================================================================
+  // Governance Gaps — surface what's configured but not enforced
+  // ========================================================================
+  const gaps: Array<{ gap: string; fix: string }> = [];
+
+  // Check: trailers enabled but no commit-msg hook
+  if (fs.existsSync('.charter/config.json')) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync('.charter/config.json', 'utf-8'));
+      if (cfg.git?.requireTrailers) {
+        const hookPath = path.resolve('.githooks/commit-msg');
+        const gitHookPath = path.resolve('.git/hooks/commit-msg');
+        if (!fs.existsSync(hookPath) && !fs.existsSync(gitHookPath)) {
+          gaps.push({
+            gap: 'requireTrailers enabled but no commit-msg hook installed',
+            fix: 'charter hook install --commit-msg',
+          });
+        }
+      }
+      if (cfg.drift?.enabled && !ciTarget) {
+        const workflowPath = path.resolve('.github/workflows/charter.yml');
+        if (!fs.existsSync(workflowPath)) {
+          gaps.push({
+            gap: 'drift detection enabled but no CI workflow',
+            fix: 'charter bootstrap --ci github (or add manually)',
+          });
+        }
+      }
+    } catch { /* config not parseable — doctor already caught it */ }
+  }
+
+  // Check: no SECURITY.md
+  if (!fs.existsSync('SECURITY.md')) {
+    gaps.push({
+      gap: 'no SECURITY.md for responsible disclosure',
+      fix: 'add SECURITY.md with reporting contact and supported versions',
+    });
+  }
+
+  // Check: no pre-commit hook for ADF evidence
+  const preCommitHook = path.resolve('.githooks/pre-commit');
+  const gitPreCommit = path.resolve('.git/hooks/pre-commit');
+  if (!fs.existsSync(preCommitHook) && !fs.existsSync(gitPreCommit)) {
+    gaps.push({
+      gap: 'no pre-commit hook for ADF evidence gate',
+      fix: 'charter hook install --pre-commit',
+    });
+  }
+
   if (options.format === 'json') {
+    (result as unknown as Record<string, unknown>).governanceGaps = gaps;
     console.log(JSON.stringify(result, null, 2));
   } else {
     console.log(`Bootstrap complete. ${warnings} warning${warnings === 1 ? '' : 's'}.`);
+
+    if (gaps.length > 0) {
+      console.log('');
+      console.log('Governance gaps (configured but not enforced):');
+      for (const { gap, fix } of gaps) {
+        console.log(`  ⚠ ${gap}`);
+        console.log(`    → ${fix}`);
+      }
+    }
+
     console.log('');
     console.log('Next steps:');
     result.nextSteps.forEach((step, i) => {
