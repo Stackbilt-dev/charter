@@ -29,6 +29,7 @@ function printDeprecationNotice(): void {
 
 export async function loginCommand(options: CLIOptions, args: string[]): Promise<number> {
   if (args.includes('--logout')) {
+    printDeprecationNotice();
     clearCredentials();
     console.log('Credentials cleared.');
     return EXIT_CODE.SUCCESS;
