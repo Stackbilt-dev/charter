@@ -13,7 +13,8 @@ import * as fs from 'fs';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { buildGraph, blastRadius } from '@stackbilt/blast';
+import { analyze, BlastInputSchema } from '@stackbilt/blast';
+import { z } from 'zod';
 
 // Flags that consume a value (so the next positional should not be treated as a seed file).
 // Includes local flags (--root, --depth) and global CLI flags (--format, --config).
@@ -36,36 +37,51 @@ export async function blastCommand(options: CLIOptions, args: string[]): Promise
     );
   }
 
-  const root = path.resolve(getFlag(args, '--root') || '.');
+  const rootArg = getFlag(args, '--root') || '.';
   const depthStr = getFlag(args, '--depth');
-  const maxDepth = depthStr ? parseInt(depthStr, 10) : 3;
-  if (!Number.isFinite(maxDepth) || maxDepth < 1) {
-    throw new CLIError(`Invalid --depth value: ${depthStr}. Must be a positive integer.`);
-  }
-
-  // Validate seeds exist
-  const seeds: string[] = [];
-  for (const seed of seedArgs) {
-    const abs = path.resolve(seed);
-    if (!fs.existsSync(abs)) {
-      throw new CLIError(`Seed file not found: ${seed}`);
-    }
-    seeds.push(abs);
-  }
-
-  // Auto-detect path aliases from tsconfig.json if present (best-effort)
+  const root = path.resolve(rootArg);
   const aliases = detectTsconfigAliases(root);
 
-  const graph = buildGraph(root, { aliases });
-  const result = blastRadius(graph, seeds, { maxDepth });
+  // Route argv through the schema. BlastInputSchema owns the depth default
+  // and the "positive integer" rule.
+  let input;
+  try {
+    input = BlastInputSchema.parse({
+      seeds: seedArgs,
+      root: rootArg,
+      maxDepth: depthStr !== undefined ? Number(depthStr) : undefined,
+      aliases,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const msg = err.issues
+        .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+        .join('; ');
+      throw new CLIError(`Invalid arguments: ${msg}`);
+    }
+    throw err;
+  }
+
+  // Pre-flight existence check — matches prior CLI error text.
+  for (const seed of input.seeds) {
+    if (!fs.existsSync(path.resolve(seed))) {
+      throw new CLIError(`Seed file not found: ${seed}`);
+    }
+  }
+
+  const result = analyze(input);
 
   if (options.format === 'json') {
     console.log(
       JSON.stringify(
         {
-          root: path.relative(process.cwd(), root),
-          fileCount: graph.fileCount,
-          ...result,
+          root: path.relative(process.cwd(), result.root),
+          fileCount: result.fileCount,
+          seeds: result.seeds,
+          affected: result.affected,
+          maxDepth: result.maxDepth,
+          hotFiles: result.hotFiles,
+          summary: result.summary,
         },
         null,
         2
@@ -76,13 +92,13 @@ export async function blastCommand(options: CLIOptions, args: string[]): Promise
 
   console.log('');
   console.log(`  Blast radius analysis`);
-  console.log(`  root:       ${path.relative(process.cwd(), root) || '.'}`);
-  console.log(`  scanned:    ${graph.fileCount} files`);
+  console.log(`  root:       ${path.relative(process.cwd(), result.root) || '.'}`);
+  console.log(`  scanned:    ${result.fileCount} files`);
   console.log(`  seeds:      ${result.seeds.length}`);
   for (const seed of result.seeds) {
     console.log(`    - ${seed}`);
   }
-  console.log(`  max depth:  ${maxDepth} (reached: ${result.maxDepth})`);
+  console.log(`  max depth:  ${input.maxDepth} (reached: ${result.maxDepth})`);
   console.log(`  affected:   ${result.summary.totalAffected} file(s)`);
   console.log('');
 
@@ -186,7 +202,7 @@ function loadTsconfigChain(tsconfigPath: string, seen = new Set<string>()): Mini
   return merged;
 }
 
-function detectTsconfigAliases(root: string): Record<string, string> {
+export function detectTsconfigAliases(root: string): Record<string, string> {
   const tsconfigPath = path.join(root, 'tsconfig.json');
   const merged = loadTsconfigChain(tsconfigPath);
   const paths = merged.compilerOptions?.paths;
