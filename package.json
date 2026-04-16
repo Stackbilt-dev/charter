@@ -37,7 +37,7 @@
   "packageManager": "pnpm@9.15.9",
   "devDependencies": {
     "@stackbilt/cli": "workspace:^",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.6.0",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vitest": "^4.1.4",
