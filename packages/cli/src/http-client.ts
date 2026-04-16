@@ -136,7 +136,10 @@ export class EngineClient {
 
   async scaffold(request: { description: string; project_type?: string; complexity?: string; seed?: number }): Promise<ScaffoldResult> {
     if (!this.apiKey) {
-      throw new Error('API key required for scaffold. Run `charter login --key sb_live_xxx` first.');
+      throw new Error(
+        'API key required for scaffold. Set STACKBILT_API_KEY in the environment, ' +
+          'or (deprecated) run `charter login --key sb_live_xxx`.',
+      );
     }
 
     const res = await fetch(`${GATEWAY_BASE_URL}/api/scaffold`, {

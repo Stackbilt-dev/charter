@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- **`STACKBILT_API_KEY` environment variable** — `charter run` and `charter architect` now resolve the API key from `STACKBILT_API_KEY` first, falling back to stored credentials only if the env var is absent or blank. This lets users authenticate the commercial commands without writing a token to `~/.charter/credentials.json`.
+- **`STACKBILT_API_BASE_URL` environment variable** — companion to `STACKBILT_API_KEY`; sets a custom engine base URL for env-var-authenticated callers. Preserves parity with the stored-credentials path (`charter login --url …`).
+- `resolveApiKey()` helper exported from `@stackbilt/cli`'s credentials module (env-var precedence, trimmed, returns `{ apiKey, source: 'env' | 'credentials', baseUrl? }`).
+
+### Deprecated
+- **`charter login`** — emits a deprecation notice on every invocation. Functionality unchanged; scheduled for removal in 1.0 when gateway-bound commands (`login`, `run`, `architect`, `scaffold`) move out of `@stackbilt/cli` into a separate `@stackbilt/build` package.
+
+### Changed
+- Scaffold auth-error message now points users at `STACKBILT_API_KEY` as the primary path, with `charter login` marked deprecated.
+- CLI README gains a short "Authentication (optional)" section documenting the env-var path.
+
 ## [0.10.0] - 2026-04-09
 
 Synchronized version bump for all `@stackbilt/*` packages to 0.10.0.

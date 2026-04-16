@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
-import { loadCredentials } from '../credentials';
+import { resolveApiKey, API_KEY_ENV_VAR } from '../credentials';
 import { EngineClient, type BuildRequest, type ScaffoldResult } from '../http-client';
 
 // ─── Animation ──────────────────────────────────────────────
@@ -98,13 +98,16 @@ export async function runCommand(options: CLIOptions, args: string[]): Promise<n
   const resolvedOutput = outputDir ?? `./${slugify(description)}`;
   const dryRun = args.includes('--dry-run');
 
-  // Engine client
-  const creds = loadCredentials();
+  // Engine client — env var wins over stored credentials.
+  const resolved = resolveApiKey();
   const baseUrl = urlOverride;
-  const client = new EngineClient({ baseUrl: baseUrl ?? creds?.baseUrl, apiKey: creds?.apiKey });
+  const client = new EngineClient({
+    baseUrl: baseUrl ?? resolved?.baseUrl,
+    apiKey: resolved?.apiKey ?? null,
+  });
 
   // Determine path: gateway (with API key) or engine fallback
-  const useGateway = !!creds?.apiKey;
+  const useGateway = !!resolved?.apiKey;
 
   let scaffoldPromise: Promise<ScaffoldResult>;
 

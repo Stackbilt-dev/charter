@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
-import { loadCredentials } from '../credentials';
+import { resolveApiKey, API_KEY_ENV_VAR } from '../credentials';
 import { EngineClient, type BuildRequest, type BuildResult } from '../http-client';
 
 export async function architectCommand(options: CLIOptions, args: string[]): Promise<number> {
@@ -44,10 +44,14 @@ export async function architectCommand(options: CLIOptions, args: string[]): Pro
   const seedStr = getFlag(args, '--seed');
   if (seedStr) request.seed = parseInt(seedStr, 10);
 
-  // Load credentials (optional — engine may not require auth yet)
-  const creds = loadCredentials();
+  // Resolve API key — env var wins over stored credentials. Engine /build is
+  // currently unauthenticated, so missing credentials is not an error here.
+  const resolved = resolveApiKey();
   const baseUrl = getFlag(args, '--url');
-  const client = new EngineClient({ baseUrl: baseUrl ?? creds?.baseUrl, apiKey: creds?.apiKey });
+  const client = new EngineClient({
+    baseUrl: baseUrl ?? resolved?.baseUrl,
+    apiKey: resolved?.apiKey ?? null,
+  });
 
   // Build
   let result: BuildResult;
