@@ -5,8 +5,10 @@
  * and performs BFS traversal to determine which files are affected by
  * changes to a given set of seed files.
  *
- * Zero dependencies — pure Node.js APIs. AST-free: uses regex-based import
- * extraction, which trades some accuracy for universality and speed.
+ * AST-free: uses regex-based import extraction, which trades some accuracy
+ * for universality and speed. Runtime dependency on Zod only — the schemas
+ * below are the authoritative input/output contract shared by the CLI and
+ * MCP tool adapters.
  *
  * Inspired by the CodeSight project's blast-radius algorithm, adapted for
  * the Charter governance workflow.
@@ -14,6 +16,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { z } from 'zod';
 
 // ============================================================================
 // Types
@@ -64,6 +67,10 @@ export interface BlastOptions {
 // ============================================================================
 // Constants
 // ============================================================================
+
+/** Default BFS traversal depth. Referenced by both the schema default and
+ * blastRadius's in-function default so they cannot drift. */
+export const DEFAULT_MAX_DEPTH = 3;
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 const DEFAULT_IGNORE_DIRS = new Set([
@@ -319,7 +326,7 @@ export function blastRadius(
   seeds: string[],
   options: BlastOptions = {}
 ): BlastRadiusResult {
-  const maxDepth = options.maxDepth ?? 3;
+  const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
   const absSeeds = seeds.map((s) => path.resolve(s));
   const seedSet = new Set(absSeeds);
 
@@ -383,6 +390,94 @@ export function topHotFiles(
     if (parents.size === 0) continue;
     ranked.push({ file, importers: parents.size });
   }
-  ranked.sort((a, b) => b.importers - a.importers);
+  // Primary: descending importer count. Secondary: ascending filename, so
+  // ties are deterministic across Node majors and filesystem scan order.
+  ranked.sort((a, b) => b.importers - a.importers || a.file.localeCompare(b.file));
   return ranked.slice(0, limit);
+}
+
+// ============================================================================
+// Zod schemas — authoritative input/output contract
+// ============================================================================
+
+export const BlastInputSchema = z.object({
+  seeds: z
+    .array(z.string().min(1))
+    .min(1)
+    .describe('One or more file paths whose blast radius should be computed. Paths may be absolute or relative to the process cwd.'),
+  root: z
+    .string()
+    .optional()
+    .default('.')
+    .describe('Directory to scan for the dependency graph. Defaults to the current working directory.'),
+  maxDepth: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .default(DEFAULT_MAX_DEPTH)
+    .describe('Maximum BFS depth when traversing reverse dependencies. 1 = direct importers only.'),
+  aliases: z
+    .record(z.string(), z.string())
+    .optional()
+    .default({})
+    .describe('Optional tsconfig-style path alias map (e.g. { "@/": "src/" }). The CLI auto-detects these from tsconfig.json; programmatic callers must supply them explicitly.'),
+});
+
+export type BlastInput = z.infer<typeof BlastInputSchema>;
+
+export const BlastOutputSchema = z.object({
+  root: z.string().describe('Resolved absolute root directory the graph was built from.'),
+  fileCount: z.number().int().nonnegative().describe('Total source files scanned under root.'),
+  seeds: z.array(z.string()).describe('Seed files, as paths relative to root.'),
+  affected: z.array(z.string()).describe('Files that transitively import any seed, excluding seeds themselves, as paths relative to root.'),
+  maxDepth: z.number().int().nonnegative().describe('Deepest BFS level actually reached.'),
+  hotFiles: z
+    .array(
+      z.object({
+        file: z.string(),
+        importers: z.number().int().nonnegative(),
+      }),
+    )
+    .describe('Top 20 most-imported files in the whole graph (not just the blast radius). Sorted by importer count descending, with filename as deterministic tie-breaker.'),
+  summary: z.object({
+    totalAffected: z.number().int().nonnegative(),
+    seedCount: z.number().int().nonnegative(),
+    depthHistogram: z.record(z.string(), z.number().int().nonnegative())
+      .describe('Count of files reached at each BFS depth. Keys are stringified depths.'),
+  }),
+});
+
+export type BlastOutput = z.infer<typeof BlastOutputSchema>;
+
+// ============================================================================
+// High-level analyze — the Core-Out entry point for CLI and MCP adapters
+// ============================================================================
+
+/**
+ * Compose buildGraph + blastRadius from a validated input.
+ *
+ * This is the function both the CLI and the MCP tool adapter call. Low-level
+ * consumers can still use buildGraph and blastRadius directly.
+ */
+export function analyze(input: BlastInput): BlastOutput {
+  const absRoot = path.resolve(input.root);
+  const graph = buildGraph(absRoot, { aliases: input.aliases });
+
+  const absSeeds = input.seeds.map((s) => path.resolve(s));
+  const missing = absSeeds.filter((s) => !fs.existsSync(s));
+  if (missing.length > 0) {
+    throw new Error(`Seed file(s) not found: ${missing.join(', ')}`);
+  }
+  const result = blastRadius(graph, absSeeds, { maxDepth: input.maxDepth });
+
+  return {
+    root: absRoot,
+    fileCount: graph.fileCount,
+    seeds: result.seeds,
+    affected: result.affected,
+    maxDepth: result.maxDepth,
+    hotFiles: result.hotFiles,
+    summary: result.summary,
+  };
 }

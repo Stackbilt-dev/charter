@@ -2,7 +2,7 @@
 
 Blast radius analysis for [Charter Kit](https://github.com/Stackbilt-dev/charter) — a local-first governance toolkit for software repos. Builds a reverse dependency graph from TypeScript/JavaScript source files and answers the question: **"if I change this file, what else breaks?"**
 
-Pure heuristic — no LLM calls, no TypeScript compiler API, zero runtime dependencies. Uses regex-based import extraction, which trades some precision for universality and speed.
+Pure heuristic — no LLM calls, no TypeScript compiler API. Uses regex-based import extraction, which trades some precision for universality and speed. The only runtime dependency is Zod, which provides the authoritative input/output schemas (`BlastInputSchema`, `BlastOutputSchema`) shared between the CLI and MCP tool adapters.
 
 > **Want the full toolkit?** Just install the CLI — it includes everything:
 > ```bash
@@ -30,6 +30,28 @@ charter blast src/foo.ts --root ./packages/server           # Scan a subdirector
 Blast radius ≥20 files triggers a `CROSS_CUTTING` warning — a signal for governance gates to route the change through architectural review.
 
 ## Programmatic Usage
+
+### High-level: `analyze`
+
+The Core-Out entry point used by both the Charter CLI and the `charter_blast` MCP tool. Takes a Zod-validated input object, returns a structured `BlastOutput`:
+
+```ts
+import { analyze, BlastInputSchema } from '@stackbilt/blast';
+
+const input = BlastInputSchema.parse({
+  seeds: ['./src/kernel/dispatch.ts'],
+  root: './',
+  maxDepth: 3,
+  // aliases: { '@/': 'src/' },  // optional, CLI auto-detects from tsconfig
+});
+
+const result = analyze(input);
+console.log(result.summary.totalAffected);
+```
+
+### Low-level: `buildGraph` + `blastRadius`
+
+Useful when you want to reuse a graph across multiple seeds:
 
 ```ts
 import { buildGraph, blastRadius, topHotFiles } from '@stackbilt/blast';

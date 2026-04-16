@@ -26,9 +26,11 @@ import {
   resolveModules,
   validateConstraints,
 } from '@stackbilt/adf';
+import { analyze, BlastInputSchema } from '@stackbilt/blast';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
+import { detectTsconfigAliases } from './blast';
 
 // ============================================================================
 // Constants
@@ -168,6 +170,63 @@ function registerTools(server: McpServer, aiDir: string): void {
         return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
       } catch (err) {
         return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    },
+  );
+
+  // Advertised input shape is a plain ZodRawShape with no `.default()` /
+  // chained refinements — the SDK's type compatibility layer only accepts
+  // simple Zod types. Authoritative validation (defaults, min lengths, etc.)
+  // lives in BlastInputSchema.parse inside the handler; the descriptions
+  // here document those rules for agents.
+  const charterBlastInput = {
+    seeds: z.array(z.string()).describe(
+      'One or more file paths whose blast radius should be computed (at least one required). Paths may be absolute or relative to the server cwd.',
+    ),
+    root: z.string().optional().describe(
+      'Directory to scan for the dependency graph. Defaults to "." (server cwd).',
+    ),
+    maxDepth: z.number().optional().describe(
+      'Maximum BFS depth when traversing reverse dependencies. Positive integer, defaults to 3. 1 = direct importers only.',
+    ),
+    aliases: z.record(z.string()).optional().describe(
+      'Optional tsconfig-style path alias map (e.g. { "@/": "src/" }). If omitted, aliases are auto-detected from tsconfig.json at the scan root.',
+    ),
+  };
+
+  // Cast matches the other inputSchema-bearing tools in this file. The SDK's
+  // `ZodRawShapeCompat` overload resolution triggers TS2589 on any
+  // multi-field raw shape. Follow-up: remove all three casts once the SDK
+  // ships a better type signature (or once Charter upgrades zod).
+  (server.registerTool as Function)(
+    'charter_blast',
+    {
+      description:
+        'Compute blast radius for one or more source files — which other files transitively import them, up to a configurable BFS depth. Returns structured JSON including affected files, hot files, and a depth histogram. A totalAffected >= 20 is the governance signal to classify a change as CROSS_CUTTING.',
+      inputSchema: charterBlastInput,
+    },
+    async (rawInput: unknown) => {
+      try {
+        const parsed = BlastInputSchema.parse(rawInput);
+        // Auto-detect tsconfig aliases if the caller didn't supply any.
+        const aliases =
+          Object.keys(parsed.aliases).length > 0
+            ? parsed.aliases
+            : detectTsconfigAliases(path.resolve(parsed.root));
+        const result = analyze({ ...parsed, aliases });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
       }
     },
   );

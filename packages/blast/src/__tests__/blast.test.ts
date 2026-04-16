@@ -2,7 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { buildGraph, blastRadius, extractImports, topHotFiles } from '../index';
+import {
+  buildGraph,
+  blastRadius,
+  extractImports,
+  topHotFiles,
+  analyze,
+  BlastInputSchema,
+  BlastOutputSchema,
+  DEFAULT_MAX_DEPTH,
+} from '../index';
 
 let tmpRoot: string;
 
@@ -216,5 +225,97 @@ describe('topHotFiles', () => {
 
     expect(hot[0].file).toBe(path.join(tmpRoot, 'shared.ts'));
     expect(hot[0].importers).toBe(3);
+  });
+
+  it('breaks ties deterministically by filename', () => {
+    // Three leaves, each with exactly one importer — all tied at importers=1.
+    // Filenames are crafted to test sort stability: z > m > a lexicographically.
+    write('leaf_z.ts', `export const z = 1;`);
+    write('leaf_m.ts', `export const m = 1;`);
+    write('leaf_a.ts', `export const a = 1;`);
+    write('use_z.ts', `import { z } from './leaf_z';`);
+    write('use_m.ts', `import { m } from './leaf_m';`);
+    write('use_a.ts', `import { a } from './leaf_a';`);
+
+    const graph = buildGraph(tmpRoot);
+    const hot = topHotFiles(graph, 10);
+
+    // Only the leaf files have importers > 0. Ties break by filename ascending.
+    const tiedLeaves = hot.filter((h) => h.importers === 1).map((h) => path.basename(h.file));
+    expect(tiedLeaves).toEqual(['leaf_a.ts', 'leaf_m.ts', 'leaf_z.ts']);
+  });
+});
+
+// ============================================================================
+// Zod schemas + analyze — Core-Out contract
+// ============================================================================
+
+describe('BlastInputSchema', () => {
+  it('applies default maxDepth when omitted', () => {
+    const parsed = BlastInputSchema.parse({ seeds: ['src/x.ts'] });
+    expect(parsed.maxDepth).toBe(DEFAULT_MAX_DEPTH);
+    expect(parsed.root).toBe('.');
+    expect(parsed.aliases).toEqual({});
+  });
+
+  it('rejects maxDepth < 1', () => {
+    expect(() => BlastInputSchema.parse({ seeds: ['x'], maxDepth: 0 })).toThrow();
+    expect(() => BlastInputSchema.parse({ seeds: ['x'], maxDepth: -2 })).toThrow();
+  });
+
+  it('rejects non-integer maxDepth', () => {
+    expect(() => BlastInputSchema.parse({ seeds: ['x'], maxDepth: 1.5 })).toThrow();
+  });
+
+  it('rejects empty seeds array', () => {
+    expect(() => BlastInputSchema.parse({ seeds: [] })).toThrow();
+  });
+});
+
+describe('analyze', () => {
+  it('returns a shape that matches BlastOutputSchema', () => {
+    write('leaf.ts', `export const x = 1;`);
+    write('importer.ts', `import { x } from './leaf';`);
+
+    const input = BlastInputSchema.parse({
+      seeds: [path.join(tmpRoot, 'leaf.ts')],
+      root: tmpRoot,
+    });
+    const result = analyze(input);
+
+    // Structural assertion — no snapshot flakiness.
+    expect(() => BlastOutputSchema.parse(result)).not.toThrow();
+    expect(result.summary.totalAffected).toBe(1);
+    expect(result.affected).toContain('importer.ts');
+  });
+
+  it('throws a descriptive error when a seed is missing', () => {
+    expect(() =>
+      analyze(
+        BlastInputSchema.parse({
+          seeds: [path.join(tmpRoot, 'does-not-exist.ts')],
+          root: tmpRoot,
+        }),
+      ),
+    ).toThrow(/Seed file\(s\) not found/);
+  });
+
+  it('agrees with buildGraph + blastRadius on affected files', () => {
+    write('a.ts', `export const a = 1;`);
+    write('b.ts', `import { a } from './a';\nexport const b = a;`);
+    write('c.ts', `import { b } from './b';\nexport const c = b;`);
+
+    const input = BlastInputSchema.parse({
+      seeds: [path.join(tmpRoot, 'a.ts')],
+      root: tmpRoot,
+      maxDepth: 2,
+    });
+    const fromAnalyze = analyze(input);
+
+    const graph = buildGraph(tmpRoot);
+    const fromLowLevel = blastRadius(graph, [path.join(tmpRoot, 'a.ts')], { maxDepth: 2 });
+
+    expect(fromAnalyze.affected.sort()).toEqual(fromLowLevel.affected.sort());
+    expect(fromAnalyze.summary.totalAffected).toBe(fromLowLevel.summary.totalAffected);
   });
 });
