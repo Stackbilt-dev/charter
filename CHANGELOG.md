@@ -4,12 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
-## [Unreleased]
+## [0.11.0] - 2026-04-16
+
+Synchronized version bump for all `@stackbilt/*` packages to 0.11.0.
 
 ### Added
 - **`STACKBILT_API_KEY` environment variable** — `charter run` and `charter architect` now resolve the API key from `STACKBILT_API_KEY` first, falling back to stored credentials only if the env var is absent or blank. This lets users authenticate the commercial commands without writing a token to `~/.charter/credentials.json`.
 - **`STACKBILT_API_BASE_URL` environment variable** — companion to `STACKBILT_API_KEY`; sets a custom engine base URL for env-var-authenticated callers. Preserves parity with the stored-credentials path (`charter login --url …`).
 - `resolveApiKey()` helper exported from `@stackbilt/cli`'s credentials module (env-var precedence, trimmed, returns `{ apiKey, source: 'env' | 'credentials', baseUrl? }`).
+- **`analyze()` + Zod schemas for `@stackbilt/blast`** — new high-level `analyze(input: BlastInput): BlastOutput` entry point, plus `BlastInputSchema`, `BlastOutputSchema`, and `DEFAULT_MAX_DEPTH` exports. The Zod schemas are the authoritative input/output contract shared by the CLI and MCP tool adapters. Existing `buildGraph` / `blastRadius` / `topHotFiles` / `extractImports` exports preserved.
+- **`charter_blast` MCP tool** — `charter serve` now registers a callable tool for blast-radius analysis, in addition to the existing resource-style governance tools. Agents can query the reverse dependency graph via MCP; tsconfig path aliases are auto-detected at the scan root.
 
 ### Deprecated
 - **`charter login`** — emits a deprecation notice on every invocation. Functionality unchanged; scheduled for removal in 1.0 when gateway-bound commands (`login`, `run`, `architect`, `scaffold`) move out of `@stackbilt/cli` into a separate `@stackbilt/build` package.
@@ -17,6 +21,9 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 ### Changed
 - Scaffold auth-error message now points users at `STACKBILT_API_KEY` as the primary path, with `charter login` marked deprecated.
 - CLI README gains a short "Authentication (optional)" section documenting the env-var path.
+- `@stackbilt/blast` gains `zod` (`^3.24.1`) as a runtime dependency. The "zero runtime dependencies" README claim is updated — Zod is the authoritative contract at the package boundary.
+- `topHotFiles` ties now break deterministically by filename ascending, so output is stable across Node majors and filesystem scan order.
+- `charter blast` CLI routes argv through `BlastInputSchema` — invalid `--depth` values surface as a structured Zod validation error instead of a hand-rolled check.
 
 ## [0.10.0] - 2026-04-09
 
