@@ -73,6 +73,18 @@ charter blast src/foo.ts --depth 3  # reverse dep graph → files affected by ch
 charter surface --markdown          # extract routes (Hono/Express) + D1 schema as markdown
 ```
 
+## Authentication (optional)
+
+Governance commands (`validate`, `drift`, `blast`, `surface`, etc.) run locally and require no authentication.
+
+Commands that reach the Stackbilt engine (`run`, `architect`) read their API key from the `STACKBILT_API_KEY` environment variable:
+
+```bash
+export STACKBILT_API_KEY=ea_xxx   # or sb_live_xxx, sb_test_xxx
+```
+
+The legacy `charter login --key …` command still works but is deprecated and will be removed in `@stackbilt/cli` 1.0 when gateway-bound commands move to a separate package.
+
 ## Human Onboarding (Copy/Paste)
 
 Run this in the target repository:
