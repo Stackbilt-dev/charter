@@ -26,7 +26,12 @@ import {
   resolveModules,
   validateConstraints,
 } from '@stackbilt/adf';
-import { analyze, BlastInputSchema } from '@stackbilt/blast';
+import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
+import {
+  analyze as analyzeSurface,
+  SurfaceInputSchema,
+  formatSurfaceMarkdown,
+} from '@stackbilt/surface';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -213,9 +218,67 @@ function registerTools(server: McpServer, aiDir: string): void {
           Object.keys(parsed.aliases).length > 0
             ? parsed.aliases
             : detectTsconfigAliases(path.resolve(parsed.root));
-        const result = analyze({ ...parsed, aliases });
+        const result = analyzeBlast({ ...parsed, aliases });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // Advertised shape mirrors the blast pattern: plain ZodRawShape with
+  // `.optional()` (no `.default()` chaining) so the SDK's type compatibility
+  // layer accepts it. Authoritative validation (defaults, structure) lives
+  // in SurfaceInputSchema.parse inside the handler.
+  const charterSurfaceInput = {
+    root: z.string().optional().describe(
+      'Directory to scan. Defaults to "." (server cwd).',
+    ),
+    extensions: z.array(z.string()).optional().describe(
+      'File extensions scanned for HTTP route registrations (each with a leading dot). Defaults to .ts/.tsx/.js/.jsx/.mjs.',
+    ),
+    ignoreDirs: z.array(z.string()).optional().describe(
+      'Extra directory names to skip in addition to the built-in ignore list (node_modules, dist, build, .git, .next, .turbo, .wrangler, coverage, __tests__, __mocks__, __fixtures__).',
+    ),
+    schemaPaths: z.array(z.string()).optional().describe(
+      'Explicit paths to SQL schema files. When omitted, schema files are auto-detected under the scan root.',
+    ),
+    format: z.enum(['json', 'markdown']).optional().describe(
+      'Response format. "json" (default) returns structured output; "markdown" returns a compact human/agent-friendly summary suitable for direct prompt injection.',
+    ),
+  };
+
+  // Cast matches the other inputSchema-bearing tools in this file — see the
+  // charter_blast registration above for context.
+  (server.registerTool as Function)(
+    'charter_surface',
+    {
+      description:
+        "Extract the project's API surface — HTTP routes (Hono/Express/itty-router) and D1/SQLite schema tables. Returns structured JSON by default, or a compact markdown summary when format=\"markdown\". Use this instead of grepping for route handlers — it's the pre-digested map of what the repo exposes.",
+      inputSchema: charterSurfaceInput,
+    },
+    async (rawInput: unknown) => {
+      try {
+        const raw = (rawInput ?? {}) as { format?: 'json' | 'markdown' };
+        const format = raw.format ?? 'json';
+        const parsed = SurfaceInputSchema.parse(rawInput);
+        const result = analyzeSurface(parsed);
+        const text =
+          format === 'markdown'
+            ? formatSurfaceMarkdown(result)
+            : JSON.stringify(result, null, 2);
+        return {
+          content: [{ type: 'text' as const, text }],
         };
       } catch (err) {
         return {

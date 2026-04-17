@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { extractRoutes, extractSchema, extractSurface, formatSurfaceMarkdown } from '../index';
+import {
+  extractRoutes,
+  extractSchema,
+  extractSurface,
+  formatSurfaceMarkdown,
+  analyze,
+  SurfaceInputSchema,
+  SurfaceOutputSchema,
+  DEFAULT_SURFACE_EXTENSIONS,
+  DEFAULT_SURFACE_IGNORE_DIRS,
+} from '../index';
 
 let tmpRoot: string;
 
@@ -204,5 +214,98 @@ app.post('/api/users', createUser);
     expect(md).toContain('# API Surface');
     expect(md).toContain('GET /x');
     expect(md).toContain('### t');
+  });
+});
+
+describe('SurfaceInputSchema', () => {
+  it('applies defaults for all optional fields', () => {
+    const parsed = SurfaceInputSchema.parse({});
+    expect(parsed.root).toBe('.');
+    expect(parsed.extensions).toEqual([...DEFAULT_SURFACE_EXTENSIONS]);
+    expect(parsed.ignoreDirs).toEqual([]);
+    expect(parsed.schemaPaths).toBeUndefined();
+  });
+
+  it('passes user-supplied values through', () => {
+    const parsed = SurfaceInputSchema.parse({
+      root: './packages/worker',
+      extensions: ['.ts'],
+      ignoreDirs: ['private'],
+      schemaPaths: ['db/schema.sql'],
+    });
+    expect(parsed.root).toBe('./packages/worker');
+    expect(parsed.extensions).toEqual(['.ts']);
+    expect(parsed.ignoreDirs).toEqual(['private']);
+    expect(parsed.schemaPaths).toEqual(['db/schema.sql']);
+  });
+
+  it('rejects non-array extensions', () => {
+    expect(() =>
+      SurfaceInputSchema.parse({ extensions: '.ts' as unknown as string[] }),
+    ).toThrow();
+  });
+
+  it('rejects non-string root', () => {
+    expect(() =>
+      SurfaceInputSchema.parse({ root: 42 as unknown as string }),
+    ).toThrow();
+  });
+});
+
+describe('analyze', () => {
+  it('returns a SurfaceOutputSchema-shaped result for a mock project', () => {
+    write(
+      'src/app.ts',
+      `import { Hono } from 'hono';
+const app = new Hono();
+app.get('/health', () => new Response('ok'));
+app.post('/api/users', createUser);
+`,
+    );
+    write('schema.sql', `CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL);`);
+
+    const input = SurfaceInputSchema.parse({ root: tmpRoot });
+    const result = analyze(input);
+
+    // Structural assertion — the schema is the contract.
+    const checked = SurfaceOutputSchema.parse(result);
+    expect(checked.summary.routeCount).toBe(2);
+    expect(checked.summary.schemaTableCount).toBe(1);
+    expect(checked.summary.routesByFramework.hono).toBe(2);
+    expect(checked.schemas[0].name).toBe('users');
+  });
+
+  it('returns empty routes + schemas on an empty directory', () => {
+    const input = SurfaceInputSchema.parse({ root: tmpRoot });
+    const result = analyze(input);
+    const checked = SurfaceOutputSchema.parse(result);
+    expect(checked.routes).toEqual([]);
+    expect(checked.schemas).toEqual([]);
+    expect(checked.summary.routeCount).toBe(0);
+  });
+
+  it('honors ignoreDirs from the input', () => {
+    write('src/app.ts', `app.get('/kept', h);`);
+    write('vendor/lib.ts', `app.get('/skipped', h);`);
+
+    const input = SurfaceInputSchema.parse({ root: tmpRoot, ignoreDirs: ['vendor'] });
+    const result = analyze(input);
+    expect(result.summary.routeCount).toBe(1);
+    expect(result.routes[0].path).toBe('/kept');
+  });
+
+  it('honors an explicit schemaPaths list', () => {
+    const schemaFile = write(
+      'db/custom-name.sql',
+      `CREATE TABLE widgets (id INTEGER PRIMARY KEY);`,
+    );
+
+    const input = SurfaceInputSchema.parse({
+      root: tmpRoot,
+      schemaPaths: [schemaFile],
+    });
+    const result = analyze(input);
+    expect(result.summary.schemaTableCount).toBe(1);
+    expect(result.schemas[0].name).toBe('widgets');
   });
 });

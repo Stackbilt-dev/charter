@@ -5,7 +5,7 @@ API surface extraction for [Charter Kit](https://github.com/Stackbilt-dev/charte
 1. **HTTP routes** — Hono, Express, itty-router
 2. **Database schema** — D1 / SQLite `CREATE TABLE` statements
 
-Pure heuristic — no LLM calls, no AST, zero runtime dependencies. Designed for Cloudflare Worker projects, but works on any Node.js HTTP backend with compatible routing conventions.
+Pure heuristic — no LLM calls, no AST. Zod is the only runtime dependency; it carries the package's authoritative input/output schemas so CLI and MCP adapters validate against the same contract. Designed for Cloudflare Worker projects, but works on any Node.js HTTP backend with compatible routing conventions.
 
 > **Want the full toolkit?** Just install the CLI — it includes everything:
 > ```bash
@@ -34,13 +34,24 @@ charter surface --schema db/schema.sql             # Explicit schema path
 ## Programmatic Usage
 
 ```ts
+import { analyze, SurfaceInputSchema } from '@stackbilt/surface';
+
+// `analyze` is the Core-Out entry point — validates input via Zod,
+// composes extractSurface, returns a SurfaceOutput-shaped result.
+const input = SurfaceInputSchema.parse({ root: './packages/worker' });
+const result = analyze(input);
+
+console.log(result.summary);
+// { routeCount: 95, schemaTableCount: 50, routesByMethod: {...}, routesByFramework: {...} }
+```
+
+The lower-level primitives are still exported for callers that don't need
+the schema layer:
+
+```ts
 import { extractSurface, formatSurfaceMarkdown } from '@stackbilt/surface';
 
 const surface = extractSurface({ root: './packages/worker' });
-
-console.log(surface.summary);
-// { routeCount: 95, schemaTableCount: 50, routesByMethod: {...}, routesByFramework: {...} }
-
 console.log(formatSurfaceMarkdown(surface));
 // # API Surface
 // **Routes:** 95
@@ -126,7 +137,7 @@ See [cc-taskrunner/taskrunner.sh](https://github.com/Stackbilt-dev/cc-taskrunner
 ## Requirements
 
 - Node >= 18
-- Zero runtime dependencies
+- One runtime dependency: [zod](https://zod.dev) (authoritative input/output schemas)
 
 ## License
 
