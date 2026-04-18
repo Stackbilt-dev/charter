@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
-## [Unreleased]
+## [0.12.0] - 2026-04-18
+
+Synchronized version bump for all `@stackbilt/*` packages to 0.12.0.
 
 ### Added
 - **`analyze()` + Zod schemas for `@stackbilt/surface`** — new high-level `analyze(input: SurfaceInput): SurfaceOutput` entry point, plus `SurfaceInputSchema`, `SurfaceOutputSchema`, `RouteSchema`, `SchemaTableSchema`, `SchemaColumnSchema`, `DEFAULT_SURFACE_EXTENSIONS`, and `DEFAULT_SURFACE_IGNORE_DIRS` exports. The Zod schemas are the authoritative input/output contract shared by the CLI and MCP tool adapters. Existing `extractSurface` / `extractRoutes` / `extractSchema` / `formatSurfaceMarkdown` exports preserved. `Route`, `SchemaTable`, and `SchemaColumn` are now `z.infer<>` aliases of their schemas — structurally identical to the prior interfaces, so consumer code is unaffected.
@@ -14,6 +16,9 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 - `@stackbilt/surface` gains `zod` (`^3.24.1`) as a runtime dependency. The "zero runtime dependencies" README claim is updated — Zod is the authoritative contract at the package boundary.
 - `charter surface` CLI routes argv through `SurfaceInputSchema` — invalid arguments surface as a structured Zod validation error instead of silently defaulting.
 - `extractSurface` now references the exported `DEFAULT_SURFACE_EXTENSIONS` / `DEFAULT_SURFACE_IGNORE_DIRS` constants so schema defaults and in-function fallbacks cannot drift (same pattern as `DEFAULT_MAX_DEPTH` in blast).
+
+### Security
+- All `@stackbilt/*` packages published from v0.12.0 onward carry npm provenance attestations via GitHub Actions trusted-publisher OIDC auth. Each tarball cryptographically links back to the GHA workflow run that built it; consumers can verify via `npm audit signatures` or the "Provenance" badge on each package's npmjs.com page. Long-lived `NPM_TOKEN` usage is retired.
 
 ## [0.11.0] - 2026-04-16
 
