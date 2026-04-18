@@ -15,15 +15,31 @@ import * as path from 'path';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { extractSurface, formatSurfaceMarkdown } from '@stackbilt/surface';
+import { analyze, SurfaceInputSchema, formatSurfaceMarkdown } from '@stackbilt/surface';
+import { z } from 'zod';
 
 export async function surfaceCommand(options: CLIOptions, args: string[]): Promise<number> {
-  const root = path.resolve(getFlag(args, '--root') || '.');
+  const rootArg = getFlag(args, '--root') || '.';
   const schemaFlag = getFlag(args, '--schema');
-  const schemaPaths = schemaFlag ? [path.resolve(schemaFlag)] : undefined;
   const asMarkdown = args.includes('--markdown') || args.includes('--md');
 
-  const surface = extractSurface({ root, schemaPaths });
+  let input;
+  try {
+    input = SurfaceInputSchema.parse({
+      root: rootArg,
+      schemaPaths: schemaFlag ? [path.resolve(schemaFlag)] : undefined,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const msg = err.issues
+        .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+        .join('; ');
+      throw new CLIError(`Invalid arguments: ${msg}`);
+    }
+    throw err;
+  }
+
+  const surface = analyze(input);
 
   if (asMarkdown) {
     console.log(formatSurfaceMarkdown(surface));
@@ -46,7 +62,7 @@ export async function surfaceCommand(options: CLIOptions, args: string[]): Promi
 
   console.log('');
   console.log(`  API Surface`);
-  console.log(`  root:    ${path.relative(process.cwd(), root) || '.'}`);
+  console.log(`  root:    ${path.relative(process.cwd(), surface.root) || '.'}`);
   console.log(`  routes:  ${surface.summary.routeCount}`);
   console.log(`  tables:  ${surface.summary.schemaTableCount}`);
   console.log('');

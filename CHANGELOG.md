@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- **`analyze()` + Zod schemas for `@stackbilt/surface`** — new high-level `analyze(input: SurfaceInput): SurfaceOutput` entry point, plus `SurfaceInputSchema`, `SurfaceOutputSchema`, `RouteSchema`, `SchemaTableSchema`, `SchemaColumnSchema`, `DEFAULT_SURFACE_EXTENSIONS`, and `DEFAULT_SURFACE_IGNORE_DIRS` exports. The Zod schemas are the authoritative input/output contract shared by the CLI and MCP tool adapters. Existing `extractSurface` / `extractRoutes` / `extractSchema` / `formatSurfaceMarkdown` exports preserved. `Route`, `SchemaTable`, and `SchemaColumn` are now `z.infer<>` aliases of their schemas — structurally identical to the prior interfaces, so consumer code is unaffected.
+- **`charter_surface` MCP tool** — `charter serve` now registers a callable tool for API surface extraction. Supports a `format: "json" | "markdown"` input for agents that want a compact human-readable summary instead of the structured payload. The tool description leads with "use this instead of grepping for route handlers" to nudge cold-boot usage.
+
+### Changed
+- `@stackbilt/surface` gains `zod` (`^3.24.1`) as a runtime dependency. The "zero runtime dependencies" README claim is updated — Zod is the authoritative contract at the package boundary.
+- `charter surface` CLI routes argv through `SurfaceInputSchema` — invalid arguments surface as a structured Zod validation error instead of silently defaulting.
+- `extractSurface` now references the exported `DEFAULT_SURFACE_EXTENSIONS` / `DEFAULT_SURFACE_IGNORE_DIRS` constants so schema defaults and in-function fallbacks cannot drift (same pattern as `DEFAULT_MAX_DEPTH` in blast).
+
 ## [0.11.0] - 2026-04-16
 
 Synchronized version bump for all `@stackbilt/*` packages to 0.11.0.

@@ -5,7 +5,8 @@
  *   1. HTTP routes (Hono, Express, itty-router) via regex matching
  *   2. Database schema (D1 schema.sql CREATE TABLE statements)
  *
- * Zero dependencies. Pure heuristic — no TypeScript compiler API, no AST.
+ * Runtime dependency on Zod only — the schemas below are the authoritative
+ * input/output contract shared by the CLI and MCP tool adapters.
  *
  * Trade-off: misses exotic patterns (dynamic route registration,
  * programmatic middleware chains). Captures the 95% case for Cloudflare
@@ -14,36 +15,80 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { z } from 'zod';
+
+// ============================================================================
+// Constants — exported so schema defaults and in-function fallbacks share
+// the same source of truth (same pattern as DEFAULT_MAX_DEPTH in blast).
+// ============================================================================
+
+/** Default source file extensions scanned for HTTP route registrations. */
+export const DEFAULT_SURFACE_EXTENSIONS: readonly string[] = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+];
+
+/** Default directories skipped when walking the source tree. */
+export const DEFAULT_SURFACE_IGNORE_DIRS: readonly string[] = [
+  'node_modules',
+  'dist',
+  'build',
+  '.git',
+  '.next',
+  '.turbo',
+  '.wrangler',
+  'coverage',
+  '__tests__',
+  '__mocks__',
+  '__fixtures__',
+];
+
+const HTTP_METHODS = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head', 'all'];
+
+// ============================================================================
+// Zod schemas — authoritative runtime contract shared with CLI + MCP adapters
+// ============================================================================
+
+export const RouteSchema = z.object({
+  method: z.string().describe('HTTP method, uppercased (GET, POST, …).'),
+  path: z.string().describe('Route path as written in source, starting with `/`.'),
+  file: z.string().describe('Source file, relative to the scan root.'),
+  line: z.number().int().nonnegative().describe('1-based line number of the registration.'),
+  framework: z
+    .enum(['hono', 'express', 'itty', 'unknown'])
+    .describe('Detected framework based on import statements in the file.'),
+  prefix: z
+    .string()
+    .optional()
+    .describe('Router prefix if detected via `.basePath(...)`.'),
+});
+
+export const SchemaColumnSchema = z.object({
+  name: z.string(),
+  type: z.string().describe('Column type as written, uppercased with whitespace removed (e.g. VARCHAR(255)).'),
+  nullable: z.boolean(),
+  primaryKey: z.boolean(),
+  unique: z.boolean(),
+  defaultValue: z.string().optional(),
+});
+
+export const SchemaTableSchema = z.object({
+  name: z.string(),
+  columns: z.array(SchemaColumnSchema),
+  file: z.string().describe('Source SQL file, relative to the scan root.'),
+  line: z.number().int().positive().describe('1-based line number of the CREATE TABLE statement.'),
+});
+
+export type Route = z.infer<typeof RouteSchema>;
+export type SchemaColumn = z.infer<typeof SchemaColumnSchema>;
+export type SchemaTable = z.infer<typeof SchemaTableSchema>;
 
 // ============================================================================
 // Types
 // ============================================================================
-
-export interface Route {
-  method: string;
-  path: string;
-  file: string;
-  line: number;
-  framework: 'hono' | 'express' | 'itty' | 'unknown';
-  /** Router prefix if detected (e.g. '/api') */
-  prefix?: string;
-}
-
-export interface SchemaTable {
-  name: string;
-  columns: SchemaColumn[];
-  file: string;
-  line: number;
-}
-
-export interface SchemaColumn {
-  name: string;
-  type: string;
-  nullable: boolean;
-  primaryKey: boolean;
-  unique: boolean;
-  defaultValue?: string;
-}
 
 export interface Surface {
   root: string;
@@ -67,27 +112,6 @@ export interface ExtractOptions {
   /** explicit schema file path(s); default: auto-detect schema.sql anywhere under root */
   schemaPaths?: string[];
 }
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs'];
-const DEFAULT_IGNORE_DIRS = new Set([
-  'node_modules',
-  'dist',
-  'build',
-  '.git',
-  '.next',
-  '.turbo',
-  '.wrangler',
-  'coverage',
-  '__tests__',
-  '__mocks__',
-  '__fixtures__',
-]);
-
-const HTTP_METHODS = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head', 'all'];
 
 // ============================================================================
 // File walking
@@ -377,8 +401,11 @@ function splitTopLevelCommas(input: string): string[] {
  */
 export function extractSurface(options: ExtractOptions = {}): Surface {
   const root = path.resolve(options.root ?? '.');
-  const extensions = new Set(options.extensions ?? DEFAULT_EXTENSIONS);
-  const ignoreDirs = new Set([...DEFAULT_IGNORE_DIRS, ...(options.ignoreDirs ?? [])]);
+  const extensions = new Set(options.extensions ?? DEFAULT_SURFACE_EXTENSIONS);
+  const ignoreDirs = new Set([
+    ...DEFAULT_SURFACE_IGNORE_DIRS,
+    ...(options.ignoreDirs ?? []),
+  ]);
 
   // Routes
   const sourceFiles = walkFiles(root, extensions, ignoreDirs);
@@ -488,4 +515,72 @@ export function formatSurfaceMarkdown(surface: Surface): string {
   }
 
   return lines.join('\n');
+}
+
+// ============================================================================
+// Zod schemas — Input / Output contract for analyze()
+// ============================================================================
+
+export const SurfaceInputSchema = z.object({
+  root: z
+    .string()
+    .optional()
+    .default('.')
+    .describe('Directory to scan. Defaults to the current working directory.'),
+  extensions: z
+    .array(z.string())
+    .optional()
+    .default([...DEFAULT_SURFACE_EXTENSIONS])
+    .describe('File extensions scanned for HTTP route registrations (each with a leading dot).'),
+  ignoreDirs: z
+    .array(z.string())
+    .optional()
+    .default([])
+    .describe('Extra directory names to skip in addition to the built-in ignore list.'),
+  schemaPaths: z
+    .array(z.string())
+    .optional()
+    .describe('Explicit paths to SQL schema files. When omitted, schema files are auto-detected under the scan root.'),
+});
+
+export type SurfaceInput = z.infer<typeof SurfaceInputSchema>;
+
+export const SurfaceOutputSchema = z.object({
+  root: z.string().describe('Resolved absolute root directory the scan was performed from.'),
+  routes: z.array(RouteSchema).describe('All HTTP routes discovered in the scanned source files.'),
+  schemas: z.array(SchemaTableSchema).describe('All D1/SQLite tables discovered in schema SQL files.'),
+  summary: z
+    .object({
+      routeCount: z.number().int().nonnegative(),
+      schemaTableCount: z.number().int().nonnegative(),
+      routesByMethod: z
+        .record(z.string(), z.number().int().nonnegative())
+        .describe('Count of routes grouped by uppercased HTTP method.'),
+      routesByFramework: z
+        .record(z.string(), z.number().int().nonnegative())
+        .describe('Count of routes grouped by detected framework (hono/express/itty/unknown).'),
+    })
+    .describe('Aggregate counts across the scanned project.'),
+});
+
+export type SurfaceOutput = z.infer<typeof SurfaceOutputSchema>;
+
+// ============================================================================
+// High-level analyze — the Core-Out entry point for CLI and MCP adapters
+// ============================================================================
+
+/**
+ * Extract a project's API surface from a validated input.
+ *
+ * This is the function both the CLI and the MCP tool adapter call. Low-level
+ * consumers can still use extractSurface / extractRoutes / extractSchema
+ * directly.
+ */
+export function analyze(input: SurfaceInput): SurfaceOutput {
+  return extractSurface({
+    root: input.root,
+    extensions: input.extensions,
+    ignoreDirs: input.ignoreDirs,
+    schemaPaths: input.schemaPaths,
+  });
 }
