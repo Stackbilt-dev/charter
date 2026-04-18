@@ -107,11 +107,13 @@ jobs:
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
+      # No registry-url: setup-node would otherwise write ~/.npmrc with a
+      # _authToken line, which makes npm CLI prefer token auth over the
+      # OIDC flow that trusted publishers require.
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '20'
           cache: 'pnpm'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -136,7 +138,7 @@ jobs:
           done
           if [[ $FAIL -ne 0 ]]; then exit 1; fi
 
+      # Auth is OIDC via npm trusted publishers — no NPM_TOKEN needed.
+      # See: https://docs.npmjs.com/trusted-publishers
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --workspaces --access public --provenance
