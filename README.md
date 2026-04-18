@@ -4,51 +4,25 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](./LICENSE)
 [![Discord](https://img.shields.io/discord/1485683351393407006?color=7289da&label=Discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/aJmE8wmQDS)
 
-![Charter hero](./stackbilt-charter-4.png)
+## Local-first AI agent governance for your repo.
 
-## Your first Cloudflare Workers project shouldn't take a week.
-
-```bash
-npx @stackbilt/cli run "A real-time chat app on Cloudflare Workers with D1, auth, and rate limiting"
-```
-
-One command. Architecture designed, stack selected, files scaffolded. No boilerplate, no templates, no inference cost -- the engine is deterministic.
-
-```
-  ✓ Analyzing requirements...
-  ✓ Selecting stack (7 components, compatibility: 94/100)
-  ✓ Scaffolding project...
-
-  Created 12 files in ./realtime-chat/
-    src/index.ts        — Hono API with WebSocket upgrade
-    src/auth.ts         — JWT middleware + session management
-    src/chat-room.ts    — Durable Object for room state
-    wrangler.toml       — D1 binding, DO namespace, rate limiting
-    schema.sql          — Users, rooms, messages tables
-    ...
-
-  Run: cd realtime-chat && npm install && npx wrangler dev
-```
-
-Add constraints to narrow the output:
+Tell your AI agents what they can and can't do. Charter gives you modular context loading (ADF), measurable ceilings on every module, commit-time validation, and pre-merge blast-radius analysis. Zero product dependencies. No network calls. No credentials stored.
 
 ```bash
-stackbilt run "Invoice processing API" --cloudflare-only --framework Hono --database D1
-stackbilt run --file spec.md   # Or feed a full spec
+npx @stackbilt/cli bootstrap --yes
 ```
+
+Detects your stack, scaffolds `.ai/`, migrates existing CLAUDE.md / `.cursorrules` / GEMINI.md into on-demand modules with trigger keywords.
 
 ## What you get
 
-Charter scaffolds production-ready projects, not starter templates. Scaffolded projects can include patterns from the [Stackbilt ecosystem](https://github.com/Stackbilt-dev) -- battle-tested packages extracted from 70+ real-world projects:
+- **Modular agent context (ADF)** — replace monolithic CLAUDE.md with trigger-driven on-demand module loading. Agents pull only the rules each task needs.
+- **Measurable constraints** — per-module metric ceilings (LOC, complexity, bloat) validated at commit time and in CI.
+- **Codebase analysis** — `charter blast` reverse-dependency graphs, `charter surface` route/schema fingerprints. Deterministic, zero runtime deps.
+- **Drift + audit** — anti-pattern scans, commit governance, CI-ready exit codes.
+- **MCP server** — `charter serve` exposes project context to Claude Code.
 
-| Package | What it does |
-|---------|-------------|
-| [@stackbilt/llm-providers](https://github.com/Stackbilt-dev/llm-providers) | Multi-LLM failover with circuit breakers and cost tracking |
-| [@stackbilt/worker-observability](https://github.com/Stackbilt-dev/worker-observability) | Health checks, structured logging, metrics, tracing, SLI/SLO |
-| [@stackbilt/audit-chain](https://github.com/Stackbilt-dev/audit-chain) | Tamper-evident SHA-256 hash-chained audit trails |
-| [@stackbilt/adf](https://www.npmjs.com/package/@stackbilt/adf) | Modular AI agent context system (see below) |
-
-Plus governance out of the box: `.ai/` directory with ADF modules, metric ceilings, and optional CI gating.
+Compose with the broader [Stackbilt ecosystem](https://github.com/Stackbilt-dev) — [audit-chain](https://github.com/Stackbilt-dev/audit-chain), [worker-observability](https://github.com/Stackbilt-dev/worker-observability), [llm-providers](https://github.com/Stackbilt-dev/llm-providers), [adf](https://www.npmjs.com/package/@stackbilt/adf) — when you need them.
 
 ## Install
 
@@ -59,8 +33,6 @@ npm install --save-dev @stackbilt/cli
 For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm install -g @stackbilt/cli`.
 
 > **WSL2 note:** If your project lives on the Windows filesystem (`/mnt/c/...`), pnpm may fail with `EACCES` permission errors due to WSL2/NTFS cross-filesystem limitations with atomic renames. Use `pnpm add --force` to work around this, or move your project to a Linux-native path (e.g., `~/projects/`) for best performance.
-
-**Free to try.** `charter login --key sb_live_xxx` to connect your [Stackbilt](https://stackbilt.dev) API key for full scaffold output.
 
 ## AI agent governance with ADF
 
@@ -127,15 +99,6 @@ Claude Code can query `getProjectContext`, `getArchitecturalDecisions`, `getProj
 
 ## Commands
 
-### Build
-
-```bash
-stackbilt run "description"              # Architect + scaffold in one step
-charter architect "description"          # Generate stack selection
-charter scaffold --output ./my-project   # Write files from last build
-charter login --key sb_live_xxx          # Store API key (one-time)
-```
-
 ### Govern
 
 ```bash
@@ -172,6 +135,17 @@ charter surface --markdown               # Emit as markdown for .ai/surface.adf 
 Deterministic codebase analysis — no LLM calls, zero runtime dependencies. `blast` warns on large radiuses (≥20 files) as a CROSS_CUTTING signal; `surface` is a lightweight alternative to full AST walks for Cloudflare Worker projects.
 
 All commands support `--format json` with `nextActions` hints for agent workflows.
+
+### Build (deprecated — moving to `@stackbilt/build`)
+
+> These four commands reach external Stackbilt endpoints and are being extracted into a separate `@stackbilt/build` npm package. Governance-only users don't need them. Migration tracked in [RFC #112](https://github.com/Stackbilt-dev/charter/issues/112).
+
+```bash
+stackbilt run "description"              # Architect + scaffold in one step
+charter architect "description"          # Generate stack selection
+charter scaffold --output ./my-project   # Write files from last build
+charter login --key sb_live_xxx          # Store API key (deprecated — prefer STACKBILT_API_KEY env var)
+```
 
 ### Exit codes
 
