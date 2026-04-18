@@ -115,6 +115,11 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
 
+      # npm 11.5.1+ required for trusted-publisher OIDC auth on publish.
+      # The version bundled with Node 20 on setup-node is ~10.x.
+      - name: Upgrade npm for trusted-publisher support
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
