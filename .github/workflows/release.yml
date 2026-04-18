@@ -119,6 +119,7 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # Enforces unified workspace versioning — every packages/*/package.json must match the tag.
       - name: Verify workspace versions match tag
         shell: bash
         run: |
