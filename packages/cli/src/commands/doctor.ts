@@ -65,6 +65,18 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       status: policyCount > 0 ? 'PASS' : 'WARN',
       details: policyCount > 0 ? `${policyCount} markdown policy file(s).` : 'No policy markdown files found.',
     });
+
+    const securityDenyPath = path.join(options.configPath, 'patterns', 'security-deny.json');
+    if (fs.existsSync(securityDenyPath)) {
+      const securityTestFiles = findSecurityTestFiles('.');
+      checks.push({
+        name: 'security test coverage',
+        status: securityTestFiles.length > 0 ? 'PASS' : 'WARN',
+        details: securityTestFiles.length > 0
+          ? `${securityTestFiles.length} security test file(s): ${securityTestFiles.slice(0, 5).join(', ')}`
+          : 'Security-sensitive repo has no **/security* or **/l4* test file. Add L4/security regression tests.',
+      });
+    }
   }
 
   // ADF readiness checks
@@ -341,6 +353,45 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
   }
 
   return EXIT_CODE.SUCCESS;
+}
+
+function findSecurityTestFiles(rootPath: string): string[] {
+  const matches: string[] = [];
+  const skipDirs = new Set(['.git', 'node_modules', 'dist', 'coverage', '.ai', '.charter']);
+
+  function walk(dir: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relPath = path.relative(rootPath, fullPath) || entry.name;
+      if (entry.isDirectory()) {
+        if (!skipDirs.has(entry.name)) {
+          walk(fullPath);
+        }
+        continue;
+      }
+
+      if (entry.isFile() && /^(security|l4)/i.test(entry.name) && isTestLikePath(relPath)) {
+        matches.push(relPath);
+      }
+    }
+  }
+
+  walk(rootPath);
+  return matches.sort();
+}
+
+function isTestLikePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+  return normalized.includes('/test/')
+    || normalized.includes('/tests/')
+    || /\.(test|spec)\.[cm]?[jt]sx?$/.test(normalized);
 }
 
 

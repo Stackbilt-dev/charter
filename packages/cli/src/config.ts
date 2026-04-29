@@ -194,7 +194,7 @@ export function loadPatterns(configPath: string): Pattern[] {
   }
 
   const patterns: Pattern[] = [];
-  const files = fs.readdirSync(patternsDir).filter(f => f.endsWith('.json'));
+  const files = fs.readdirSync(patternsDir).filter(f => f.endsWith('.json') && f !== 'security-deny.json');
 
   for (const file of files) {
     try {

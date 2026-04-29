@@ -12,7 +12,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { loadConfig, loadPatterns, getPatternCustomizationStatus } from '../config';
 import { scanForDrift } from '@stackbilt/drift';
-import type { DriftReport } from '@stackbilt/types';
+import type { DriftReport, DriftViolation, Pattern } from '@stackbilt/types';
 
 export async function driftCommand(options: CLIOptions, args: string[]): Promise<number> {
   const config = loadConfig(options.configPath);
@@ -67,11 +67,19 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
     return options.ciMode ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
   }
 
-  const report = scanForDrift(files, patterns);
-  const status: 'PASS' | 'FAIL' = report.score >= config.drift.minScore ? 'PASS' : 'FAIL';
+  const securityPatterns = loadSecurityDenyPatterns(options.configPath);
+  const securityReport = securityPatterns.length > 0 ? scanForDrift(files, securityPatterns) : null;
+  const securityViolations = (securityReport?.violations || []).map((violation) => ({
+    ...violation,
+    severity: 'BLOCKER' as const,
+  }));
+  const report = mergeReports(scanForDrift(files, patterns), securityViolations, securityPatterns.length);
+  const hasSecurityBlocker = securityViolations.length > 0;
+  const status: 'PASS' | 'FAIL' = report.score >= config.drift.minScore && !hasSecurityBlocker ? 'PASS' : 'FAIL';
   const patternsCustomized = getPatternCustomizationStatus(options.configPath);
   const output = {
     status,
+    securityBlockers: securityViolations.length,
     minScore: config.drift.minScore,
     thresholdPercent: Math.round(config.drift.minScore * 100),
     configPath: options.configPath,
@@ -82,24 +90,27 @@ export async function driftCommand(options: CLIOptions, args: string[]): Promise
   if (options.format === 'json') {
     console.log(JSON.stringify(output, null, 2));
   } else {
-    printReport(report, config.drift.minScore, patternsCustomized);
+    printReport(report, config.drift.minScore, patternsCustomized, securityViolations.length);
   }
 
-  if (options.ciMode && report.score < config.drift.minScore) {
+  if (options.ciMode && (report.score < config.drift.minScore || hasSecurityBlocker)) {
     return EXIT_CODE.POLICY_VIOLATION;
   }
 
   return EXIT_CODE.SUCCESS;
 }
 
-function printReport(report: DriftReport, minScore: number, patternsCustomized: boolean | null): void {
-  const icon = report.score >= minScore ? '[ok]' : '[fail]';
+function printReport(report: DriftReport, minScore: number, patternsCustomized: boolean | null, securityBlockers: number): void {
+  const icon = report.score >= minScore && securityBlockers === 0 ? '[ok]' : '[fail]';
   const pct = Math.round(report.score * 100);
 
   console.log(`\n  ${icon} Drift Score: ${pct}% (threshold: ${Math.round(minScore * 100)}%)`);
   console.log(`     Scanned: ${report.scannedFiles} files against ${report.scannedPatterns} patterns`);
   if (patternsCustomized !== null) {
     console.log(`     Patterns customized: ${patternsCustomized ? 'yes' : 'no'}`);
+  }
+  if (securityBlockers > 0) {
+    console.log(`     Security blockers: ${securityBlockers}`);
   }
 
   if (report.violations.length > 0) {
@@ -126,6 +137,53 @@ function printReport(report: DriftReport, minScore: number, patternsCustomized: 
   }
 
   console.log('');
+}
+
+function loadSecurityDenyPatterns(configPath: string): Pattern[] {
+  const denyPath = path.join(configPath, 'patterns', 'security-deny.json');
+  if (!fs.existsSync(denyPath)) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(denyPath, 'utf-8'));
+    const rawPatterns = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.patterns)
+        ? parsed.patterns
+        : [];
+
+    return rawPatterns.map((item: Record<string, unknown>, index: number) => ({
+      id: String(item.id || `security-deny-${index}`),
+      name: String(item.name || `Security Deny ${index + 1}`),
+      category: String(item.category || 'SECURITY'),
+      blessedSolution: String(item.blessed_solution || item.blessedSolution || ''),
+      rationale: typeof item.rationale === 'string' ? item.rationale : null,
+      antiPatterns: typeof item.anti_patterns === 'string'
+        ? item.anti_patterns
+        : typeof item.antiPatterns === 'string'
+          ? item.antiPatterns
+          : null,
+      documentationUrl: null,
+      relatedLedgerId: null,
+      status: 'ACTIVE' as const,
+      createdAt: new Date().toISOString(),
+      projectId: null,
+    }));
+  } catch {
+    console.warn(`Warning: Failed to parse security deny pattern file: ${denyPath}`);
+    return [];
+  }
+}
+
+function mergeReports(base: DriftReport, securityViolations: DriftViolation[], extraPatternCount: number): DriftReport {
+  const violations = [...base.violations, ...securityViolations];
+  return {
+    ...base,
+    violations,
+    scannedPatterns: base.scannedPatterns + extraPatternCount,
+    score: Math.max(0, 1.0 - (violations.length * 0.1)),
+  };
 }
 
 function collectFiles(
