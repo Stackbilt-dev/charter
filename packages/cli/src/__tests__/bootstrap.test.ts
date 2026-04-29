@@ -3,6 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapCommand } from '../commands/bootstrap';
+import { doctorCommand } from '../commands/doctor';
+import { driftCommand } from '../commands/drift';
 import type { CLIOptions } from '../index';
 
 const baseOptions: CLIOptions = {
@@ -121,5 +123,51 @@ STATE:
     const manifest = fs.readFileSync(path.join('.ai', 'manifest.adf'), 'utf-8');
     expect(manifest).toContain('agent.adf');
     expect(manifest).toContain('persona.adf');
+  });
+
+  it('seeds security-sensitive bootstrap files and warns when security tests are absent', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--security-sensitive', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync('SECURITY.md')).toBe(true);
+    expect(fs.existsSync(path.join('.charter', 'patterns', 'security-deny.json'))).toBe(true);
+
+    logs = [];
+    await doctorCommand({ ...baseOptions, format: 'json' }, []);
+    const report = JSON.parse(logs[0]);
+    const securityCheck = report.checks.find((check: { name: string }) => check.name === 'security test coverage');
+    expect(securityCheck.status).toBe('WARN');
+
+    fs.mkdirSync('tests', { recursive: true });
+    fs.writeFileSync(path.join('tests', 'security-l4.test.ts'), 'export {};');
+
+    logs = [];
+    await doctorCommand({ ...baseOptions, format: 'json' }, []);
+    const updatedReport = JSON.parse(logs[0]);
+    const updatedSecurityCheck = updatedReport.checks.find((check: { name: string }) => check.name === 'security test coverage');
+    expect(updatedSecurityCheck.status).toBe('PASS');
+  });
+
+  it('treats security deny drift matches as CI policy violations', async () => {
+    await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--security-sensitive', '--skip-install', '--skip-doctor'],
+    );
+    fs.mkdirSync('src', { recursive: true });
+    fs.writeFileSync(path.join('src', 'verify.ts'), 'export function verify(computed: string, signature: string) { return computed === signature; }\n');
+
+    logs = [];
+    const exitCode = await driftCommand({ ...baseOptions, format: 'json', ciMode: true }, ['--path', '.']);
+    const report = JSON.parse(logs[0]);
+
+    expect(exitCode).toBe(1);
+    expect(report.status).toBe('FAIL');
+    expect(report.securityBlockers).toBeGreaterThan(0);
+    expect(report.violations.some((violation: { severity: string; patternName: string }) =>
+      violation.severity === 'BLOCKER' && violation.patternName.includes('Timing-Sensitive Equality')
+    )).toBe(true);
   });
 });

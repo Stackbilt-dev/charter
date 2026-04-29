@@ -104,6 +104,7 @@ Claude Code can query `getProjectContext`, `getArchitecturalDecisions`, `getProj
 ```bash
 charter                                  # Repo risk/value snapshot
 charter bootstrap --ci github            # One-command onboarding
+charter bootstrap --security-sensitive   # SECURITY.md + hard security drift denies
 charter doctor                           # Environment/config health check
 charter validate                         # Commit governance (trailers)
 charter drift                            # Pattern drift scanning

@@ -79,6 +79,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const skipInstall = args.includes('--skip-install');
   const skipDoctor = args.includes('--skip-doctor');
   const force = args.includes('--force');
+  const securitySensitive = args.includes('--security-sensitive');
   const nonInteractive = options.yes;
   const setupOverwrite = options.yes || force;
 
@@ -125,7 +126,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 2: Setup
   // ========================================================================
-  const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, setupOverwrite);
+  const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, setupOverwrite, securitySensitive);
   result.steps.push(setupResult.step);
   warnings += setupResult.step.warnings.length;
 
@@ -472,7 +473,8 @@ function runSetupPhase(
   contexts: ReturnType<typeof loadPackageContexts>,
   ciTarget: string | undefined,
   packageManager: 'npm' | 'pnpm',
-  force: boolean
+  force: boolean,
+  securitySensitive: boolean
 ): { step: StepResult } {
   const warnings: string[] = [];
   const created: string[] = [];
@@ -489,6 +491,7 @@ function runSetupPhase(
         react: detection.signals.hasReact,
         vite: detection.signals.hasVite,
       },
+      securitySensitive,
     });
 
     if (initResult.created) {
