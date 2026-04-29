@@ -31,6 +31,9 @@
   "dependencies": {
     "@stackbilt/types": "workspace:^"
   },
+  "scripts": {
+    "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
+  },
   "publishConfig": {
     "access": "public"
   },

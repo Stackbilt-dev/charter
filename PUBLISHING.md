@@ -41,6 +41,7 @@ pnpm run clean
 pnpm run typecheck
 pnpm run build
 pnpm run test
+pnpm run publish:check
 ```
 
 ## Phase 2: Version Bump
@@ -62,23 +63,29 @@ done
 
 ## Phase 3: Artifact Validation (Required)
 
-1. Dry-run packed contents per package:
+1. Verify packed package manifests do not contain `workspace:` dependency specifiers:
 
 ```bash
-pnpm --filter @stackbilt/types pack --dry-run
-pnpm --filter @stackbilt/core pack --dry-run
-pnpm --filter @stackbilt/adf pack --dry-run
-pnpm --filter @stackbilt/git pack --dry-run
-pnpm --filter @stackbilt/classify pack --dry-run
-pnpm --filter @stackbilt/validate pack --dry-run
-pnpm --filter @stackbilt/drift pack --dry-run
-pnpm --filter @stackbilt/blast pack --dry-run
-pnpm --filter @stackbilt/surface pack --dry-run
-pnpm --filter @stackbilt/ci pack --dry-run
-pnpm --filter @stackbilt/cli pack --dry-run
+pnpm run publish:check
 ```
 
-2. Verify CLI behavior before publish:
+2. Dry-run packed contents per package:
+
+```bash
+(cd packages/types && pnpm pack --dry-run)
+(cd packages/core && pnpm pack --dry-run)
+(cd packages/adf && pnpm pack --dry-run)
+(cd packages/git && pnpm pack --dry-run)
+(cd packages/classify && pnpm pack --dry-run)
+(cd packages/validate && pnpm pack --dry-run)
+(cd packages/drift && pnpm pack --dry-run)
+(cd packages/blast && pnpm pack --dry-run)
+(cd packages/surface && pnpm pack --dry-run)
+(cd packages/ci && pnpm pack --dry-run)
+(cd packages/cli && pnpm pack --dry-run)
+```
+
+3. Verify CLI behavior before publish:
 
 ```bash
 node packages/cli/dist/bin.js --version
