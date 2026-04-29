@@ -126,11 +126,17 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      # Enforces unified workspace versioning — every packages/*/package.json must match the tag.
-      - name: Verify workspace versions match tag
+      # Enforces unified workspace versioning: every packages/*/package.json must match the tag.
+      # If Charter adopts independent package versions, replace this with per-package release metadata.
+      - name: Verify tag and workspace versions
         shell: bash
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag format: ${TAG}. Expected v<major>.<minor>.<patch>"
+            exit 1
+          fi
+
           EXPECTED="${TAG#v}"
           FAIL=0
           for p in packages/*/package.json; do
@@ -143,7 +149,43 @@ jobs:
           done
           if [[ $FAIL -ne 0 ]]; then exit 1; fi
 
+      - name: Verify packed manifests
+        run: pnpm run publish:check
+
       # Auth is OIDC via npm trusted publishers — no NPM_TOKEN needed.
       # See: https://docs.npmjs.com/trusted-publishers
       - name: Publish to npm
-        run: npm publish --workspaces --access public --provenance
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          mkdir -p release-tarballs
+
+          pack_package() {
+            local package_dir="$1"
+            (cd "${package_dir}" && pnpm pack --pack-destination ../../release-tarballs)
+          }
+
+          pack_package packages/types
+          pack_package packages/core
+          pack_package packages/adf
+          pack_package packages/git
+          pack_package packages/classify
+          pack_package packages/validate
+          pack_package packages/drift
+          pack_package packages/blast
+          pack_package packages/surface
+          pack_package packages/ci
+          pack_package packages/cli
+
+          npm publish "release-tarballs/stackbilt-types-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-core-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-adf-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-git-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-classify-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-validate-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-drift-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-blast-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-surface-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-ci-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-cli-${VERSION}.tgz" --access public --provenance
