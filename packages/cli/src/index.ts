@@ -38,6 +38,7 @@ Usage:
   charter                          Show immediate governance value + risk snapshot
   charter bootstrap [--ci github] [--preset <name>] [--yes] [--force] [--skip-install] [--skip-doctor]
                                    One-command repo onboarding (detect + setup + ADF + install + doctor)
+                                   --security-sensitive adds SECURITY.md, hard security drift denies, and a security test check
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
   charter init [--preset <worker|frontend|backend|fullstack>] [--guided]
