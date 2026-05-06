@@ -78,11 +78,13 @@ One-command repo onboarding. Orchestrates detect + setup + ADF init + install + 
 ```bash
 npx charter bootstrap                                         # interactive
 npx charter bootstrap --preset worker --ci github --yes       # fully automated
+npx charter bootstrap --preset worker --security-sensitive     # security posture baseline
 npx charter bootstrap --skip-install --skip-doctor            # minimal
 ```
 
 - `--ci github` — generate GitHub Actions governance workflow
 - `--preset <worker|frontend|backend|fullstack|docs>` — stack preset
+- `--security-sensitive` — generate `SECURITY.md`, seed hard-fail drift denies in `.charter/patterns/security-deny.json`, and warn in `doctor` when no `security*` or `l4*` test file exists
 - `--skip-install` — skip dependency installation phase
 - `--skip-doctor` — skip health check phase
 - `-y, --yes` — accept all prompts

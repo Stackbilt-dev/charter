@@ -228,6 +228,73 @@ const GITIGNORE_CONTENT = `# Charter local state
 .cache/
 `;
 
+const SECURITY_TEMPLATE = `# Security Policy
+
+## Supported Versions
+
+| Version | Supported |
+| ------- | --------- |
+| Current release | Yes |
+
+## Reporting a Vulnerability
+
+Please report suspected vulnerabilities privately to the project maintainers.
+Do not open a public issue for security-sensitive findings.
+
+Include:
+- affected package or service
+- reproduction steps or proof of concept
+- expected impact
+- any known mitigations
+
+Maintainers should acknowledge reports within 3 business days and provide a remediation plan or status update when triage is complete.
+`;
+
+const SECURITY_DENY_PATTERNS = {
+  customized: false,
+  preset: 'security-sensitive',
+  generatedAt: '1970-01-01T00:00:00.000Z',
+  hardFail: true,
+  patterns: [
+    {
+      id: 'security-deny-timing-compare',
+      name: 'Security Deny: Timing-Sensitive Equality',
+      category: 'SECURITY',
+      blessed_solution: 'Use constant-time comparison helpers for signatures, digests, and tokens.',
+      rationale: 'Plain equality on security digests can leak timing information.',
+      anti_patterns: 'Avoid `/===\\s*(signature|expected|digest|token)/i` and `/(signature|expected|digest|token)\\s*===/i`.',
+      status: 'ACTIVE',
+    },
+    {
+      id: 'security-deny-optional-security-binding',
+      name: 'Security Deny: Optional Security Binding Access',
+      category: 'SECURITY',
+      blessed_solution: 'Fail closed when security-critical bindings are missing.',
+      rationale: 'Optional reads on auth/session/token bindings can silently bypass enforcement.',
+      anti_patterns: 'Avoid `/\\b(auth|session|token|secret|key)\\w*\\?\\.(get|put)\\s*\\(/i`.',
+      status: 'ACTIVE',
+    },
+    {
+      id: 'security-deny-auth-todo',
+      name: 'Security Deny: TODO in Security Path',
+      category: 'SECURITY',
+      blessed_solution: 'Resolve security TODOs before shipping auth, session, or token paths.',
+      rationale: 'TODO markers in security-sensitive code tend to become persistent control gaps.',
+      anti_patterns: 'Avoid `/TODO.*\\b(auth|session|token|secret|hmac|signature)\\b/i` and `/\\b(auth|session|token|secret|hmac|signature)\\b.*TODO/i`.',
+      status: 'ACTIVE',
+    },
+    {
+      id: 'security-deny-token-json-exposure',
+      name: 'Security Deny: Token JSON Exposure',
+      category: 'SECURITY',
+      blessed_solution: 'Return opaque success responses or scoped public metadata instead of raw access tokens.',
+      rationale: 'Raw token exposure in JSON responses increases credential leakage risk.',
+      anti_patterns: 'Avoid `/c\\.json\\s*\\(\\s*\\{\\s*access_token/i`.',
+      status: 'ACTIVE',
+    },
+  ],
+};
+
 interface InitResult {
   created: boolean;
   configPath: string;
@@ -244,6 +311,7 @@ interface InitializeOptions {
     react?: boolean;
     vite?: boolean;
   };
+  securitySensitive?: boolean;
 }
 
 export async function initCommand(options: CLIOptions, args: string[] = []): Promise<number> {
@@ -251,13 +319,14 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   const guided = args.includes('--guided');
   const presetFlag = getFlag(args, '--preset');
   const preset = isValidPreset(presetFlag) ? presetFlag : undefined;
+  const securitySensitive = args.includes('--security-sensitive');
 
   // --guided: interactive mode that asks questions before scaffolding
   if (guided) {
     return guidedInit(options, force);
   }
 
-  const result = initializeCharter(options.configPath, force, { preset });
+  const result = initializeCharter(options.configPath, force, { preset, securitySensitive });
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -319,6 +388,10 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
   if (writeIfChanged(path.join(configDir, 'patterns', 'blessed-stack.json'), JSON.stringify(patterns, null, 2) + '\n')) writesPerformed++;
   if (writeIfChanged(path.join(configDir, 'policies', 'governance.md'), DEFAULT_POLICY_CONTENT)) writesPerformed++;
   if (writeIfChanged(path.join(configDir, '.gitignore'), GITIGNORE_CONTENT)) writesPerformed++;
+  if (initOptions.securitySensitive) {
+    if (writeIfChanged(path.join(configDir, 'patterns', 'security-deny.json'), JSON.stringify(SECURITY_DENY_PATTERNS, null, 2) + '\n')) writesPerformed++;
+    if (writeIfChanged('SECURITY.md', SECURITY_TEMPLATE)) writesPerformed++;
+  }
 
   return {
     created: !exists,
@@ -328,6 +401,7 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
       'patterns/blessed-stack.json',
       'policies/governance.md',
       '.gitignore',
+      ...(initOptions.securitySensitive ? ['patterns/security-deny.json', '../SECURITY.md'] : []),
     ],
     writesPerformed,
   };
