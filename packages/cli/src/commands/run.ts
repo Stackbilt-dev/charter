@@ -21,6 +21,7 @@ import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
 import { resolveApiKey, API_KEY_ENV_VAR } from '../credentials';
 import { EngineClient, type BuildRequest, type ScaffoldResult } from '../http-client';
+import { printBuildCommandDeprecationWarning } from './deprecation-warning';
 
 // ─── Animation ──────────────────────────────────────────────
 
@@ -69,6 +70,8 @@ function phaseDetail(label: string, result: ScaffoldResult): string {
 // ─── Command ────────────────────────────────────────────────
 
 export async function runCommand(options: CLIOptions, args: string[]): Promise<number> {
+  printBuildCommandDeprecationWarning('run', args);
+
   // Parse flags first (getFlag consumes flag + value from args)
   const filePath = getFlag(args, '--file');
   const outputDir = getFlag(args, '--output');

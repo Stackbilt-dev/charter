@@ -13,8 +13,11 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
 import type { BuildResult } from '../http-client';
+import { printBuildCommandDeprecationWarning } from './deprecation-warning';
 
 export async function scaffoldCommand(options: CLIOptions, args: string[]): Promise<number> {
+  printBuildCommandDeprecationWarning('scaffold', args);
+
   const configPath = options.configPath || '.charter';
   const cachePath = path.join(configPath, 'last-build.json');
 

@@ -12,6 +12,7 @@
 import type { CLIOptions } from '../index';
 import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
+import { printBuildCommandDeprecationWarning } from './deprecation-warning';
 import {
   loadCredentials,
   saveCredentials,
@@ -20,16 +21,10 @@ import {
 } from '../credentials';
 import { EngineClient } from '../http-client';
 
-function printDeprecationNotice(): void {
-  process.stderr.write(
-    `[deprecated] 'charter login' will be removed in 1.0. ` +
-      `Set ${API_KEY_ENV_VAR} in the environment instead.\n`,
-  );
-}
-
 export async function loginCommand(options: CLIOptions, args: string[]): Promise<number> {
+  printBuildCommandDeprecationWarning('login', args);
+
   if (args.includes('--logout')) {
-    printDeprecationNotice();
     clearCredentials();
     console.log('Credentials cleared.');
     return EXIT_CODE.SUCCESS;
@@ -37,7 +32,6 @@ export async function loginCommand(options: CLIOptions, args: string[]): Promise
 
   const key = getFlag(args, '--key');
   if (!key) {
-    printDeprecationNotice();
     const existing = loadCredentials();
     const envKey = process.env[API_KEY_ENV_VAR];
     if (envKey && envKey.trim().length > 0) {
@@ -63,8 +57,6 @@ export async function loginCommand(options: CLIOptions, args: string[]): Promise
     }
     return EXIT_CODE.SUCCESS;
   }
-
-  printDeprecationNotice();
 
   const VALID_PREFIXES = ['ea_', 'sb_live_', 'sb_test_'];
   if (!VALID_PREFIXES.some((p) => key.startsWith(p))) {
