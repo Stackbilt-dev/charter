@@ -2,10 +2,11 @@
 /**
  * eval-brief-coverage.mjs
  *
- * Deterministic fixture-based eval for charter context.
- * Verifies that the brief's content coverage is sufficient for agent orientation.
+ * Structural coverage eval for charter context.
+ * Runs `charter context --stdout-only` against the local repo and verifies the brief
+ * contains all required sections and answers 5 standard agent orientation questions.
  *
- * Does NOT call a live model — tests structural coverage against fixture answers.
+ * Does NOT call a live model — tests structural coverage of live output.
  * CI-safe and reproducible.
  *
  * Acceptance: a brief-primed agent should reach first useful action in ≤5 tool calls.
@@ -14,7 +15,6 @@
  */
 
 import { execSync } from 'node:child_process';
-import * as assert from 'node:assert';
 
 const REQUIRED_SECTIONS = ['## Identity', '## Surface', '## Hotspots', '## Sensitivity', '## Governance', '## See also'];
 

@@ -638,9 +638,24 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
     onDemandLimit = 3;
     truncatedSections.push(`Governance ON_DEMAND: reduced from ${before} to ${onDemandLimit} entries`);
     markdown = tryRender();
+    if (markdown.length <= CHAR_CEILING) {
+      return {
+        markdown,
+        tokenCount: estimateTokens(markdown),
+        truncated: true,
+        truncatedSections: [...truncatedSections],
+      };
+    }
   }
 
-  // Even after all truncations, return what we have
+  // Step 5: Hard-slice to guarantee the budget is never exceeded.
+  // Reached only when all prior steps still leave the brief over budget
+  // (e.g. very long route paths or ON_DEMAND trigger lists).
+  if (markdown.length > CHAR_CEILING) {
+    truncatedSections.push('Content hard-sliced to fit token budget');
+    markdown = markdown.slice(0, CHAR_CEILING) + '\n\n## Truncated\n- Content hard-sliced to fit token budget\n';
+  }
+
   return {
     markdown,
     tokenCount: estimateTokens(markdown),
@@ -657,6 +672,11 @@ export async function contextCommand(options: CLIOptions, args: string[]): Promi
   const stdoutOnly = args.includes('--stdout-only');
   const verbose = args.includes('--verbose');
   const writeOnly = args.includes('--write');
+
+  if (stdoutOnly && writeOnly) {
+    process.stderr.write('charter context: --stdout-only and --write are mutually exclusive\n');
+    return EXIT_CODE.RUNTIME_ERROR;
+  }
 
   const result = await generateBrief({
     configPath: options.configPath,
