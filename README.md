@@ -99,6 +99,8 @@ METRICS [load-bearing]:
 
 Claude Code can query `getProjectContext`, `getArchitecturalDecisions`, `getProjectState`, and `getRecentChanges` directly.
 
+The `charter_brief` MCP tool composes routes, hotspots, and governance into a single pre-digested brief — call it first in any agent session to skip 15-30 cold-boot discovery calls.
+
 ## Commands
 
 ### Govern
@@ -107,6 +109,7 @@ Claude Code can query `getProjectContext`, `getArchitecturalDecisions`, `getProj
 charter                                  # Repo risk/value snapshot
 charter bootstrap --ci github            # One-command onboarding
 charter bootstrap --security-sensitive   # SECURITY.md + hard security drift denies
+charter context                          # pre-digested repo brief for AI agents (routes, hotspots, governance)
 charter doctor                           # Environment/config health check
 charter validate                         # Commit governance (trailers)
 charter drift                            # Pattern drift scanning

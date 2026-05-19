@@ -226,6 +226,7 @@ Keep governance workflows aligned across all active agent instruction standards.
 
 const GITIGNORE_CONTENT = `# Charter local state
 .cache/
+context.md
 `;
 
 const SECURITY_TEMPLATE = `# Security Policy

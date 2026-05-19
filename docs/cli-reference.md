@@ -324,6 +324,66 @@ npx charter blast src/foo.ts --root ./packages/server       # scan a subdirector
 
 **Semantics:** zero runtime dependencies, no LLM calls, no TypeScript compiler API. Regex-based import extraction — trades some precision for universality across JavaScript/TypeScript/ESM/CommonJS projects.
 
+### charter context
+
+Pre-digested repo brief for AI agents. Composes routes (surface), hotspots (blast), sensitivity tags, and governance posture into a single bounded markdown document.
+
+**The fastest way to orient an AI agent in a Charter-governed repo.** Reading the brief replaces 15-30 cold-boot discovery tool calls.
+
+#### Usage
+
+```bash
+npx charter context                   # print brief + write .charter/context.md
+npx charter context --stdout-only     # print only, no file write
+npx charter context --verbose         # no token ceiling (for human reading)
+npx charter context --write           # write .charter/context.md only (for hooks)
+```
+
+#### Brief sections
+
+| Section | Source | Always present |
+| ------- | ------ | -------------- |
+| Identity | `.charter/config.json` + `package.json` | Yes |
+| Surface | `charter surface` (routes + D1 tables) | Yes |
+| Hotspots | `charter blast` (top hot files by importer count) | Yes |
+| Sensitivity | `.charter/config.json` sensitivity tags | Yes |
+| Governance | `.ai/manifest.adf` module routing | Yes |
+
+#### Token budget
+
+The brief is capped at **2000 tokens** (~8000 characters). When content exceeds the budget, sections are truncated in this order: hotspots tail → D1 tables → routes → governance ON_DEMAND entries. A `## Truncated` section is appended listing what was reduced.
+
+Use `--verbose` to remove the ceiling for interactive sessions.
+
+#### MCP tool
+
+`charter serve` registers `charter_brief`. Agents should call this first:
+
+> "CALL THIS FIRST when entering a Charter-governed repo. Returns routes, hotspots, sensitivity tags, and governance in a single pre-digested brief — replaces 15-30 discovery tool calls."
+
+#### Post-commit hook (keep brief fresh)
+
+```bash
+echo 'charter context --write' >> .git/hooks/post-commit
+chmod +x .git/hooks/post-commit
+```
+
+Or use `charter bootstrap` — it adds this as a suggested next step.
+
+#### Blast seed strategy
+
+Seeds for hotspot analysis are chosen by preset (from `.charter/config.json`):
+
+| Preset | Seeds |
+| ------ | ----- |
+| worker | `src/index.*`, route files, wrangler entry |
+| frontend | `src/App.*`, `src/main.*`, `src/index.*` |
+| backend | `src/index.*`, `src/server.*`, `src/app.*` |
+| fullstack | worker + frontend seeds |
+| cli | `bin/` entries, `src/commands/*.ts` |
+| docs | `README.md`, `docs/*.md` |
+| unknown | `src/index.*`, `src/main.*` |
+
 ### charter surface
 
 Extract the API surface of a project: HTTP routes and database schema tables.

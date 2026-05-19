@@ -357,6 +357,11 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       required: false,
       reason: 'Install commit-msg hook for trailer enforcement',
     });
+    result.nextSteps.push({
+      cmd: 'echo \'charter context --write\' >> .git/hooks/post-commit && chmod +x .git/hooks/post-commit',
+      required: false,
+      reason: 'Keep .charter/context.md fresh after each commit (charter brief auto-refresh)',
+    });
   }
 
   // ========================================================================
