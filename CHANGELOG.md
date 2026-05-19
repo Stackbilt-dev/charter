@@ -13,6 +13,9 @@ Synchronized version bump for all `@stackbilt/*` packages to 0.13.0.
 - **Security blocker tracking in `charter drift`** — when `security-deny.json` is present, matching violations are surfaced as `BLOCKER` severity and counted in a new `securityBlockers` field in JSON output. CI mode exits non-zero on any security blocker regardless of the drift score threshold.
 - **`doctor` security test coverage check** — activates automatically when `.charter/patterns/security-deny.json` exists; passes once a `security*` or `l4*` test file is detected under `tests/`, `__tests__/`, or any `*.test.*` / `*.spec.*` path.
 
+### Changed
+- **Unified build-command deprecation warnings** — `login`, `run`, `architect`, and `scaffold` now share a single `printBuildCommandDeprecationWarning` helper that points users at `@stackbilt/build`. Suppress with `CHARTER_NO_DEPRECATION_WARNING=1` or `--no-deprecation-warning`.
+
 ## [0.12.1] - 2026-05-05
 
 Hotfix release for npm consumer install breakage in 0.12.0.
@@ -502,6 +505,7 @@ All 345 existing tests pass.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.13.0]: https://github.com/stackbilt-dev/charter/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/stackbilt-dev/charter/compare/v0.12.0...v0.12.1
 [0.5.0]: https://github.com/stackbilt-dev/charter/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/stackbilt-dev/charter/compare/v0.4.1...v0.4.2
