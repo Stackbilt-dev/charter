@@ -222,8 +222,8 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       try {
         const manifestDoc = parseAdf(fs.readFileSync(manifestCheckPath, 'utf-8'));
         const manifestParsed = parseManifest(manifestDoc);
-        if (manifestParsed.defaultLoad.length === 0) {
-          console.warn("Warning: manifest.adf parsed with 0 DEFAULT_LOAD entries — run 'charter adf register core.adf --load default' to repair.");
+        if (manifestParsed.defaultLoad.length === 0 && options.format === 'text') {
+          console.log("  Warning: manifest.adf parsed with 0 DEFAULT_LOAD entries — run 'charter adf register core.adf --load default' to repair.");
         }
       } catch {
         // Parse failure already flagged elsewhere
@@ -435,7 +435,8 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       console.log('');
       console.log(`⚠  Bootstrap partially complete — ${failedSteps.length} step${failedSteps.length === 1 ? '' : 's'} failed:`);
       for (const s of failedSteps) {
-        const errDetail = s.details.error ? ` (${s.details.error})` : '';
+        const rawErr = s.details.error ? String(s.details.error).split('\n')[0].slice(0, 120) : '';
+        const errDetail = rawErr ? ` (${rawErr})` : '';
         const hintLine = s.warnings.find(w => w.startsWith('Hint:'));
         const hint = hintLine ? ` — ${hintLine}` : '';
         console.log(`   • ${s.name}${errDetail}${hint}`);
@@ -955,7 +956,7 @@ function runInstallPhase(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     warnings.push(`Install failed: ${msg}`);
-    const hint = classifyInstallError(msg);
+    const hint = classifyInstallError(msg, pm);
     if (hint) {
       warnings.push(`Hint: ${hint}`);
     }
@@ -971,13 +972,13 @@ function runInstallPhase(
   }
 }
 
-function classifyInstallError(msg: string): string {
-  if (/ERR_PNPM_FROZEN_LOCKFILE|frozen.lockfile|--frozen-lockfile/i.test(msg))
+function classifyInstallError(msg: string, pm: string): string {
+  if (/ERR_PNPM_FROZEN_LOCKFILE|frozen[-. ]lockfile|--frozen-lockfile/i.test(msg))
     return 'Lockfile is out of date. Retry with: pnpm install --no-frozen-lockfile';
   if (/EPERM|EACCES|permission denied/i.test(msg))
     return 'Permission error. On WSL/NTFS try: pnpm install --force  (or move project to ~/projects/)';
   if (/ENOTFOUND|ETIMEDOUT|fetch failed|503|network/i.test(msg))
-    return 'Network error. Check connectivity and retry: ' + (msg.includes('pnpm') ? 'pnpm install' : 'npm install');
+    return `Network error. Check connectivity and retry: ${pm} install`;
   return '';
 }
 
@@ -1246,7 +1247,7 @@ function registerModulesInDefaultLoad(manifestPath: string, modules: string[]): 
   if (!section) {
     section = {
       key: sectionKey,
-      decoration: null,
+      decoration: '📦',
       content: { type: 'list', items: [] },
     };
     // Prepend DEFAULT_LOAD before any ON_DEMAND section

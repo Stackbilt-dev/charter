@@ -224,6 +224,7 @@ load state.adf always
     expect(onDemandPaths).not.toContain('core.adf');
     expect(onDemandPaths).not.toContain('state.adf');
   });
+
   it('classifies frozen-lockfile install errors and sets status to partial', async () => {
     // Override execSync to throw an ERR_PNPM_FROZEN_LOCKFILE error for this test only
     execSyncOverride = () => {
