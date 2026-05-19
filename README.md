@@ -32,6 +32,8 @@ npm install --save-dev @stackbilt/cli
 
 For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm install -g @stackbilt/cli`.
 
+> If you installed `@stackbilt/cli@0.12.0`, upgrade to `0.12.1` or later. `0.12.0` was deprecated due to invalid published `workspace:` dependency specifiers for external consumers.
+
 > **WSL2 note:** If your project lives on the Windows filesystem (`/mnt/c/...`), pnpm may fail with `EACCES` permission errors due to WSL2/NTFS cross-filesystem limitations with atomic renames. Use `pnpm add --force` to work around this, or move your project to a Linux-native path (e.g., `~/projects/`) for best performance.
 
 ## AI agent governance with ADF

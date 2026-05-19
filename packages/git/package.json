@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/git",
   "sideEffects": false,
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Git trailer parsing, commit risk scoring, and PR validation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@stackbilt/types": "workspace:^"
+    "@stackbilt/types": "^0.12.1"
   },
   "scripts": {
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"

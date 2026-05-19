@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.13.0] - 2026-05-19
+
+Synchronized version bump for all `@stackbilt/*` packages to 0.13.0.
+
+### Added
+- **`charter bootstrap --security-sensitive`** — new flag that seeds a `SECURITY.md` vulnerability disclosure template, writes hard-fail drift deny patterns to `.charter/patterns/security-deny.json`, and registers a `doctor` check that warns when no `security*` or `l4*` test file is found. Designed for repos handling auth, tokens, or signatures.
+- **Security blocker tracking in `charter drift`** — when `security-deny.json` is present, matching violations are surfaced as `BLOCKER` severity and counted in a new `securityBlockers` field in JSON output. CI mode exits non-zero on any security blocker regardless of the drift score threshold.
+- **`doctor` security test coverage check** — activates automatically when `.charter/patterns/security-deny.json` exists; passes once a `security*` or `l4*` test file is detected under `tests/`, `__tests__/`, or any `*.test.*` / `*.spec.*` path.
+
+## [0.12.1] - 2026-05-05
+
+Hotfix release for npm consumer install breakage in 0.12.0.
+
+### Fixed
+- Published `@stackbilt/*` package manifests now use concrete semver ranges for internal runtime dependencies (for example, `^0.12.1`) instead of `workspace:` protocol specifiers.
+- `pnpm add @stackbilt/cli` now succeeds in non-workspace consumer repos.
+
+### Changed
+- All publishable `@stackbilt/*` packages are synchronized at `0.12.1`.
+- Publishing runbook updated to require concrete publish-time dependency validation and to remove stale `pnpm pack --dry-run` guidance.
+
+### Deprecated
+- Broken `0.12.0` npm versions were deprecated for impacted packages with an upgrade message to `0.12.1`.
+
 ## [0.12.0] - 2026-04-18
 
 Synchronized version bump for all `@stackbilt/*` packages to 0.12.0.
@@ -478,6 +502,7 @@ All 345 existing tests pass.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.12.1]: https://github.com/stackbilt-dev/charter/compare/v0.12.0...v0.12.1
 [0.5.0]: https://github.com/stackbilt-dev/charter/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/stackbilt-dev/charter/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/stackbilt-dev/charter/compare/v0.4.0...v0.4.1

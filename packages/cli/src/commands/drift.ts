@@ -167,7 +167,7 @@ function loadSecurityDenyPatterns(configPath: string): Pattern[] {
       documentationUrl: null,
       relatedLedgerId: null,
       status: 'ACTIVE' as const,
-      createdAt: new Date().toISOString(),
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : '1970-01-01T00:00:00.000Z',
       projectId: null,
     }));
   } catch {
@@ -177,12 +177,10 @@ function loadSecurityDenyPatterns(configPath: string): Pattern[] {
 }
 
 function mergeReports(base: DriftReport, securityViolations: DriftViolation[], extraPatternCount: number): DriftReport {
-  const violations = [...base.violations, ...securityViolations];
   return {
     ...base,
-    violations,
+    violations: [...base.violations, ...securityViolations],
     scannedPatterns: base.scannedPatterns + extraPatternCount,
-    score: Math.max(0, 1.0 - (violations.length * 0.1)),
   };
 }
 
