@@ -45,7 +45,7 @@ import {
   manifestForPreset,
 } from './adf';
 import { loadPatterns } from '../config';
-import { parseAdf, parseManifest } from '@stackbilt/adf';
+import { parseAdf, parseManifest, formatAdf } from '@stackbilt/adf';
 import { migrateSource, updateModuleIndex } from './adf-migrate';
 import type { SourceMigrationResult } from './adf-migrate';
 
@@ -111,6 +111,15 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const contexts = detectResult.contexts;
   const packageManager = detectResult.packageManager;
 
+  // Check git repo status once — used for preflight warning and gating hook next-steps
+  const inGitRepo = isGitRepo();
+  if (!inGitRepo) {
+    detectResult.step.warnings.push(
+      "Not inside a git repository. Run 'git init && git add -A && git commit -m \"initial commit\"' before installing hooks. Continuing — governance files will be written but hooks cannot be installed yet."
+    );
+    warnings++;
+  }
+
   if (options.format === 'text') {
     console.log('[1/7] Detecting stack...');
     console.log(`  Stack: ${selectedPreset} (${detection.confidence} confidence)`);
@@ -119,6 +128,11 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       for (const w of detection.warnings) {
         console.log(`  Warning: ${w}`);
       }
+    }
+    if (!inGitRepo) {
+      console.log(`  Warning: Not inside a git repository.`);
+      console.log(`  Run 'git init && git add -A && git commit -m "initial commit"' before installing hooks.`);
+      console.log(`  Continuing — governance files will be written but hooks cannot be installed yet.`);
     }
     console.log('');
   }
@@ -176,11 +190,43 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       shouldRegister = await promptYesNo('  Register these modules now? (y/N) ');
     }
     if (shouldRegister) {
-      registerOrphansInManifest(path.join('.ai', 'manifest.adf'), orphans);
+      const manifestFilePath = path.join('.ai', 'manifest.adf');
+      // Split orphans: core.adf and state.adf belong in DEFAULT_LOAD, everything else in ON_DEMAND
+      const defaultLoadOrphans = orphans.filter(m => DEFAULT_LOAD_MODULES.has(m));
+      const onDemandOrphans = orphans.filter(m => !DEFAULT_LOAD_MODULES.has(m));
+
+      if (defaultLoadOrphans.length > 0) {
+        registerModulesInDefaultLoad(manifestFilePath, defaultLoadOrphans);
+        if (options.format === 'text') {
+          console.log(`  Registered ${defaultLoadOrphans.length} module(s) as DEFAULT_LOAD in manifest.adf`);
+        }
+      }
+      if (onDemandOrphans.length > 0) {
+        registerOrphansInManifest(manifestFilePath, onDemandOrphans);
+        if (options.format === 'text') {
+          console.log(`  Registered ${onDemandOrphans.length} module(s) as ON_DEMAND in manifest.adf`);
+        }
+      }
+
       updateModuleIndex('CLAUDE.md', '.ai');
       if (options.format === 'text') {
-        console.log(`  Registered ${orphans.length} module(s) as ON_DEMAND in manifest.adf`);
         console.log('');
+      }
+    }
+  }
+
+  // Post-write manifest self-check: warn if DEFAULT_LOAD is empty but core.adf exists
+  if (fs.existsSync(path.join('.ai', 'core.adf'))) {
+    const manifestCheckPath = path.join('.ai', 'manifest.adf');
+    if (fs.existsSync(manifestCheckPath)) {
+      try {
+        const manifestDoc = parseAdf(fs.readFileSync(manifestCheckPath, 'utf-8'));
+        const manifestParsed = parseManifest(manifestDoc);
+        if (manifestParsed.defaultLoad.length === 0 && options.format === 'text') {
+          console.log("  Warning: manifest.adf parsed with 0 DEFAULT_LOAD entries — run 'charter adf register core.adf --load default' to repair.");
+        }
+      } catch {
+        // Parse failure already flagged elsewhere
       }
     }
   }
@@ -299,6 +345,20 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     reason: 'Commit governance baseline',
   });
 
+  // Gate hook next-steps on being inside a git repo
+  if (inGitRepo) {
+    result.nextSteps.push({
+      cmd: 'charter hook install --pre-commit',
+      required: false,
+      reason: 'Install pre-commit hook for ADF evidence gate',
+    });
+    result.nextSteps.push({
+      cmd: 'charter hook install --commit-msg',
+      required: false,
+      reason: 'Install commit-msg hook for trailer enforcement',
+    });
+  }
+
   // ========================================================================
   // Governance Gaps — surface what's configured but not enforced
   // ========================================================================
@@ -368,6 +428,39 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     result.nextSteps.forEach((step, i) => {
       console.log(`  ${i + 1}. ${step.cmd}`);
     });
+
+    // Partial/failure summary banner
+    if (result.status === 'partial' || result.status === 'failure') {
+      const failedSteps = result.steps.filter(s => s.status === 'fail');
+      console.log('');
+      console.log(`⚠  Bootstrap partially complete — ${failedSteps.length} step${failedSteps.length === 1 ? '' : 's'} failed:`);
+      for (const s of failedSteps) {
+        const rawErr = s.details.error ? String(s.details.error).split('\n')[0].slice(0, 120) : '';
+        const errDetail = rawErr ? ` (${rawErr})` : '';
+        const hintLine = s.warnings.find(w => w.startsWith('Hint:'));
+        const hint = hintLine ? ` — ${hintLine}` : '';
+        console.log(`   • ${s.name}${errDetail}${hint}`);
+      }
+      console.log('');
+      console.log('Next steps to complete setup:');
+      let n = 1;
+      const installFailed = failedSteps.some(s => s.name === 'install');
+      if (installFailed) {
+        const installStep = failedSteps.find(s => s.name === 'install');
+        const frozenHint = installStep?.warnings.find(w => w.includes('--no-frozen-lockfile'));
+        if (frozenHint) {
+          console.log(`   ${n++}. pnpm install --no-frozen-lockfile   (or see hint above)`);
+        } else {
+          console.log(`   ${n++}. ${installStep?.details.command ?? 'npm install'}   (see hint above)`);
+        }
+        console.log(`   ${n++}. charter doctor`);
+        if (inGitRepo) {
+          console.log(`   ${n++}. charter hook install --pre-commit`);
+        }
+      } else {
+        console.log(`   ${n++}. charter doctor`);
+      }
+    }
   }
 
   return EXIT_CODE.SUCCESS;
@@ -862,10 +955,10 @@ function runInstallPhase(
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    const isPermError = msg.includes('EPERM') || msg.includes('EACCES') || msg.includes('permission denied');
     warnings.push(`Install failed: ${msg}`);
-    if (isPermError) {
-      warnings.push(`Hint: permission error detected. Retry outside the sandbox or with elevated privileges: ${command}`);
+    const hint = classifyInstallError(msg, pm);
+    if (hint) {
+      warnings.push(`Hint: ${hint}`);
     }
     warnings.push(`Retry manually: ${command}`);
     return {
@@ -877,6 +970,16 @@ function runInstallPhase(
       },
     };
   }
+}
+
+function classifyInstallError(msg: string, pm: string): string {
+  if (/ERR_PNPM_FROZEN_LOCKFILE|frozen[-. ]lockfile|--frozen-lockfile/i.test(msg))
+    return 'Lockfile is out of date. Retry with: pnpm install --no-frozen-lockfile';
+  if (/EPERM|EACCES|permission denied/i.test(msg))
+    return 'Permission error. On WSL/NTFS try: pnpm install --force  (or move project to ~/projects/)';
+  if (/ENOTFOUND|ETIMEDOUT|fetch failed|503|network/i.test(msg))
+    return `Network error. Check connectivity and retry: ${pm} install`;
+  return '';
 }
 
 function detectPackageManagerFromLockfiles(): 'pnpm' | 'npm' | 'yarn' {
@@ -1052,6 +1155,12 @@ function runDoctorPhase(
 // Helpers
 // ============================================================================
 
+/**
+ * Modules that must always appear in DEFAULT_LOAD rather than ON_DEMAND.
+ * core.adf and state.adf are always loaded — they are not optional.
+ */
+const DEFAULT_LOAD_MODULES = new Set(['core.adf', 'state.adf']);
+
 function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
 }
@@ -1123,4 +1232,49 @@ function registerOrphansInManifest(manifestPath: string, orphans: string[]): voi
   });
   lines.splice(insertIdx, 0, ...newEntries);
   fs.writeFileSync(manifestPath, lines.join('\n'));
+}
+
+/**
+ * Register modules in the DEFAULT_LOAD section of manifest.adf.
+ * Uses the structured parseAdf/formatAdf round-trip so the result is canonical.
+ * DEFAULT_LOAD entries are plain filenames with no "(Triggers on: ...)" suffix.
+ */
+function registerModulesInDefaultLoad(manifestPath: string, modules: string[]): void {
+  const manifestDoc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
+  const sectionKey = 'DEFAULT_LOAD';
+
+  let section = manifestDoc.sections.find(s => s.key === sectionKey);
+  if (!section) {
+    section = {
+      key: sectionKey,
+      decoration: '📦',
+      content: { type: 'list', items: [] },
+    };
+    // Prepend DEFAULT_LOAD before any ON_DEMAND section
+    const onDemandIdx = manifestDoc.sections.findIndex(s => s.key === 'ON_DEMAND');
+    if (onDemandIdx !== -1) {
+      manifestDoc.sections.splice(onDemandIdx, 0, section);
+    } else {
+      manifestDoc.sections.push(section);
+    }
+  }
+
+  if (section.content.type !== 'list') {
+    // Fallback: append raw text rather than throwing — bootstrap should not crash
+    const raw = '\n\n📦 DEFAULT_LOAD:\n' + modules.map(m => `  - ${m}`).join('\n') + '\n';
+    fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf-8').trimEnd() + raw);
+    return;
+  }
+
+  let updated = false;
+  for (const mod of modules) {
+    if (!section.content.items.includes(mod)) {
+      section.content.items.push(mod);
+      updated = true;
+    }
+  }
+
+  if (updated) {
+    fs.writeFileSync(manifestPath, formatAdf(manifestDoc));
+  }
 }

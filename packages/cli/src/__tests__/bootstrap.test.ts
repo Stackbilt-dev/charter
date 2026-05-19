@@ -6,6 +6,20 @@ import { bootstrapCommand } from '../commands/bootstrap';
 import { doctorCommand } from '../commands/doctor';
 import { driftCommand } from '../commands/drift';
 import type { CLIOptions } from '../index';
+import { parseAdf, parseManifest } from '@stackbilt/adf';
+
+// Controlled per-test override for execSync (module-level mock needed for ESM-treated builtins)
+let execSyncOverride: (((...args: unknown[]) => unknown) | null) = null;
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execSync: (...args: unknown[]) => {
+      if (execSyncOverride) return execSyncOverride(...args);
+      return actual.execSync(...(args as Parameters<typeof actual.execSync>));
+    },
+  };
+});
 
 const baseOptions: CLIOptions = {
   configPath: '.charter',
@@ -169,5 +183,71 @@ STATE:
     expect(report.violations.some((violation: { severity: string; patternName: string }) =>
       violation.severity === 'BLOCKER' && violation.patternName.includes('Timing-Sensitive Equality')
     )).toBe(true);
+  });
+
+
+  it('registers core.adf and state.adf in DEFAULT_LOAD when manifest uses non-canonical syntax', async () => {
+    // Set up a .ai/ directory with core.adf, state.adf, and a manifest that uses
+    // non-canonical syntax ('load X always') — no '📦 DEFAULT_LOAD:' section.
+    // This replicates issue #150: parseManifest returns empty defaultLoad,
+    // so core.adf and state.adf appear as orphans and were incorrectly registered
+    // as ON_DEMAND before this fix.
+    fs.mkdirSync('.ai', { recursive: true });
+
+    const nonCanonicalManifest = `ADF: 0.1
+
+load core.adf always
+load state.adf always
+`;
+    fs.writeFileSync(path.join('.ai', 'manifest.adf'), nonCanonicalManifest);
+    fs.writeFileSync(path.join('.ai', 'core.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Core rules\n');
+    fs.writeFileSync(path.join('.ai', 'state.adf'), 'ADF: 0.1\n\nSTATE:\n  CURRENT: active\n');
+
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    // Parse the resulting manifest with the structured parser — not string.includes —
+    // because that's what verify:adf uses, and it's what was broken.
+    const resultManifest = fs.readFileSync(path.join('.ai', 'manifest.adf'), 'utf-8');
+    const doc = parseAdf(resultManifest);
+    const manifest = parseManifest(doc);
+
+    expect(manifest.defaultLoad).toContain('core.adf');
+    expect(manifest.defaultLoad).toContain('state.adf');
+
+    // Neither should appear in ON_DEMAND
+    const onDemandPaths = manifest.onDemand.map(m => m.path);
+    expect(onDemandPaths).not.toContain('core.adf');
+    expect(onDemandPaths).not.toContain('state.adf');
+  });
+
+  it('classifies frozen-lockfile install errors and sets status to partial', async () => {
+    // Override execSync to throw an ERR_PNPM_FROZEN_LOCKFILE error for this test only
+    execSyncOverride = () => {
+      throw new Error('ERR_PNPM_FROZEN_LOCKFILE: Lockfile is not up-to-date');
+    };
+
+    logs = [];
+    try {
+      await bootstrapCommand(
+        { ...baseOptions, format: 'json' },
+        ['--preset', 'worker', '--skip-doctor'],
+      );
+    } finally {
+      execSyncOverride = null;
+    }
+
+    const report = JSON.parse(logs[0]);
+    expect(report.status).toBe('partial');
+
+    const installStep = report.steps.find((s: { name: string }) => s.name === 'install');
+    expect(installStep).toBeDefined();
+    expect(installStep.status).toBe('fail');
+    const hasHint = installStep.warnings.some((w: string) => w.includes('--no-frozen-lockfile'));
+    expect(hasHint).toBe(true);
   });
 });
