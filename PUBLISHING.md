@@ -57,9 +57,8 @@ for pkg in packages/*/package.json; do
 done
 ```
 
-> **Note:** Do NOT manually replace `workspace:^` dependency specifiers.
-> PNPM automatically resolves `workspace:^` to concrete version ranges
-> (e.g. `"^0.4.0"`) in the published tarball. The source files stay as-is.
+> **Note:** Published package `dependencies` must not contain `workspace:`
+> protocol specifiers. Use concrete semver ranges (for example, `"^0.4.0"`).
 
 ## Phase 3: Artifact Validation (Required)
 
@@ -121,7 +120,6 @@ Publish in this order:
 
 ```bash
 # All packages declare publishConfig.access: "public", so --access flag is not needed.
-# PNPM resolves workspace:^ to concrete versions in the published tarball automatically.
 pnpm --filter @stackbilt/types publish
 pnpm --filter @stackbilt/core publish
 pnpm --filter @stackbilt/adf publish

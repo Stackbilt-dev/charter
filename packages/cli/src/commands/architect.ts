@@ -15,8 +15,11 @@ import { EXIT_CODE, CLIError } from '../index';
 import { getFlag } from '../flags';
 import { resolveApiKey, API_KEY_ENV_VAR } from '../credentials';
 import { EngineClient, type BuildRequest, type BuildResult } from '../http-client';
+import { printBuildCommandDeprecationWarning } from './deprecation-warning';
 
 export async function architectCommand(options: CLIOptions, args: string[]): Promise<number> {
+  printBuildCommandDeprecationWarning('architect', args);
+
   // Parse description from positional arg or --file
   const filePath = getFlag(args, '--file');
   const positional = args.filter(a => !a.startsWith('-') && a !== filePath);

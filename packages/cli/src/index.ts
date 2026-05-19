@@ -86,6 +86,8 @@ Options:
   --detect-only      Setup only: print detected stack/preset and exit
   --no-dependency-sync
                      Setup only: do not rewrite devDependencies["@stackbilt/cli"]
+  --no-deprecation-warning
+                     Suppress deprecation warnings for login/architect/scaffold/run
 `;
 
 export const EXIT_CODE = {
