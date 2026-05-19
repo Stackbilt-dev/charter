@@ -27,6 +27,7 @@ import {
   validateConstraints,
 } from '@stackbilt/adf';
 import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
+import { generateBrief } from './context';
 import {
   analyze as analyzeSurface,
   SurfaceInputSchema,
@@ -290,6 +291,34 @@ function registerTools(server: McpServer, aiDir: string): void {
           ],
           isError: true,
         };
+      }
+    },
+  );
+
+  (server.registerTool as Function)(
+    'charter_brief',
+    {
+      description:
+        'CALL THIS FIRST when entering a Charter-governed repo. Returns routes, hotspots, sensitivity tags, and governance posture in a single pre-digested brief — replaces 15-30 discovery tool calls and 10k-50k tokens of cold-boot discovery. Returns markdown by default or structured JSON when format="json".',
+      inputSchema: {
+        format: z.enum(['markdown', 'json']).optional().describe(
+          'Response format. "markdown" (default) returns the brief as human/agent-readable markdown. "json" returns structured metadata including tokenCount and truncated flag.',
+        ),
+        verbose: z.boolean().optional().describe(
+          'If true, removes the 2000-token size ceiling. Use for interactive human sessions only.',
+        ),
+      },
+    },
+    async (rawInput: unknown) => {
+      try {
+        const input = (rawInput ?? {}) as { format?: 'markdown' | 'json'; verbose?: boolean };
+        const result = await generateBrief({ verbose: input.verbose ?? false });
+        const text = input.format === 'json'
+          ? JSON.stringify({ markdown: result.markdown, tokenCount: result.tokenCount, truncated: result.truncated, truncatedSections: result.truncatedSections }, null, 2)
+          : result.markdown;
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }
     },
   );

@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/validate",
   "sideEffects": false,
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Citation validation, message classification, and governance checks",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@stackbilt/types": "^0.13.0"
+    "@stackbilt/types": "^0.14.0"
   },
   "scripts": {
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"

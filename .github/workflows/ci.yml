@@ -18,6 +18,10 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - name: Measure brief token budget
+        run: node scripts/measure-brief-size.mjs
+      - name: Eval brief orientation coverage
+        run: node scripts/eval-brief-coverage.mjs
       - run: pnpm run typecheck
       - name: Docs sync check
         run: pnpm run docs:check
