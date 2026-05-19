@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.14.0] - 2026-05-19
+
+Synchronized version bump for all `@stackbilt/*` packages to 0.14.0.
+
+### Added
+- **`charter context`** — new CLI command that generates a pre-digested repo brief (identity, surface, hotspots, sensitivity, governance) within a 2,000-token budget. Designed as the fastest way to orient an AI agent entering a Charter-governed repo; replaces 15-30 cold-boot discovery tool calls. Flags: `--stdout-only`, `--verbose` (no ceiling), `--write` (file only). Writes `.charter/context.md` by default.
+- **`charter_brief` MCP tool** — `charter serve` now registers `charter_brief`, which calls `generateBrief()` and returns the same bounded brief over MCP. Tool description instructs agents to call it first in any session.
+- **CI brief quality gates** — `scripts/measure-brief-size.mjs` (exits 1 if brief > 2000 tokens) and `scripts/eval-brief-coverage.mjs` (fixture-based check requiring all 5 sections and 5 orientation questions to be answerable from the brief alone) are added to `.github/workflows/ci.yml` after the build step.
+- **`context.md` excluded from `.charter/.gitignore`** — generated brief is local-only by default; committed to `.gitignore` by `charter bootstrap` and `charter init`.
+
 ## [0.13.0] - 2026-05-19
 
 Synchronized version bump for all `@stackbilt/*` packages to 0.13.0.
@@ -505,6 +515,7 @@ All 345 existing tests pass.
 ### Security
 - Added repository security policy and reporting process.
 
+[0.14.0]: https://github.com/stackbilt-dev/charter/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/stackbilt-dev/charter/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/stackbilt-dev/charter/compare/v0.12.0...v0.12.1
 [0.5.0]: https://github.com/stackbilt-dev/charter/compare/v0.4.2...v0.5.0

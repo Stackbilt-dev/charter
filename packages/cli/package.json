@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/cli",
   "sideEffects": false,
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Charter CLI — repo-level governance checks + architecture scaffolding",
   "bin": {
     "charter": "./dist/bin.js",
@@ -41,15 +41,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@stackbilt/adf": "^0.13.0",
-    "@stackbilt/blast": "^0.13.0",
-    "@stackbilt/classify": "^0.13.0",
-    "@stackbilt/core": "^0.13.0",
-    "@stackbilt/drift": "^0.13.0",
-    "@stackbilt/git": "^0.13.0",
-    "@stackbilt/surface": "^0.13.0",
-    "@stackbilt/types": "^0.13.0",
-    "@stackbilt/validate": "^0.13.0"
+    "@stackbilt/adf": "^0.14.0",
+    "@stackbilt/blast": "^0.14.0",
+    "@stackbilt/classify": "^0.14.0",
+    "@stackbilt/core": "^0.14.0",
+    "@stackbilt/drift": "^0.14.0",
+    "@stackbilt/git": "^0.14.0",
+    "@stackbilt/surface": "^0.14.0",
+    "@stackbilt/types": "^0.14.0",
+    "@stackbilt/validate": "^0.14.0"
   },
   "license": "Apache-2.0",
   "author": "Stackbilt LLC"
