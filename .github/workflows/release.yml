@@ -179,15 +179,26 @@ jobs:
           pack_package packages/ci
           pack_package packages/cli
 
-          npm publish "./release-tarballs/stackbilt-types-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-core-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-adf-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-git-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-classify-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-validate-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-drift-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-blast-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-surface-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-policies-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-ci-${VERSION}.tgz" --access public --provenance
-          npm publish "./release-tarballs/stackbilt-cli-${VERSION}.tgz" --access public --provenance
+          # publish_if_missing: skip packages already published at this version (idempotent re-runs)
+          publish_if_missing() {
+            local tarball="$1"
+            local pkg_name="$2"
+            if npm view "${pkg_name}@${VERSION}" version &>/dev/null 2>&1; then
+              echo "Skipping ${pkg_name}@${VERSION} — already published"
+            else
+              npm publish "${tarball}" --access public --provenance
+            fi
+          }
+
+          publish_if_missing "./release-tarballs/stackbilt-types-${VERSION}.tgz"    "@stackbilt/types"
+          publish_if_missing "./release-tarballs/stackbilt-core-${VERSION}.tgz"     "@stackbilt/core"
+          publish_if_missing "./release-tarballs/stackbilt-adf-${VERSION}.tgz"      "@stackbilt/adf"
+          publish_if_missing "./release-tarballs/stackbilt-git-${VERSION}.tgz"      "@stackbilt/git"
+          publish_if_missing "./release-tarballs/stackbilt-classify-${VERSION}.tgz" "@stackbilt/classify"
+          publish_if_missing "./release-tarballs/stackbilt-validate-${VERSION}.tgz" "@stackbilt/validate"
+          publish_if_missing "./release-tarballs/stackbilt-drift-${VERSION}.tgz"    "@stackbilt/drift"
+          publish_if_missing "./release-tarballs/stackbilt-blast-${VERSION}.tgz"    "@stackbilt/blast"
+          publish_if_missing "./release-tarballs/stackbilt-surface-${VERSION}.tgz"  "@stackbilt/surface"
+          publish_if_missing "./release-tarballs/stackbilt-policies-${VERSION}.tgz" "@stackbilt/policies"
+          publish_if_missing "./release-tarballs/stackbilt-ci-${VERSION}.tgz"       "@stackbilt/ci"
+          publish_if_missing "./release-tarballs/stackbilt-cli-${VERSION}.tgz"      "@stackbilt/cli"
