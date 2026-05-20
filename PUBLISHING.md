@@ -14,6 +14,7 @@ Publishable packages:
 - `@stackbilt/drift`
 - `@stackbilt/blast`
 - `@stackbilt/surface`
+- `@stackbilt/policies`
 - `@stackbilt/ci`
 - `@stackbilt/cli`
 
@@ -113,7 +114,7 @@ When reviewing detect output, confirm:
 Publish in this order:
 
 1. `@stackbilt/types`
-2. `@stackbilt/core`, `@stackbilt/adf`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/blast`, `@stackbilt/surface`, `@stackbilt/ci`
+2. `@stackbilt/core`, `@stackbilt/adf`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/blast`, `@stackbilt/surface`, `@stackbilt/policies`, `@stackbilt/ci`
 3. `@stackbilt/cli`
 
 `@stackbilt/blast` and `@stackbilt/surface` are zero-dependency and can be published in any order relative to the other standalone analyzers. They are only required at publish time by `@stackbilt/cli`.
@@ -129,6 +130,7 @@ pnpm --filter @stackbilt/validate publish
 pnpm --filter @stackbilt/drift publish
 pnpm --filter @stackbilt/blast publish
 pnpm --filter @stackbilt/surface publish
+pnpm --filter @stackbilt/policies publish
 pnpm --filter @stackbilt/ci publish
 pnpm --filter @stackbilt/cli publish
 ```
