@@ -179,15 +179,15 @@ jobs:
           pack_package packages/ci
           pack_package packages/cli
 
-          npm publish "release-tarballs/stackbilt-types-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-core-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-adf-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-git-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-classify-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-validate-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-drift-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-blast-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-surface-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-policies-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-ci-${VERSION}.tgz" --access public --provenance
-          npm publish "release-tarballs/stackbilt-cli-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-types-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-core-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-adf-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-git-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-classify-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-validate-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-drift-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-blast-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-surface-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-policies-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-ci-${VERSION}.tgz" --access public --provenance
+          npm publish "./release-tarballs/stackbilt-cli-${VERSION}.tgz" --access public --provenance
