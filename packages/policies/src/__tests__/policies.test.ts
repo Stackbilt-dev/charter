@@ -21,15 +21,22 @@ function makeTempRepo(files: Record<string, string>): string {
   return dir;
 }
 
-// Mock child_process.exec so tests never hit GitHub
+const FAKE_SHA = 'a'.repeat(40);
+
+// Mock child_process.exec so tests never hit GitHub.
+// Returns a line for each ref type so both tag (@vN) and branch (@main) lookups resolve.
 vi.mock('node:child_process', () => ({
   exec: (
-    _cmd: string,
+    cmd: string,
     _opts: unknown,
     cb: (err: null, stdout: string) => void,
   ) => {
-    // Return a fake 40-char SHA for any tag lookup
-    cb(null, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v4\n');
+    const tagM = cmd.match(/"refs\/tags\/([^"^]+)"/);
+    const branchM = cmd.match(/"refs\/heads\/([^"]+)"/);
+    const lines: string[] = [];
+    if (tagM) lines.push(`${FAKE_SHA}\trefs/tags/${tagM[1]}`);
+    if (branchM) lines.push(`${FAKE_SHA}\trefs/heads/${branchM[1]}`);
+    cb(null, (lines.length ? lines.join('\n') : `${FAKE_SHA}\trefs/tags/v4`) + '\n');
   },
 }));
 
@@ -59,17 +66,19 @@ jobs:
     expect(detectRepoConfig(dir).packageManager).toBe('pnpm');
   });
 
-  it('detects floating pins in workflow', () => {
+  it('detects floating pins in workflow — tags and branch refs', () => {
     const dir = makeTempRepo({
       '.github/workflows/ci.yml': `
 steps:
   - uses: actions/checkout@v4
   - uses: actions/setup-node@v4
+  - uses: actions/cache@main
 `,
     });
     const config = detectRepoConfig(dir);
-    expect(config.floatingPins).toHaveLength(2);
+    expect(config.floatingPins).toHaveLength(3);
     expect(config.floatingPins[0].tag).toBe('v4');
+    expect(config.floatingPins[2].tag).toBe('main');
   });
 
   it('does not flag SHA-pinned or local refs as floating', () => {
@@ -104,7 +113,14 @@ describe('patchFloatingActionPins', () => {
     const content = `steps:\n  - uses: actions/checkout@v4\n`;
     const { patched, replacements } = await patchFloatingActionPins(content);
     expect(replacements).toHaveLength(1);
-    expect(patched).toContain('actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v4');
+    expect(patched).toContain(`actions/checkout@${FAKE_SHA} # v4`);
+  });
+
+  it('replaces @main branch ref with mocked SHA + comment', async () => {
+    const content = `steps:\n  - uses: actions/cache@main\n`;
+    const { patched, replacements } = await patchFloatingActionPins(content);
+    expect(replacements).toHaveLength(1);
+    expect(patched).toContain(`actions/cache@${FAKE_SHA} # main`);
   });
 
   it('leaves SHA-pinned lines unchanged', async () => {
@@ -203,7 +219,7 @@ describe('applyPolicies', () => {
     expect(fs.existsSync(path.join(dir, '.github/workflows/supply-chain.yml'))).toBe(true);
     // pin patched
     const ciContent = fs.readFileSync(path.join(dir, '.github/workflows/ci.yml'), 'utf-8');
-    expect(ciContent).toContain('@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v4');
+    expect(ciContent).toContain(`@${FAKE_SHA} # v4`);
     // charter config created
     expect(fs.existsSync(path.join(dir, '.charter/config.json'))).toBe(true);
     // floating-action-pins pattern installed

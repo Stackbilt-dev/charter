@@ -29,11 +29,11 @@ export const FLOATING_PIN_PATTERN = {
   name: 'Floating Action Pins',
   category: 'SECURITY',
   status: 'ACTIVE',
-  anti_patterns: 'uses: (?!Stackbilt-dev/)(?!\\./)[^@]+@v[\\d]',
+  anti_patterns: 'uses: (?!Stackbilt-dev/)(?!\\./)[^\\s@]+@(?![0-9a-f]{40}(\\s|$|#))[^\\s]',
   blessed_solution:
     'Pin to full commit SHA with a # vX.Y.Z comment: uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4',
   rationale:
-    'Tag-based action pins are mutable — a supply chain attacker can move the tag to a malicious commit. SHA pins are immutable.',
+    'Any non-SHA ref (@vN, @main, @master, semver tags) is mutable — only a 40-char hex SHA is immutable.',
   created_at: '2026-05-20T00:00:00.000Z',
 } as const;
 

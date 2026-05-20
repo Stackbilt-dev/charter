@@ -16,8 +16,9 @@ export interface RepoConfig {
   hasSupplyChainWorkflow: boolean;
 }
 
-// Matches `uses: owner/action@vN[.N.N]` — excludes local (./) and Stackbilt-dev refs
-const FLOATING_PIN_LINE_RE = /uses:\s+(?!Stackbilt-dev\/)(?!\.\/)[^\s@]+@(v[\d][\d.]*)/;
+// Matches any non-SHA ref (@vN, @main, @master, semver tags) — excludes local (./) and Stackbilt-dev refs.
+// A 40-char hex SHA followed by whitespace, EOL, or # comment is the only exempt form.
+const FLOATING_PIN_LINE_RE = /uses:\s+(?!Stackbilt-dev\/)(?!\.\/)[^\s@]+@(?![0-9a-f]{40}(\s|$|#))(\S+)/;
 
 export function detectRepoConfig(repoPath: string): RepoConfig {
   const abs = path.resolve(repoPath);
@@ -44,7 +45,7 @@ export function detectRepoConfig(repoPath: string): RepoConfig {
     content.split('\n').forEach((line, idx) => {
       const m = line.match(FLOATING_PIN_LINE_RE);
       if (m) {
-        floatingPins.push({ file: wfPath, line: idx + 1, uses: line.trim(), tag: m[1] });
+        floatingPins.push({ file: wfPath, line: idx + 1, uses: line.trim(), tag: m[2] });
       }
     });
   }

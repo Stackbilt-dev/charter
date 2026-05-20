@@ -11,8 +11,9 @@ export interface PatchResult {
   replacements: PatchReplacement[];
 }
 
-// Matches a `uses:` line with a floating tag — excludes local and Stackbilt-dev refs
-const FLOATING_USES_RE = /^(\s*-?\s*uses:\s+)((?!Stackbilt-dev\/)(?!\.\/)[^\s@]+)@(v[\d][\d.]*)(.*)$/;
+// Matches any non-SHA ref (@vN, @main, @master, semver) — excludes local (./) and Stackbilt-dev refs.
+// A 40-char hex SHA is the only exempt form.
+const FLOATING_USES_RE = /^(\s*-?\s*uses:\s+)((?!Stackbilt-dev\/)(?!\.\/)[^\s@]+)@(?![0-9a-f]{40}(?:\s|$|#))([^\s#]+)(.*)$/;
 
 export async function patchFloatingActionPins(content: string): Promise<PatchResult> {
   const replacements: PatchReplacement[] = [];
@@ -46,14 +47,15 @@ export async function patchFloatingActionPins(content: string): Promise<PatchRes
 function resolveActionSha(action: string, tag: string): Promise<string | null> {
   return new Promise((resolve) => {
     const url = `https://github.com/${action}`;
-    const cmd = `git ls-remote "${url}" "refs/tags/${tag}" "refs/tags/${tag}^{}"`;
+    // Try annotated tag deref, plain tag, then branch head (covers @main, @master, etc.)
+    const cmd = `git ls-remote "${url}" "refs/tags/${tag}" "refs/tags/${tag}^{}" "refs/heads/${tag}"`;
     exec(cmd, { timeout: 20000 }, (err, stdout) => {
       if (err || !stdout.trim()) { resolve(null); return; }
       const lines = stdout.trim().split('\n');
-      // Prefer dereferenced annotated tag (^{}) — gives the commit SHA, not tag object SHA
       const deref = lines.find((l) => l.includes(`refs/tags/${tag}^{}`));
       const plain = lines.find((l) => l.includes(`refs/tags/${tag}`) && !l.includes('^{}'));
-      const winner = deref ?? plain;
+      const branch = lines.find((l) => l.includes(`refs/heads/${tag}`));
+      const winner = deref ?? plain ?? branch;
       if (!winner) { resolve(null); return; }
       const sha = winner.split('\t')[0].trim();
       resolve(sha.length === 40 ? sha : null);

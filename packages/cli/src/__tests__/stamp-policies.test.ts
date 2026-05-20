@@ -26,6 +26,7 @@ function makeOptions(overrides: Partial<CLIOptions> = {}): CLIOptions {
 }
 
 const FAKE_REF = 'a'.repeat(40);
+const fakeConfig = { packageManager: 'npm' as const, nodeVersion: '20', existingWorkflows: [], floatingPins: [], hasSupplyChainWorkflow: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -36,6 +37,7 @@ beforeEach(() => {
   });
   // Default: apply returns updated
   mockApply.mockResolvedValue({
+    config: fakeConfig,
     pinsPatched: 2,
     workflowsPatched: ['.github/workflows/ci.yml'],
     supplyChainWorkflowAdded: true,
@@ -83,6 +85,7 @@ describe('stampPoliciesCommand', () => {
 
   it('returns exit 0 when already compliant', async () => {
     mockApply.mockResolvedValue({
+      config: fakeConfig,
       pinsPatched: 0,
       workflowsPatched: [],
       supplyChainWorkflowAdded: false,
