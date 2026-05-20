@@ -10,6 +10,7 @@
     { "path": "packages/drift" },
     { "path": "packages/blast" },
     { "path": "packages/surface" },
+    { "path": "packages/policies" },
     { "path": "packages/ci" },
     { "path": "packages/cli" }
   ]

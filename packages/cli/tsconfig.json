@@ -13,7 +13,8 @@
     { "path": "../adf" },
     { "path": "../drift" },
     { "path": "../blast" },
-    { "path": "../surface" }
+    { "path": "../surface" },
+    { "path": "../policies" }
   ],
   "include": ["src/**/*.ts"]
 }

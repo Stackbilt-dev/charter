@@ -1,8 +1,8 @@
 {
-  "name": "@stackbilt/ci",
+  "name": "@stackbilt/policies",
   "sideEffects": false,
-  "version": "0.14.0",
-  "description": "GitHub Actions adapter for Charter governance checks",
+  "version": "0.15.0",
+  "description": "Supply chain policy stamping — detect, patch, and generate CI workflows for org-wide policy adoption",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -22,15 +22,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Stackbilt-dev/charter.git",
-    "directory": "packages/ci"
+    "directory": "packages/policies"
   },
   "bugs": {
     "url": "https://github.com/Stackbilt-dev/charter/issues"
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
-  "dependencies": {
-    "@stackbilt/types": "workspace:*"
-  },
+  "dependencies": {},
   "scripts": {
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
   },

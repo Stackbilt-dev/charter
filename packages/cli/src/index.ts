@@ -26,6 +26,7 @@ import { scoreCommand } from './commands/score';
 import { blastCommand } from './commands/blast';
 import { surfaceCommand } from './commands/surface';
 import { contextCommand } from './commands/context';
+import { stampPoliciesCommand } from './commands/stamp-policies';
 import { recordTelemetryEvent } from './telemetry';
 import { getFlag } from './flags';
 import packageJson from '../package.json';
@@ -52,6 +53,12 @@ Usage:
   charter audit [--range <revset>]
                                    Generate governance audit report
   charter drift [--path <dir>]     Scan files for pattern drift
+  charter stamp-policies [--path <dir>] [--dry-run] [--no-fix-pins] [--policy-repo-ref <sha>]
+                                   Stamp supply chain CI policies onto a target repo.
+                                   Patches floating action pins to commit SHAs and adds
+                                   supply-chain.yml caller (SBOM + dep-review reusables from
+                                   Stackbilt-dev/stackbilt_llc). Installs floating-action-pins
+                                   drift pattern and updates .charter/config.json.
   charter classify <subject>       Classify a change (SURFACE/LOCAL/CROSS_CUTTING)
   charter hook install --commit-msg [--force]
                                    Install git commit-msg hook for trailer normalization
@@ -189,6 +196,9 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'drift':
         exitCode = await driftCommand(options, restArgs);
+        break;
+      case 'stamp-policies':
+        exitCode = await stampPoliciesCommand(options, restArgs);
         break;
       case 'classify':
         exitCode = await classifyCommand(options, restArgs);

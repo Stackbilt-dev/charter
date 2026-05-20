@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "@stackbilt/types": "^0.14.0"
+    "@stackbilt/types": "workspace:*"
   },
   "scripts": {
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
