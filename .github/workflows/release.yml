@@ -175,6 +175,7 @@ jobs:
           pack_package packages/drift
           pack_package packages/blast
           pack_package packages/surface
+          pack_package packages/policies
           pack_package packages/ci
           pack_package packages/cli
 
@@ -187,5 +188,6 @@ jobs:
           npm publish "release-tarballs/stackbilt-drift-${VERSION}.tgz" --access public --provenance
           npm publish "release-tarballs/stackbilt-blast-${VERSION}.tgz" --access public --provenance
           npm publish "release-tarballs/stackbilt-surface-${VERSION}.tgz" --access public --provenance
+          npm publish "release-tarballs/stackbilt-policies-${VERSION}.tgz" --access public --provenance
           npm publish "release-tarballs/stackbilt-ci-${VERSION}.tgz" --access public --provenance
           npm publish "release-tarballs/stackbilt-cli-${VERSION}.tgz" --access public --provenance
