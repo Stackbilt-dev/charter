@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/policies",
   "sideEffects": false,
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Supply chain policy stamping — detect, patch, and generate CI workflows for org-wide policy adoption",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

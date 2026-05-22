@@ -231,6 +231,21 @@ npx charter adf patch .ai/state.adf --ops-file patches.json
 
 **Operations:** `ADD_BULLET`, `REPLACE_BULLET`, `REMOVE_BULLET`, `ADD_SECTION`, `REPLACE_SECTION`, `REMOVE_SECTION`, `UPDATE_METRIC`.
 
+With `--format json`, the output includes a `changes[]` array showing per-op before/after values:
+
+```json
+{
+  "file": ".ai/core.adf",
+  "patched": true,
+  "opsApplied": 1,
+  "changes": [
+    { "op": "UPDATE_METRIC", "section": "METRICS", "key": "total_loc", "before": 280, "after": 312 }
+  ]
+}
+```
+
+For bullet ops, `before` is the original item text (or `null` for `ADD_BULLET`); `after` is `null` for `REMOVE_BULLET`.
+
 ### charter adf bundle
 
 Resolves manifest modules for a given task and outputs merged context with token estimate. Only loads modules whose trigger keywords match the task.
@@ -372,6 +387,37 @@ If startup validation fails (missing `.ai/` directory or `manifest.adf`), `chart
 | `getRecentChanges` | Recent git commits classified by type. |
 | `charter_blast` | Blast radius for one or more source files. |
 | `charter_surface` | API surface — HTTP routes and D1/SQLite schema tables. |
+| `updateEvidence` | **Write-back.** Measures metric source files, patches ADF with current values, returns before/after diff + live constraint status. |
+
+##### `updateEvidence` — keeping ADF metrics accurate
+
+Call after code changes that affect tracked metrics (e.g. after adding files to a module that has a `LOC` ceiling):
+
+```json
+// MCP call — no args needed for a full refresh
+{ "tool": "updateEvidence" }
+
+// Preview first without writing
+{ "tool": "updateEvidence", "dryRun": true }
+
+// Update specific metrics only
+{ "tool": "updateEvidence", "metrics": ["total_loc", "test_count"] }
+```
+
+Returns:
+
+```json
+{
+  "measured": [{ "metricKey": "total_loc", "sourcePath": "src/core.ts", "measured": 312 }],
+  "changes": [{ "file": "core.adf", "metricKey": "total_loc", "section": "METRICS", "before": 280, "after": 312 }],
+  "skipped": [],
+  "written": ["core.adf"],
+  "constraints": { "allPassing": true, "failCount": 0, "warnCount": 1, "items": [...] },
+  "hint": "Run `charter adf sync --write` to update .adf.lock"
+}
+```
+
+`updateEvidence` does **not** update `.adf.lock`. Run `charter adf sync --write` separately if you need lock hygiene (this preserves the drift-detection signal for CI).
 
 ### charter context
 

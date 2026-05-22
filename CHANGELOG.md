@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.16.0] - 2026-05-22
+
+Minor release adding ADF write-back tooling — the first step in closing the LM→ADF automation loop.
+
+### Added
+
+- **`updateEvidence` MCP tool** (`serve.ts`): `charter serve` now registers `updateEvidence`, which measures actual file line counts for every metric declared in `manifest.adf`, diffs them against stored ADF values, and writes `UPDATE_METRIC` patches back to the owning ADF modules in place. Returns `{ measured, changes, skipped, written, constraints }` so agents get full before/after visibility and live constraint pass/fail after the write. Supports `dryRun: true` (preview without writing) and `metrics: [...]` (update specific keys only). Deliberately does not touch `.adf.lock` — callers should run `charter adf sync --write` if lock hygiene is needed (preserves drift-detection signal).
+- **`adf patch` `changes[]` output** (`adf.ts`): `charter adf patch --format json` now includes a `changes` array alongside `opsApplied`. Each entry records `{ op, section/key, before, after }` — `UPDATE_METRIC` shows numeric before/after values, `REPLACE_BULLET`/`REMOVE_BULLET` show the original item text, `ADD_BULLET` shows `before: null`. Human-readable output also prints inline per-op diffs for metrics and bullet ops.
+
+### Fixed
+
+- **`charter serve` exits cleanly on startup errors** (`serve.ts`, [#157](https://github.com/Stackbilt-dev/charter/issues/157)): Both `@modelcontextprotocol/sdk/server/mcp.js` and `@modelcontextprotocol/sdk/server/stdio.js` bind `process.stdin` at module load time, keeping Node's event loop alive past `process.exit()`. Both imports are now lazy (dynamic `import()` inside `serveCommand()`, after path guards). A bad `--ai-dir` now exits in under 100 ms with a JSON-RPC error and non-zero exit code instead of hanging indefinitely.
+- **`charter stamp-policies` structured error + env fallback** (`stamp-policies.ts`): `CHARTER_POLICY_REPO_REF` env var is now accepted as a fallback when `--policy-repo-ref` is not passed. When SHA resolution fails, the command emits a structured JSON error object with `code: POLICY_REPO_REF_UNRESOLVED` and a `recoveryCommand` hint rather than a plain string message.
+
 ## [0.15.1] - 2026-05-22
 
 Patch release fixing three `charter serve` MCP startup issues discovered during real-world Claude Code wiring (tracked in [#156](https://github.com/Stackbilt-dev/charter/issues/156)).
