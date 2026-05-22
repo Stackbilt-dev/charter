@@ -152,8 +152,8 @@ npx charter adf init --emit-pointers          # generate thin pointer files
 npx charter adf init --module testing         # add a single module to existing .ai/
 ```
 
-- `--ai-dir <dir>` — custom directory path (default: `.ai`)
-- `--force` / `--yes` — overwrite existing manifest
+- `--ai-dir <dir>` — custom directory path (default: `.ai`). Resolved to an absolute path at runtime.
+- `--force` — overwrite existing files. Without this flag, existing `.adf` files are skipped and reported; only the missing `manifest.adf` is written.
 - `--emit-pointers` — generate thin pointer files (`CLAUDE.md`, `.cursorrules`, `agents.md`)
 - `--module <name>` — add a single module to existing `.ai/` (delegates to `adf create`)
 
@@ -323,6 +323,55 @@ npx charter blast src/foo.ts --root ./packages/server       # scan a subdirector
 **Governance signal:** blast radius ≥20 files triggers a `CROSS_CUTTING` warning in text mode. Use this as a gate to escalate wide-reaching changes to architectural review.
 
 **Semantics:** zero runtime dependencies, no LLM calls, no TypeScript compiler API. Regex-based import extraction — trades some precision for universality across JavaScript/TypeScript/ESM/CommonJS projects.
+
+### charter serve
+
+Expose ADF project context as an MCP server over stdio, for use with Claude Code.
+
+```bash
+npx charter serve                             # stdio MCP server (default)
+npx charter serve --ai-dir /abs/path/.ai      # explicit ADF directory
+npx charter serve --name "my-project"         # override the server name shown in Claude Code
+```
+
+- `--ai-dir <dir>` — path to the `.ai/` ADF directory (default: `.ai`). **Always resolved to an absolute path at startup.** When wiring in `.mcp.json`, use an absolute path or a path relative to the project root — relative paths are resolved against the working directory at spawn time, which may differ from the project root in multi-repo setups.
+- `--name <name>` — override the MCP server name (default: inferred from `core.adf` `PROJECT` section or directory name).
+
+#### Wiring in `.mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "charter": {
+      "command": "npx",
+      "args": ["@stackbilt/cli", "serve", "--ai-dir", "/absolute/path/to/.ai"]
+    }
+  }
+}
+```
+
+Use an absolute path for `--ai-dir`. A relative path like `.ai` resolves against the MCP host's working directory at spawn time, which may not be the project root.
+
+#### Startup errors
+
+If startup validation fails (missing `.ai/` directory or `manifest.adf`), `charter serve` emits a structured JSON-RPC error to stdout before exiting so Claude Code can surface a human-readable message:
+
+| Condition | Error message | Fix |
+|-----------|--------------|-----|
+| `.ai/` directory missing | `No .ai/ directory found.` | `charter init` |
+| `manifest.adf` missing | `.ai/manifest.adf not found.` | `charter adf init` |
+
+#### Registered MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `charter_brief` | **Call first.** Pre-digested repo brief — routes, hotspots, governance. |
+| `getProjectContext` | ADF bundle resolved for a given task or trigger keywords. |
+| `getProjectState` | Constraint validation results across all loaded modules. |
+| `getArchitecturalDecisions` | Load-bearing constraints from `core.adf`. |
+| `getRecentChanges` | Recent git commits classified by type. |
+| `charter_blast` | Blast radius for one or more source files. |
+| `charter_surface` | API surface — HTTP routes and D1/SQLite schema tables. |
 
 ### charter context
 

@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [0.15.1] - 2026-05-22
+
+Patch release fixing three `charter serve` MCP startup issues discovered during real-world Claude Code wiring (tracked in [#156](https://github.com/Stackbilt-dev/charter/issues/156)).
+
+### Fixed
+
+- **`charter serve` — path anchoring** (`serve.ts`): `--ai-dir` is now resolved to an absolute path at startup via `path.resolve()`. Previously, relative paths were re-resolved against `process.cwd()` at each tool invocation, causing `getProjectContext` and other MCP tools to fail when the MCP host's working directory differed from the project root (e.g. multi-repo Claude Code setups, WSL2 DrvFs quirks).
+- **`charter serve` — `getProjectContext` double-prefix bug** (`serve.ts`): The `bundleModules` reader callback was doing `path.join(aiDir, p)` where `p` is already the fully-joined path returned by the bundler's internal `joinPath`. This produced double-prefixed paths like `.ai/.ai/core.adf`, causing every `getProjectContext` call to throw "Module not found". Fixed by passing `p` directly to `fs.readFileSync`.
+- **`charter serve` — structured startup errors** (`serve.ts`): Startup validation failures now emit a JSON-RPC `{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"..."}}` envelope to stdout before exiting, so Claude Code surfaces a human-readable message instead of a dead `-32000`. Error messages also distinguish between a missing `.ai/` directory (`→ charter init`) and a missing `manifest.adf` (`→ charter adf init`).
+- **`charter adf init` — silent `core.adf` overwrite** (`adf.ts`): Running `charter adf init` when `.ai/` already existed (e.g. to generate a missing `manifest.adf`) unconditionally overwrote `core.adf`, `state.adf`, and preset module files. These files are now skipped if they already exist; a notice lists each skipped file with a `--force` hint. `manifest.adf` is still always written (it was the missing file that triggered the run). JSON output gains a `skipped` field listing preserved files.
+
 ## [0.14.0] - 2026-05-19
 
 Synchronized version bump for all `@stackbilt/*` packages to 0.14.0.
