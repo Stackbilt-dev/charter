@@ -14,8 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import {
@@ -75,7 +74,14 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
 
   const projectName = customName ?? inferProjectName(aiDir);
 
-  const server = new McpServer({
+  // Lazy-import both MCP SDK modules here — after all guards — so the SDK's
+  // stdin handle is never acquired on the error paths above.
+  const [{ McpServer: McpServerClass }, { StdioServerTransport }] = await Promise.all([
+    import('@modelcontextprotocol/sdk/server/mcp.js'),
+    import('@modelcontextprotocol/sdk/server/stdio.js'),
+  ]);
+
+  const server = new McpServerClass({
     name: projectName,
     version: '1.0.0',
   });
