@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- **`charter context-refresh` Phase 1 + 2** (`context-refresh.ts`, `index.ts`, docs/tests): new live-context refresh command that writes both `.ai/context.adf` and `.ai/context.snapshot.json`.
+  - Phase 1 (`c5e90fd`): git-source snapshot generation, optional markdown mirror via `--output`, initial command wiring and tests.
+  - Phase 2 (`5fb4a44`): source expansion (`git`, `github`), config contract support via `.charter/context-sources.json`, TTL controls (`--once`, `--ttl-minutes`, `--force`), and machine-readable refresh status.
+- **Snapshot contract for warm starts**: normalized root aggregates (`openWork`, `recentActivity`, `pendingDecisions`) are generated at refresh time from source payloads to prevent semantic drift while preserving raw source diagnostics under `sources.*`.
+
+### Changed
+
+- **`charter context-refresh` GitHub failure mode is fail-closed**: missing `GITHUB_TOKEN` or unavailable GitHub source no longer crashes refresh. Snapshot records `sources.github.available = false` plus warning context, and refresh continues with remaining sources.
+- **CLI + docs command surface**: top-level help and CLI reference now include `charter context-refresh` usage, flags, output artifacts, and config-file behavior.
+
 ## [0.16.0] - 2026-05-22
 
 Minor release adding ADF write-back tooling — the first step in closing the LM→ADF automation loop.

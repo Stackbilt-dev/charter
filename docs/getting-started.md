@@ -94,9 +94,24 @@ npx charter adf evidence --auto-measure
 npx charter adf evidence --auto-measure --ci --format json
 ```
 
+## Generate Live Session Context
+
+Use `context-refresh` to persist a resumable snapshot for the next agent session:
+
+```bash
+npx charter context-refresh
+npx charter context-refresh --once --ttl-minutes 30
+npx charter context-refresh --sources git,github --format json
+```
+
+Outputs:
+- `.ai/context.adf` (human/ADF view)
+- `.ai/context.snapshot.json` (structured source + aggregate snapshot)
+
 ## What's Next
 
 - [CLI Reference](/cli-reference) — full command surface
 - [CI Integration](/ci-integration) — GitHub Actions workflow with evidence gating
+- [Context Refresh Resume Guide](/context-refresh-resume) — current phase status + next-session restart checklist
 - [WSL2 + Windows Filesystem](/wsl2-install) — installation and path guidance for WSL2
 - [Ecosystem](/ecosystem) — how Charter fits into the Stackbilt platform

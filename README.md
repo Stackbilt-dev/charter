@@ -101,6 +101,8 @@ Claude Code can query `getProjectContext`, `getArchitecturalDecisions`, `getProj
 
 The `charter_brief` MCP tool composes routes, hotspots, and governance into a single pre-digested brief — call it first in any agent session to skip 15-30 cold-boot discovery calls.
 
+For live session continuity snapshots, use `charter context-refresh` to produce `.ai/context.adf` + `.ai/context.snapshot.json` (with optional GitHub source and TTL controls).
+
 ## Commands
 
 ### Govern
@@ -110,6 +112,7 @@ charter                                  # Repo risk/value snapshot
 charter bootstrap --ci github            # One-command onboarding
 charter bootstrap --security-sensitive   # SECURITY.md + hard security drift denies
 charter context                          # pre-digested repo brief for AI agents (routes, hotspots, governance)
+charter context-refresh                  # live session snapshot (.ai/context.adf + .ai/context.snapshot.json)
 charter doctor                           # Environment/config health check
 charter validate                         # Commit governance (trailers)
 charter drift                            # Pattern drift scanning
@@ -158,6 +161,12 @@ charter login --key sb_live_xxx          # Store API key (deprecated — prefer 
 - `0`: success
 - `1`: policy violation (CI mode)
 - `2`: runtime/usage error
+
+## Resume Guide
+
+Need to resume `context-refresh` roadmap work quickly next session?
+
+- See [docs/context-refresh-resume.md](./docs/context-refresh-resume.md) for current status, shipped commits, Phase 3 remaining scope, and exact validation commands.
 
 ## Modular packages
 

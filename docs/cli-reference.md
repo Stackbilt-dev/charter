@@ -527,6 +527,8 @@ Optional config path: `.charter/context-sources.json`
 
 If `github` is enabled but `GITHUB_TOKEN` is missing, refresh continues without hard failure and records `sources.github.available = false` plus warnings.
 
+For active implementation status and next-session handoff details, see [Context Refresh Resume Guide](/context-refresh-resume).
+
 ### charter surface
 
 Extract the API surface of a project: HTTP routes and database schema tables.
