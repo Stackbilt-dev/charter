@@ -51,11 +51,22 @@ const DEFAULT_PORT = 3847;
 export async function serveCommand(options: CLIOptions, args: string[]): Promise<number> {
   const transport = (getFlag(args, '--transport') ?? 'stdio') as 'stdio' | 'sse';
   const port = parseInt(getFlag(args, '--port') ?? String(DEFAULT_PORT), 10);
-  const aiDir = getFlag(args, '--ai-dir') ?? '.ai';
+  const aiDir = path.resolve(getFlag(args, '--ai-dir') ?? '.ai');
   const customName = getFlag(args, '--name');
 
+  if (!fs.existsSync(aiDir)) {
+    const errMsg = `No .ai/ directory found. Run: charter init`;
+    if (transport === 'stdio') {
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: `charter serve: ${errMsg}` } }) + '\n');
+    }
+    throw new CLIError(errMsg);
+  }
   if (!fs.existsSync(path.join(aiDir, 'manifest.adf'))) {
-    throw new CLIError(`No .ai/ directory found. Run: charter init`);
+    const errMsg = `.ai/manifest.adf not found. Run: charter adf init`;
+    if (transport === 'stdio') {
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: `charter serve: ${errMsg}` } }) + '\n');
+    }
+    throw new CLIError(errMsg);
   }
 
   if (transport === 'sse') {
@@ -103,7 +114,7 @@ function registerTools(server: McpServer, aiDir: string): void {
         const bundle = bundleModules(
           aiDir,
           modulePaths,
-          (p) => fs.readFileSync(path.join(aiDir, p), 'utf-8'),
+          (p) => fs.readFileSync(p, 'utf-8'),
           keywords,
           manifest,
         );

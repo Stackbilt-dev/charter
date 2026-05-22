@@ -238,6 +238,7 @@ interface AdfInitResult {
   created: boolean;
   aiDir: string;
   files: string[];
+  skipped?: string[];
   pointers?: string[];
 }
 
@@ -342,32 +343,38 @@ function adfInit(options: CLIOptions, args: string[]): number {
 
   fs.mkdirSync(aiDir, { recursive: true });
   fs.writeFileSync(path.join(aiDir, 'manifest.adf'), manifestForPreset(presetFlag));
-  fs.writeFileSync(path.join(aiDir, 'core.adf'), CORE_SCAFFOLD);
-  fs.writeFileSync(path.join(aiDir, 'state.adf'), STATE_SCAFFOLD);
+
+  const createdFiles: string[] = ['manifest.adf'];
+  const skippedFiles: string[] = [];
+  const tryWrite = (name: string, scaffold: string): boolean => {
+    const fp = path.join(aiDir, name);
+    if (!fs.existsSync(fp) || force) { fs.writeFileSync(fp, scaffold); createdFiles.push(name); return true; }
+    skippedFiles.push(name); return false;
+  };
+
+  tryWrite('core.adf', CORE_SCAFFOLD);
+  tryWrite('state.adf', STATE_SCAFFOLD);
 
   const moduleFiles: string[] = [];
   if (presetFlag === 'docs') {
-    fs.writeFileSync(path.join(aiDir, 'content.adf'), CONTENT_SCAFFOLD);
-    fs.writeFileSync(path.join(aiDir, 'decisions.adf'), DECISIONS_SCAFFOLD);
-    fs.writeFileSync(path.join(aiDir, 'planning.adf'), PLANNING_SCAFFOLD);
-    moduleFiles.push('content.adf', 'decisions.adf', 'planning.adf');
+    if (tryWrite('content.adf', CONTENT_SCAFFOLD)) moduleFiles.push('content.adf');
+    if (tryWrite('decisions.adf', DECISIONS_SCAFFOLD)) moduleFiles.push('decisions.adf');
+    if (tryWrite('planning.adf', PLANNING_SCAFFOLD)) moduleFiles.push('planning.adf');
   } else if (presetFlag === 'frontend') {
-    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-    moduleFiles.push('frontend.adf');
+    if (tryWrite('frontend.adf', FRONTEND_SCAFFOLD)) moduleFiles.push('frontend.adf');
   } else if (presetFlag === 'backend' || presetFlag === 'worker') {
-    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-    moduleFiles.push('backend.adf');
+    if (tryWrite('backend.adf', BACKEND_SCAFFOLD)) moduleFiles.push('backend.adf');
   } else {
-    fs.writeFileSync(path.join(aiDir, 'frontend.adf'), FRONTEND_SCAFFOLD);
-    fs.writeFileSync(path.join(aiDir, 'backend.adf'), BACKEND_SCAFFOLD);
-    moduleFiles.push('frontend.adf', 'backend.adf');
+    if (tryWrite('frontend.adf', FRONTEND_SCAFFOLD)) moduleFiles.push('frontend.adf');
+    if (tryWrite('backend.adf', BACKEND_SCAFFOLD)) moduleFiles.push('backend.adf');
   }
-  fs.writeFileSync(path.join(aiDir, '.adf.lock'), '{}\n');
+  tryWrite('.adf.lock', '{}\n');
 
   const result: AdfInitResult = {
     created: true,
     aiDir,
-    files: ['manifest.adf', 'core.adf', 'state.adf', ...moduleFiles, '.adf.lock'],
+    files: createdFiles,
+    ...(skippedFiles.length > 0 ? { skipped: skippedFiles } : {}),
   };
 
   // --emit-pointers: generate thin pointer files that redirect to .ai/
@@ -426,6 +433,13 @@ function adfInit(options: CLIOptions, args: string[]): number {
     console.log('    .ai/state.adf       \u2014 Project state tracking');
     for (const file of moduleFiles) {
       console.log(`    .ai/${file.padEnd(19)}\u2014 Domain-specific rules (on-demand)`);
+    }
+    if (skippedFiles.length > 0) {
+      console.log('');
+      console.log('  Skipped (already exist \u2014 use --force to overwrite):');
+      for (const name of skippedFiles) {
+        console.log(`    .ai/${name}`);
+      }
     }
     console.log('');
     console.log('  Next steps:');
