@@ -481,32 +481,51 @@ Seeds for hotspot analysis are chosen by resolved preset (from `.charter/config.
 
 ### charter context-refresh
 
-Generates a live session snapshot and writes it to `.ai/context.adf`.
+Generates a live session snapshot and writes it to `.ai/context.adf` plus `.ai/context.snapshot.json`.
 
-Phase 1 is intentionally local-first and deterministic: it supports the `git` source only.
+Phase 2 supports `git` and `github` sources with fail-closed behavior for missing GitHub credentials.
 
 ```bash
 npx charter context-refresh
 npx charter context-refresh --sources git
+npx charter context-refresh --sources git,github
 npx charter context-refresh --output CONTEXT.md
 npx charter context-refresh --ai-dir .ai
+npx charter context-refresh --once --ttl-minutes 30
 npx charter context-refresh --format json
 ```
 
 #### Flags
 
-- `--sources <csv>` — context sources to include. Phase 1 currently supports `git` only.
+- `--sources <csv>` — context sources to include. Supported: `git`, `github`.
 - `--output <path>` — optionally mirror a markdown snapshot to a file (for session briefs/docs).
 - `--ai-dir <dir>` — target ADF directory (default: `.ai`), output file is `<dir>/context.adf`.
+- `--once` — skip refresh when an existing snapshot is newer than TTL.
+- `--ttl-minutes <n>` — TTL window used by `--once` (default from config or `30`).
+- `--force` — bypass TTL skip and refresh immediately.
 
 #### Output
 
-- Always writes `.ai/context.adf` (or `<ai-dir>/context.adf`) with:
+- Always writes:
+  - `.ai/context.adf` (or `<ai-dir>/context.adf`)
+  - `.ai/context.snapshot.json` (or `<ai-dir>/context.snapshot.json`)
+- Context payload includes:
   - `STATE` metadata (`GENERATED_AT`, source set)
   - `OPEN_WORK` (branch + working tree status)
-  - `RECENT_ACTIVITY` (recent commits)
-  - `PENDING_DECISIONS` placeholder (for future non-git sources)
-- In `--format json`, prints a machine-readable summary including write paths and captured git signals.
+  - `RECENT_ACTIVITY` (recent commits / issue updates)
+  - `PENDING_DECISIONS` (derived issue prompts)
+- In `--format json`, prints a machine-readable summary including `status`, `reason`, `generatedAt`, `expiresAt`, `files`, `warnings`, and `errors`.
+
+#### Config file
+
+Optional config path: `.charter/context-sources.json`
+
+- `defaults.sources` — default sources when `--sources` is omitted
+- `defaults.ttlMinutes` — default TTL for `--once`
+- `defaults.maxItems` — source-specific result caps
+- `sources.github` — repo + strict label filter setup
+
+If `github` is enabled but `GITHUB_TOKEN` is missing, refresh continues without hard failure and records `sources.github.available = false` plus warnings.
 
 ### charter surface
 

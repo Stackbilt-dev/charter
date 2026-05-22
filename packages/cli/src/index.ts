@@ -44,8 +44,8 @@ Usage:
                                    --security-sensitive adds SECURITY.md, hard security drift denies, and a security test check
   charter context [--stdout-only] [--verbose] [--write]
                                    Pre-digested repo brief for AI agents (routes, hotspots, governance)
-  charter context-refresh [--sources git] [--output CONTEXT.md] [--ai-dir <dir>]
-                                   Live session snapshot to .ai/context.adf (Phase 1: git source)
+  charter context-refresh [--sources git,github] [--output CONTEXT.md] [--ai-dir <dir>] [--once] [--ttl-minutes <n>] [--force]
+                                   Live session snapshot to .ai/context.adf + .ai/context.snapshot.json
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
   charter init [--preset <worker|frontend|backend|fullstack>] [--guided]
