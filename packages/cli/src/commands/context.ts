@@ -202,6 +202,51 @@ function findMarkdownFiles(root: string): string[] {
   }
 }
 
+function getSectionTextValue(
+  doc: ReturnType<typeof parseAdf>,
+  sectionKey: string
+): string | undefined {
+  const section = doc.sections.find((candidate) => candidate.key === sectionKey);
+  if (!section || section.content.type !== 'text') {
+    return undefined;
+  }
+  const value = section.content.value.trim();
+  return value.length > 0 ? value : undefined;
+}
+
+function collectSensitivityTagsFromDoc(
+  doc: ReturnType<typeof parseAdf>,
+  target: Set<string>
+): void {
+  for (const section of doc.sections) {
+    if (section.key !== 'SENSITIVITY') continue;
+    if (section.content.type === 'list') {
+      for (const item of section.content.items) {
+        const normalized = item.trim();
+        if (normalized.length > 0) target.add(normalized);
+      }
+      continue;
+    }
+    if (section.content.type === 'map') {
+      for (const entry of section.content.entries) {
+        const normalizedValue = entry.value.trim();
+        if (normalizedValue.length > 0) {
+          target.add(`${entry.key}: ${normalizedValue}`);
+        } else {
+          target.add(entry.key);
+        }
+      }
+      continue;
+    }
+    if (section.content.type === 'text') {
+      for (const line of section.content.value.split(/\r?\n/)) {
+        const normalized = line.trim();
+        if (normalized.length > 0) target.add(normalized);
+      }
+    }
+  }
+}
+
 // ============================================================================
 // Brief model
 // ============================================================================
@@ -398,19 +443,25 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
     // ignore
   }
 
-  const stack = (charterConfig.stack as string | undefined) ?? 'unknown';
-  const preset = (charterConfig.preset as string | undefined) ?? 'default';
-  const sensitivityTags: string[] = [];
+  const configuredStack = typeof charterConfig.stack === 'string'
+    ? charterConfig.stack.trim()
+    : undefined;
+  const configuredPreset = typeof charterConfig.preset === 'string'
+    ? charterConfig.preset.trim()
+    : undefined;
+  let stack = configuredStack && configuredStack.length > 0 ? configuredStack : 'unknown';
+  let preset = configuredPreset && configuredPreset.length > 0 ? configuredPreset : 'default';
+  const sensitivityTagSet = new Set<string>();
   const sensCfg = charterConfig.sensitivity;
   if (sensCfg && typeof sensCfg === 'object' && sensCfg !== null) {
     if (Array.isArray((sensCfg as Record<string, unknown>).tags)) {
       for (const t of (sensCfg as { tags: unknown[] }).tags) {
-        if (typeof t === 'string') sensitivityTags.push(t);
+        if (typeof t === 'string' && t.trim().length > 0) sensitivityTagSet.add(t.trim());
       }
     }
   } else if (Array.isArray(charterConfig.sensitivityTags)) {
     for (const t of charterConfig.sensitivityTags as unknown[]) {
-      if (typeof t === 'string') sensitivityTags.push(t);
+      if (typeof t === 'string' && t.trim().length > 0) sensitivityTagSet.add(t.trim());
     }
   }
 
@@ -500,6 +551,8 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
   let defaultLoad: string[] = [];
   let onDemand: Array<{ path: string; triggers: string[] }> = [];
   let noManifest = false;
+  let manifestPreset: string | undefined;
+  let manifestStack: string | undefined;
   try {
     const manifestPath = path.join(aiDir, 'manifest.adf');
     if (fs.existsSync(manifestPath)) {
@@ -508,12 +561,38 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
       const manifest = parseManifest(doc);
       defaultLoad = manifest.defaultLoad;
       onDemand = manifest.onDemand.map((m) => ({ path: m.path, triggers: m.triggers }));
+      manifestPreset = getSectionTextValue(doc, 'PRESET');
+      manifestStack = getSectionTextValue(doc, 'STACK');
+      collectSensitivityTagsFromDoc(doc, sensitivityTagSet);
+
+      const modulePaths = [...new Set([...manifest.defaultLoad, ...manifest.onDemand.map((m) => m.path)])];
+      for (const modulePath of modulePaths) {
+        const resolvedModulePath = path.join(aiDir, modulePath);
+        if (!fs.existsSync(resolvedModulePath)) continue;
+        try {
+          const moduleDoc = parseAdf(fs.readFileSync(resolvedModulePath, 'utf8'));
+          collectSensitivityTagsFromDoc(moduleDoc, sensitivityTagSet);
+        } catch {
+          // Ignore malformed module files in brief generation.
+        }
+      }
     } else {
       noManifest = true;
     }
   } catch {
     noManifest = true;
   }
+
+  if (manifestPreset && (preset === 'default' || !configuredPreset)) {
+    preset = manifestPreset;
+  }
+  if (manifestStack && (stack === 'unknown' || !configuredStack)) {
+    stack = manifestStack;
+  }
+  if ((stack === 'unknown' || stack.length === 0) && preset !== 'default') {
+    stack = preset;
+  }
+  const sensitivityTags = [...sensitivityTagSet];
 
   // ---- Build model ----
   const model: BriefModel = {

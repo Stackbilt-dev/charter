@@ -263,7 +263,7 @@ export async function scoreCommand(options: CLIOptions, args: string[] = []): Pr
     return EXIT_CODE.SUCCESS;
   }
 
-  const aiDir = normalizeRelativePath(getFlag(args, '--ai-dir') || '.ai');
+  const aiDir = normalizeAiDirInput(getFlag(args, '--ai-dir') || '.ai');
   const inventory = collectRepoInventory();
   const report = buildScoreReport(inventory, aiDir);
 
@@ -306,7 +306,11 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
   };
 
   const manifestPath = normalizeRelativePath(path.posix.join(aiDir, 'manifest.adf'));
-  const aiFiles = inventory.files.filter((file) => file.startsWith(`${aiDir}/`) && file.endsWith('.adf'));
+  const manifestPathInInventory = toInventoryPath(manifestPath);
+  const aiDirInInventory = toInventoryPath(aiDir);
+  const aiFiles = aiDirInInventory
+    ? inventory.files.filter((file) => file.startsWith(`${aiDirInInventory}/`) && file.endsWith('.adf'))
+    : [];
   const alternateAgentFiles = AGENT_FILES.filter((file) => inventory.fileSet.has(file) && file !== 'CLAUDE.md' && !/^agents\.md$/i.test(file));
   const claudeContent = readText('CLAUDE.md');
   const claudeExists = inventory.fileSet.has('CLAUDE.md');
@@ -325,7 +329,9 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
   const agentsContent = agentsFile ? readText(agentsFile) : '';
   const agentsExists = !!agentsFile;
   const agentsSubstantive = agentsExists && isSubstantiveInstruction(agentsContent);
-  const manifestExists = inventory.fileSet.has(manifestPath);
+  const manifestExists = manifestPathInInventory
+    ? inventory.fileSet.has(manifestPathInInventory)
+    : fileExists(manifestPath);
 
   let agentConfigScore = 0;
   if (claudeExists) agentConfigScore += 5;
@@ -338,8 +344,8 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     AGENT_FILES.filter((file) => inventory.fileSet.has(file))
       .concat(cursorFiles)
       .concat(ROOT_DOC_FILES.filter((file) => inventory.fileSet.has(file)))
-      .concat(manifestExists ? [manifestPath] : [])
-      .concat(aiFiles.filter((file) => file !== manifestPath))
+      .concat(manifestExists ? [manifestPathInInventory ?? manifestPath] : [])
+      .concat(aiFiles.filter((file) => file !== (manifestPathInInventory ?? manifestPath)))
   )];
 
   const pathReferences = new Map<string, ResolvedPathReference>();
@@ -400,20 +406,25 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
 
       for (const modulePath of referencedModules) {
         const normalizedModule = normalizeRelativePath(path.posix.join(aiDir, modulePath));
-        if (!inventory.fileSet.has(normalizedModule)) {
-          missingModules.push(normalizedModule);
+        const moduleInInventory = toInventoryPath(normalizedModule);
+        const moduleExists = moduleInInventory
+          ? inventory.fileSet.has(moduleInInventory)
+          : fileExists(normalizedModule);
+        if (!moduleExists) {
+          missingModules.push(moduleInInventory ?? normalizedModule);
           continue;
         }
 
-        existingModules.push(normalizedModule);
+        const moduleDisplayPath = moduleInInventory ?? normalizedModule;
+        existingModules.push(moduleDisplayPath);
         try {
-          const moduleDoc = parseAdf(readText(normalizedModule));
+          const moduleDoc = parseAdf(readText(moduleDisplayPath));
           if (hasConstraints(moduleDoc)) {
-            constraintSources.add(normalizedModule);
+            constraintSources.add(moduleDisplayPath);
           }
           if (!stateDefined && hasAdfState(moduleDoc)) {
             stateDefined = true;
-            stateSource = normalizedModule;
+            stateSource = moduleDisplayPath;
           }
         } catch {
           // Keep module presence signal even if the content is malformed.
@@ -1496,6 +1507,29 @@ function supportsColor(): boolean {
 
 function normalizeRelativePath(relativePath: string): string {
   return relativePath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/');
+}
+
+function normalizeAiDirInput(aiDir: string): string {
+  const normalizedInput = normalizeRelativePath(aiDir);
+  if (!path.isAbsolute(normalizedInput)) {
+    return normalizedInput;
+  }
+  const relative = normalizeRelativePath(path.relative(process.cwd(), normalizedInput));
+  if (relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+    return relative;
+  }
+  return normalizedInput;
+}
+
+function toInventoryPath(candidatePath: string): string | null {
+  if (!path.isAbsolute(candidatePath)) {
+    return normalizeRelativePath(candidatePath);
+  }
+  const relative = normalizeRelativePath(path.relative(process.cwd(), candidatePath));
+  if (relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+    return relative;
+  }
+  return null;
 }
 
 function formatDate(date: Date): string {

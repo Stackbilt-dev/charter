@@ -209,6 +209,25 @@ npm test
     expect(findCategory(report, 'freshness')?.score).toBeLessThanOrEqual(2);
     expect(report.recommendations.some((item: string) => item.includes('Refresh agent config after recent code changes'))).toBe(true);
   });
+
+  it('accepts absolute --ai-dir paths and still detects manifest.adf', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, '.ai'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.ai', 'manifest.adf'), `ADF: 0.1
+DEFAULT_LOAD:
+  - core.adf
+`, 'utf8');
+    fs.writeFileSync(path.join(tmp, '.ai', 'core.adf'), 'ADF: 0.1\n', 'utf8');
+
+    const absAiDir = path.join(tmp, '.ai');
+    const { report } = await captureJson(() => scoreCommand(baseOptions, ['--ai-dir', absAiDir]));
+
+    expect(report.signals.agentConfig.manifest.exists).toBe(true);
+    expect(report.signals.agentConfig.manifest.path).toBe('.ai/manifest.adf');
+    expect(findCategory(report, 'architecture')?.summary).not.toContain('no ADF manifest');
+  });
 });
 
 function createTempRepo(): string {
@@ -230,6 +249,9 @@ async function captureJson(runCommand: () => Promise<number>): Promise<{ exitCod
   };
 }
 
-function findCategory(report: { categories: Array<{ id: string; score: number }> }, id: string): { id: string; score: number } | undefined {
+function findCategory(
+  report: { categories: Array<{ id: string; score: number; summary?: string }> },
+  id: string
+): { id: string; score: number; summary?: string } | undefined {
   return report.categories.find((category) => category.id === id);
 }

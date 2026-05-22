@@ -128,6 +128,55 @@ describe('generateBrief respects token ceiling', () => {
   });
 });
 
+describe('generateBrief reads ADF-driven preset and sensitivity', () => {
+  it('uses PRESET from manifest.adf and SENSITIVITY from referenced modules', async () => {
+    const tmp = makeTempDir();
+    process.chdir(tmp);
+
+    fs.writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({ name: 'adf-brief', version: '1.0.0' }),
+      'utf8'
+    );
+
+    fs.mkdirSync(path.join(tmp, '.charter'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.charter', 'config.json'), JSON.stringify({}), 'utf8');
+
+    fs.mkdirSync(path.join(tmp, '.ai'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, '.ai', 'manifest.adf'),
+      `ADF: 0.1
+PRESET: worker
+
+DEFAULT_LOAD:
+  - core.adf
+
+ON_DEMAND:
+  - backend.adf (Triggers on: api, worker)
+`,
+      'utf8'
+    );
+
+    fs.writeFileSync(path.join(tmp, '.ai', 'core.adf'), `ADF: 0.1\n`, 'utf8');
+    fs.writeFileSync(
+      path.join(tmp, '.ai', 'backend.adf'),
+      `ADF: 0.1
+🔒 SENSITIVITY:
+  - SECRETS: .env, wrangler.toml
+  - EGRESS: src/routes/**
+`,
+      'utf8'
+    );
+
+    const result = await generateBrief({ configPath: '.charter', aiDir: '.ai' });
+
+    expect(result.markdown).toContain('- **Preset**: worker');
+    expect(result.markdown).toContain('- **Stack**: worker');
+    expect(result.markdown).toContain('- SECRETS: .env, wrangler.toml');
+    expect(result.markdown).toContain('- EGRESS: src/routes/**');
+  });
+});
+
 describe('contextCommand writes .charter/context.md', () => {
   it('writes context.md when --write flag is passed', { timeout: 30000 }, async () => {
     const tmp = makeTempDir();
