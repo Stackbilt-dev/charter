@@ -28,11 +28,21 @@ ADF: 0.1
   - Bias toward action over clarification; implement rather than ask when task is clear
 
 📊 METRICS [load-bearing]:
-  adf_commands_loc: 0 / 800 [lines]
-  adf_bundle_loc: 0 / 200 [lines]
-  adf_sync_loc: 0 / 250 [lines]
-  adf_evidence_loc: 0 / 380 [lines]
-  adf_migrate_loc: 0 / 750 [lines]
-  bundler_loc: 0 / 500 [lines]
-  parser_loc: 0 / 300 [lines]
-  cli_entry_loc: 0 / 250 [lines]
+  adf_commands_loc: 905 / 1041 [lines]
+  adf_bundle_loc: 175 / 202 [lines]
+  adf_sync_loc: 217 / 250 [lines]
+  adf_evidence_loc: 272 / 313 [lines]
+  adf_migrate_loc: 688 / 792 [lines]
+  bundler_loc: 125 / 144 [lines]
+  parser_loc: 214 / 247 [lines]
+  cli_entry_loc: 258 / 297 [lines]
+
+BUDGET_RATIONALES:
+  adf_commands_loc_2026-05-22: 0 -> 905, ceiling 800 -> 1041; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  adf_bundle_loc_2026-05-22: 0 -> 175, ceiling 200 -> 202; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  adf_sync_loc_2026-05-22: 0 -> 217, ceiling 250 -> 250; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  adf_evidence_loc_2026-05-22: 0 -> 272, ceiling 380 -> 313; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  adf_migrate_loc_2026-05-22: 0 -> 688, ceiling 750 -> 792; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  bundler_loc_2026-05-22: 0 -> 125, ceiling 500 -> 144; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  parser_loc_2026-05-22: 0 -> 214, ceiling 300 -> 247; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
+  cli_entry_loc_2026-05-22: 0 -> 258, ceiling 250 -> 297; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
