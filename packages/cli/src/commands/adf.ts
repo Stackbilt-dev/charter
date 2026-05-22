@@ -12,7 +12,7 @@ import {
   applyPatches,
   CANONICAL_KEY_ORDER,
 } from '@stackbilt/adf';
-import type { PatchOperation } from '@stackbilt/adf';
+import type { AdfDocument, PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, readFlagFile } from '../flags';
@@ -521,6 +521,83 @@ function adfFmt(options: CLIOptions, args: string[]): number {
 }
 
 // ============================================================================
+// adf patch — helpers for before/after change capture
+// ============================================================================
+
+interface PatchChange {
+  op: string;
+  section?: string;
+  key?: string;
+  index?: number;
+  before: unknown;
+  after: unknown;
+}
+
+function captureOpBefore(doc: AdfDocument, op: PatchOperation): Omit<PatchChange, 'after'> {
+  switch (op.op) {
+    case 'ADD_BULLET':
+      return { op: op.op, section: op.section, before: null };
+    case 'REPLACE_BULLET': {
+      const s = doc.sections.find(s => s.key === op.section);
+      let before: unknown = null;
+      if (s?.content.type === 'list') before = s.content.items[op.index] ?? null;
+      else if (s?.content.type === 'map') {
+        const e = s.content.entries[op.index];
+        before = e ? `${e.key}: ${e.value}` : null;
+      }
+      return { op: op.op, section: op.section, index: op.index, before };
+    }
+    case 'REMOVE_BULLET': {
+      const s = doc.sections.find(s => s.key === op.section);
+      let before: unknown = null;
+      if (s?.content.type === 'list') before = s.content.items[op.index] ?? null;
+      else if (s?.content.type === 'map') {
+        const e = s.content.entries[op.index];
+        before = e ? `${e.key}: ${e.value}` : null;
+      }
+      return { op: op.op, section: op.section, index: op.index, before };
+    }
+    case 'ADD_SECTION':
+      return { op: op.op, key: op.key, before: null };
+    case 'REPLACE_SECTION': {
+      const s = doc.sections.find(s => s.key === op.key);
+      return { op: op.op, key: op.key, before: s?.content ?? null };
+    }
+    case 'REMOVE_SECTION': {
+      const s = doc.sections.find(s => s.key === op.key);
+      return { op: op.op, key: op.key, before: s?.content ?? null };
+    }
+    case 'UPDATE_METRIC': {
+      const s = doc.sections.find(s => s.key === op.section);
+      let before: number | null = null;
+      if (s?.content.type === 'metric') {
+        const entry = s.content.entries.find(e => e.key === op.key);
+        before = entry?.value ?? null;
+      }
+      return { op: op.op, section: op.section, key: op.key, before };
+    }
+  }
+}
+
+function captureOpAfter(patched: AdfDocument, op: PatchOperation): unknown {
+  switch (op.op) {
+    case 'ADD_BULLET': return op.value;
+    case 'REPLACE_BULLET': return op.value;
+    case 'REMOVE_BULLET': return null;
+    case 'ADD_SECTION': {
+      const s = patched.sections.find(s => s.key === op.key);
+      return s?.content ?? null;
+    }
+    case 'REPLACE_SECTION': {
+      const s = patched.sections.find(s => s.key === op.key);
+      return s?.content ?? null;
+    }
+    case 'REMOVE_SECTION': return null;
+    case 'UPDATE_METRIC': return op.value;
+  }
+}
+
+// ============================================================================
 // adf patch
 // ============================================================================
 
@@ -556,15 +633,32 @@ function adfPatch(options: CLIOptions, args: string[]): number {
   const input = fs.readFileSync(filePath, 'utf-8');
   const doc = parseAdf(input);
 
+  // Capture before-values from the original doc (before any mutation)
+  const befores = ops.map(op => captureOpBefore(doc, op));
+
   try {
     const patched = applyPatches(doc, ops);
     const output = formatAdf(patched);
     fs.writeFileSync(filePath, output);
 
+    const changes: PatchChange[] = befores.map((b, i) => ({
+      ...b,
+      after: captureOpAfter(patched, ops[i]),
+    }));
+
     if (options.format === 'json') {
-      console.log(JSON.stringify({ file: filePath, patched: true, opsApplied: ops.length }, null, 2));
+      console.log(JSON.stringify({ file: filePath, patched: true, opsApplied: ops.length, changes }, null, 2));
     } else {
       console.log(`  [ok] Applied ${ops.length} patch${ops.length === 1 ? '' : 'es'} to ${filePath}`);
+      for (const c of changes) {
+        if (c.op === 'UPDATE_METRIC') {
+          console.log(`       ${c.section}.${c.key}: ${c.before} → ${c.after}`);
+        } else if (c.op === 'REPLACE_BULLET' || c.op === 'REMOVE_BULLET') {
+          console.log(`       ${c.op} [${c.index}] in ${c.section}: "${c.before}" → ${c.after === null ? '(removed)' : `"${c.after}"`}`);
+        } else if (c.op === 'ADD_BULLET') {
+          console.log(`       ${c.op} in ${c.section}: "${c.after}"`);
+        }
+      }
     }
     return EXIT_CODE.SUCCESS;
   } catch (e: unknown) {
