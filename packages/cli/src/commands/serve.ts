@@ -20,10 +20,12 @@ import { z } from 'zod';
 import {
   parseAdf,
   formatAdf,
+  applyPatches,
   parseManifest,
   bundleModules,
   resolveModules,
   validateConstraints,
+  evaluateEvidence,
 } from '@stackbilt/adf';
 import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
 import { generateBrief } from './context';
@@ -334,6 +336,155 @@ function registerTools(server: McpServer, aiDir: string): void {
           ? JSON.stringify({ markdown: result.markdown, tokenCount: result.tokenCount, truncated: result.truncated, truncatedSections: result.truncatedSections }, null, 2)
           : result.markdown;
         return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    },
+  );
+
+  (server.registerTool as Function)(
+    'updateEvidence',
+    {
+      description:
+        'Measures actual metric values from source files tracked in manifest.adf and writes them back into the ADF modules that contain those metrics. Run this after code changes that affect tracked metrics (e.g. LOC counts). Returns what was measured, what changed (before/after), and current constraint status. Does NOT update .adf.lock — run `charter adf sync --write` separately if you need lock hygiene.',
+      inputSchema: {
+        dryRun: z.boolean().optional().describe(
+          'If true, report what would change without writing any ADF files.',
+        ),
+        metrics: z.array(z.string()).optional().describe(
+          'Specific metric keys to update (case-insensitive). If omitted, all auto-measurable metrics defined in manifest.adf are updated.',
+        ),
+      },
+    },
+    async (rawInput: unknown) => {
+      try {
+        const input = (rawInput ?? {}) as { dryRun?: boolean; metrics?: string[] };
+        const dryRun = input.dryRun ?? false;
+        const filterKeys = (input.metrics ?? []).map(k => k.toLowerCase());
+
+        const manifest = loadManifest(aiDir);
+        if (manifest.metrics.length === 0) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ status: 'no-op', reason: 'No METRICS entries in manifest.adf' }, null, 2) }] };
+        }
+
+        // Measure each source file
+        const measurements: Array<{ metricKey: string; sourcePath: string; measured: number | null; error?: string }> = [];
+        for (const ms of manifest.metrics) {
+          const metricKey = ms.key.toLowerCase();
+          if (filterKeys.length > 0 && !filterKeys.includes(metricKey)) continue;
+          const absPath = path.resolve(ms.path);
+          if (!fs.existsSync(absPath)) {
+            measurements.push({ metricKey, sourcePath: ms.path, measured: null, error: 'file not found' });
+            continue;
+          }
+          const lines = fs.readFileSync(absPath, 'utf-8').split('\n').length;
+          measurements.push({ metricKey, sourcePath: ms.path, measured: lines });
+        }
+
+        // For each measurement, find the ADF module that owns the metric and patch it
+        const allModuleNames = listModuleNames(aiDir);
+        const fileChanges: Array<{
+          file: string;
+          metricKey: string;
+          section: string;
+          before: number | null;
+          after: number;
+        }> = [];
+        const skipped: Array<{ metricKey: string; reason: string }> = [];
+
+        for (const m of measurements) {
+          if (m.measured === null) {
+            skipped.push({ metricKey: m.metricKey, reason: m.error ?? 'file not found' });
+            continue;
+          }
+          // Locate the ADF module that owns this metric key
+          let ownerModule: string | null = null;
+          let ownerSection: string | null = null;
+          let currentValue: number | null = null;
+          for (const modName of allModuleNames) {
+            const modPath = path.join(aiDir, modName);
+            if (!fs.existsSync(modPath)) continue;
+            const doc = parseAdf(fs.readFileSync(modPath, 'utf-8'));
+            for (const sec of doc.sections) {
+              if (sec.content.type !== 'metric') continue;
+              const entry = sec.content.entries.find(e => e.key === m.metricKey);
+              if (entry) {
+                ownerModule = modName;
+                ownerSection = sec.key;
+                currentValue = entry.value;
+                break;
+              }
+            }
+            if (ownerModule) break;
+          }
+
+          if (!ownerModule || !ownerSection) {
+            skipped.push({ metricKey: m.metricKey, reason: 'metric key not found in any ADF module' });
+            continue;
+          }
+
+          if (currentValue === m.measured) {
+            skipped.push({ metricKey: m.metricKey, reason: `already up to date (${m.measured})` });
+            continue;
+          }
+
+          fileChanges.push({
+            file: ownerModule,
+            metricKey: m.metricKey,
+            section: ownerSection,
+            before: currentValue,
+            after: m.measured,
+          });
+        }
+
+        // Apply patches grouped by file
+        const written: string[] = [];
+        if (!dryRun && fileChanges.length > 0) {
+          const byFile = new Map<string, typeof fileChanges>();
+          for (const c of fileChanges) {
+            const list = byFile.get(c.file) ?? [];
+            list.push(c);
+            byFile.set(c.file, list);
+          }
+          for (const [modName, changes] of byFile) {
+            const modPath = path.join(aiDir, modName);
+            const doc = parseAdf(fs.readFileSync(modPath, 'utf-8'));
+            const ops = changes.map(c => ({
+              op: 'UPDATE_METRIC' as const,
+              section: c.section,
+              key: c.metricKey,
+              value: c.after,
+            }));
+            const patched = applyPatches(doc, ops);
+            fs.writeFileSync(modPath, formatAdf(patched));
+            written.push(modName);
+          }
+        }
+
+        // Re-evaluate constraints against the (possibly updated) state
+        const modulePaths = [...manifest.defaultLoad];
+        const bundle = bundleModules(aiDir, modulePaths, p => fs.readFileSync(p, 'utf-8'), [], manifest);
+        const report = evaluateEvidence(bundle, undefined, 1.2);
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              dryRun,
+              measured: measurements,
+              changes: fileChanges,
+              skipped,
+              written: dryRun ? [] : written,
+              constraints: {
+                allPassing: report.allPassing,
+                failCount: report.failCount,
+                warnCount: report.warnCount,
+                items: report.constraints,
+              },
+              hint: dryRun ? 'Re-run with dryRun:false to write changes' : (written.length > 0 ? 'Run `charter adf sync --write` to update .adf.lock' : undefined),
+            }, null, 2),
+          }],
+        };
       } catch (err) {
         return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }
