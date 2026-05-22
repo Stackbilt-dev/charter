@@ -63,6 +63,15 @@ describe('stampPoliciesCommand', () => {
     expect(mockApply).toHaveBeenCalledWith('.', expect.objectContaining({ policyRepoRef: FAKE_REF }));
   });
 
+  it('uses CHARTER_POLICY_REPO_REF when flag is absent', async () => {
+    process.env.CHARTER_POLICY_REPO_REF = FAKE_REF;
+    const code = await stampPoliciesCommand(makeOptions(), []);
+    expect(code).toBe(0);
+    expect(mockExec).not.toHaveBeenCalled();
+    expect(mockApply).toHaveBeenCalledWith('.', expect.objectContaining({ policyRepoRef: FAKE_REF }));
+    delete process.env.CHARTER_POLICY_REPO_REF;
+  });
+
   it('returns RUNTIME_ERROR when git ls-remote fails and no explicit ref', async () => {
     mockExec.mockImplementation((_cmd: unknown, _opts: unknown, cb: unknown) => {
       (cb as (e: Error, out: string) => void)(new Error('network'), '');
@@ -71,6 +80,22 @@ describe('stampPoliciesCommand', () => {
     const code = await stampPoliciesCommand(makeOptions(), []);
     expect(code).toBe(2);
     expect(mockApply).not.toHaveBeenCalled();
+  });
+
+  it('emits structured JSON error when ref resolution fails in json mode', async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => { logs.push(msg); });
+    mockExec.mockImplementation((_cmd: unknown, _opts: unknown, cb: unknown) => {
+      (cb as (e: Error, out: string) => void)(new Error('network'), '');
+      return {} as ReturnType<typeof exec>;
+    });
+    const code = await stampPoliciesCommand(makeOptions({ format: 'json' }), []);
+    expect(code).toBe(2);
+    const parsed = JSON.parse(logs.find((l) => l.startsWith('{')) ?? '{}');
+    expect(parsed.status).toBe('ERROR');
+    expect(parsed.error?.code).toBe('POLICY_REPO_REF_UNRESOLVED');
+    expect(parsed.error?.recoveryCommand).toContain('--policy-repo-ref <sha>');
+    vi.restoreAllMocks();
   });
 
   it('passes --dry-run through to applyPolicies', async () => {

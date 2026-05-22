@@ -22,17 +22,34 @@ export async function stampPoliciesCommand(options: CLIOptions, args: string[]):
   const dryRun = args.includes('--dry-run');
   const fixPins = !args.includes('--no-fix-pins');
   const explicitRef = getFlag(args, '--policy-repo-ref');
+  const envRef = process.env.CHARTER_POLICY_REPO_REF?.trim();
+  const recoveryCommand = 'npx charter stamp-policies --policy-repo-ref <sha>';
 
   let policyRepoRef: string;
   if (explicitRef) {
     policyRepoRef = explicitRef;
+  } else if (envRef) {
+    policyRepoRef = envRef;
   } else {
     const resolved = await resolveStackbiltLlcRef();
     if (!resolved) {
-      console.error(
-        '  [error] Could not resolve Stackbilt-dev/stackbilt_llc HEAD SHA.\n' +
-        '          Pass --policy-repo-ref <sha> to override.',
-      );
+      if (options.format === 'json') {
+        console.log(JSON.stringify({
+          status: 'ERROR',
+          error: {
+            code: 'POLICY_REPO_REF_UNRESOLVED',
+            message: 'Could not resolve Stackbilt-dev/stackbilt_llc HEAD SHA.',
+            hint: 'Pass --policy-repo-ref <sha> or set CHARTER_POLICY_REPO_REF.',
+            recoveryCommand,
+          },
+        }, null, 2));
+      } else {
+        console.error(
+          '  [error] Could not resolve Stackbilt-dev/stackbilt_llc HEAD SHA.\n' +
+          '          Pass --policy-repo-ref <sha> to override.\n' +
+          `          Recovery: ${recoveryCommand}`,
+        );
+      }
       return EXIT_CODE.RUNTIME_ERROR;
     }
     policyRepoRef = resolved;
