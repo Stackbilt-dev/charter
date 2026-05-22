@@ -479,6 +479,35 @@ Seeds for hotspot analysis are chosen by resolved preset (from `.charter/config.
 | docs | `README.md`, `docs/*.md` |
 | unknown | `src/index.*`, `src/main.*` |
 
+### charter context-refresh
+
+Generates a live session snapshot and writes it to `.ai/context.adf`.
+
+Phase 1 is intentionally local-first and deterministic: it supports the `git` source only.
+
+```bash
+npx charter context-refresh
+npx charter context-refresh --sources git
+npx charter context-refresh --output CONTEXT.md
+npx charter context-refresh --ai-dir .ai
+npx charter context-refresh --format json
+```
+
+#### Flags
+
+- `--sources <csv>` — context sources to include. Phase 1 currently supports `git` only.
+- `--output <path>` — optionally mirror a markdown snapshot to a file (for session briefs/docs).
+- `--ai-dir <dir>` — target ADF directory (default: `.ai`), output file is `<dir>/context.adf`.
+
+#### Output
+
+- Always writes `.ai/context.adf` (or `<ai-dir>/context.adf`) with:
+  - `STATE` metadata (`GENERATED_AT`, source set)
+  - `OPEN_WORK` (branch + working tree status)
+  - `RECENT_ACTIVITY` (recent commits)
+  - `PENDING_DECISIONS` placeholder (for future non-git sources)
+- In `--format json`, prints a machine-readable summary including write paths and captured git signals.
+
 ### charter surface
 
 Extract the API surface of a project: HTTP routes and database schema tables.

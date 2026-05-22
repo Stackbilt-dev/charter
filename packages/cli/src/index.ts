@@ -26,6 +26,7 @@ import { scoreCommand } from './commands/score';
 import { blastCommand } from './commands/blast';
 import { surfaceCommand } from './commands/surface';
 import { contextCommand } from './commands/context';
+import { contextRefreshCommand } from './commands/context-refresh';
 import { stampPoliciesCommand } from './commands/stamp-policies';
 import { recordTelemetryEvent } from './telemetry';
 import { getFlag } from './flags';
@@ -43,6 +44,8 @@ Usage:
                                    --security-sensitive adds SECURITY.md, hard security drift denies, and a security test check
   charter context [--stdout-only] [--verbose] [--write]
                                    Pre-digested repo brief for AI agents (routes, hotspots, governance)
+  charter context-refresh [--sources git] [--output CONTEXT.md] [--ai-dir <dir>]
+                                   Live session snapshot to .ai/context.adf (Phase 1: git source)
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
   charter init [--preset <worker|frontend|backend|fullstack>] [--guided]
@@ -181,6 +184,9 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'context':
         exitCode = await contextCommand(options, restArgs);
+        break;
+      case 'context-refresh':
+        exitCode = await contextRefreshCommand(options, restArgs);
         break;
       case 'setup':
         exitCode = await setupCommand(options, restArgs);
