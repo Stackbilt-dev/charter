@@ -356,10 +356,7 @@ function parseColumns(body: string): SchemaColumn[] {
     const nullable = !/\bNOT\s+NULL\b/.test(rest);
     const primaryKey = /\bPRIMARY\s+KEY\b/.test(rest);
     const unique = /\bUNIQUE\b/.test(rest);
-    const defaultMatch = def
-      .slice(tokenMatch[0].length)
-      .match(/\bDEFAULT\s+((?:\([^)]*\))|'[^']*'|"[^"]*"|\S+)/i);
-    const defaultValue = defaultMatch ? defaultMatch[1] : undefined;
+    const defaultValue = parseDefaultValue(def.slice(tokenMatch[0].length));
 
     columns.push({
       name,
@@ -372,6 +369,77 @@ function parseColumns(body: string): SchemaColumn[] {
   }
 
   return columns;
+}
+
+function parseDefaultValue(input: string): string | undefined {
+  const match = /\bDEFAULT\b/i.exec(input);
+  if (!match) return undefined;
+  let cursor = match.index + match[0].length;
+  while (cursor < input.length && /\s/.test(input[cursor])) cursor++;
+  if (cursor >= input.length) return undefined;
+
+  const lead = input[cursor];
+  if (lead === '(') {
+    return readBalancedValue(input, cursor, '(', ')');
+  }
+  if (lead === '\'' || lead === '"') {
+    return readQuotedValue(input, cursor, lead);
+  }
+
+  const token = input.slice(cursor).match(/^[^\s,]+/);
+  return token ? token[0] : undefined;
+}
+
+function readBalancedValue(input: string, start: number, open: string, close: string): string {
+  let depth = 1;
+  let i = start + 1;
+  let quote: '\'' | '"' | null = null;
+
+  while (i < input.length) {
+    const ch = input[i];
+    if (quote) {
+      if (ch === quote) {
+        const escaped = i + 1 < input.length && input[i + 1] === quote;
+        if (escaped) {
+          i += 2;
+          continue;
+        }
+        quote = null;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '\'' || ch === '"') {
+      quote = ch;
+      i++;
+      continue;
+    }
+    if (ch === open) depth++;
+    if (ch === close) depth--;
+    i++;
+    if (depth === 0) {
+      return input.slice(start, i);
+    }
+  }
+
+  return input.slice(start).trim();
+}
+
+function readQuotedValue(input: string, start: number, quote: '\'' | '"'): string {
+  let i = start + 1;
+  while (i < input.length) {
+    if (input[i] === quote) {
+      const escaped = i + 1 < input.length && input[i + 1] === quote;
+      if (escaped) {
+        i += 2;
+        continue;
+      }
+      return input.slice(start, i + 1);
+    }
+    i++;
+  }
+  return input.slice(start).trim();
 }
 
 function splitTopLevelCommas(input: string): string[] {

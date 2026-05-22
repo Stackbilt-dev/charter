@@ -438,10 +438,10 @@ npx charter context --write           # write .charter/context.md only (for hook
 
 | Section | Source | Always present |
 | ------- | ------ | -------------- |
-| Identity | `.charter/config.json` + `package.json` | Yes |
+| Identity | `.charter/config.json`, `manifest.adf` (`PRESET`/`STACK`), and `package.json` | Yes |
 | Surface | `charter surface` (routes + D1 tables) | Yes |
 | Hotspots | `charter blast` (top hot files by importer count) | Yes |
-| Sensitivity | `.charter/config.json` sensitivity tags | Yes |
+| Sensitivity | `.charter/config.json` tags + ADF `SENSITIVITY` sections (manifest + referenced modules) | Yes |
 | Governance | `.ai/manifest.adf` module routing | Yes |
 
 #### Token budget
@@ -467,7 +467,7 @@ Or use `charter bootstrap` — it adds this as a suggested next step.
 
 #### Blast seed strategy
 
-Seeds for hotspot analysis are chosen by preset (from `.charter/config.json`):
+Seeds for hotspot analysis are chosen by resolved preset (from `.charter/config.json` when set, otherwise ADF `PRESET` fallback):
 
 | Preset | Seeds |
 | ------ | ----- |

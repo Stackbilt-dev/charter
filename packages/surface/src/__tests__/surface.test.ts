@@ -120,7 +120,21 @@ CREATE TABLE users (
     expect(emailCol.unique).toBe(true);
 
     const createdCol = tables[0].columns.find((c) => c.name === 'created_at')!;
-    expect(createdCol.defaultValue).toBeDefined();
+    expect(createdCol.defaultValue).toBe("(datetime('now'))");
+  });
+
+  it('preserves quoted defaults with escaped quotes', () => {
+    const sql = `
+CREATE TABLE jobs (
+  status TEXT NOT NULL DEFAULT 'pending',
+  note TEXT DEFAULT 'can''t fail'
+);
+`;
+    const tables = extractSchema(sql, 'schema.sql');
+    const statusCol = tables[0].columns.find((c) => c.name === 'status')!;
+    const noteCol = tables[0].columns.find((c) => c.name === 'note')!;
+    expect(statusCol.defaultValue).toBe("'pending'");
+    expect(noteCol.defaultValue).toBe("'can''t fail'");
   });
 
   it('handles IF NOT EXISTS', () => {
