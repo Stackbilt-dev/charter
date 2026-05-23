@@ -478,9 +478,11 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as Record<string, unknown>;
       if (typeof pkg.name === 'string') packageName = pkg.name;
       if (typeof pkg.version === 'string') version = pkg.version;
-      // Private workspace roots (monorepos) carry a stale or meaningless version — use the
-      // actual published CLI version instead so the brief reflects what's installed.
-      if (pkg.private === true) version = cliPkg.version;
+      // Private *workspace* roots (monorepos with a workspaces field) carry a stale or
+      // meaningless version — use the actual published CLI version so the brief reflects
+      // what's installed. Plain private packages (internal apps without workspaces) keep
+      // their own version unchanged.
+      if (pkg.private === true && pkg.workspaces != null) version = cliPkg.version;
       if (typeof pkg.description === 'string') description = pkg.description;
       if (pkg.bin && typeof pkg.bin === 'object' && pkg.bin !== null) {
         pkgBin = pkg.bin as Record<string, string>;

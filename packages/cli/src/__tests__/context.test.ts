@@ -210,10 +210,10 @@ describe('generateBrief version resolution', () => {
     const tmp = makeTempDir();
     process.chdir(tmp);
 
-    // Simulate a monorepo workspace root: private: true with a stale/low version
+    // Monorepo workspace root: private: true AND workspaces field present
     fs.writeFileSync(
       path.join(tmp, 'package.json'),
-      JSON.stringify({ name: 'my-monorepo', version: '0.1.0', private: true }),
+      JSON.stringify({ name: 'my-monorepo', version: '0.1.0', private: true, workspaces: ['packages/*'] }),
       'utf8'
     );
 
@@ -223,6 +223,22 @@ describe('generateBrief version resolution', () => {
     expect(result.markdown).not.toContain('v0.1.0');
     // Should show the actual installed CLI version
     expect(result.markdown).toContain(`v${cliPkg.version}`);
+  });
+
+  it('keeps the repo version for a private package that is not a workspace root', async () => {
+    const tmp = makeTempDir();
+    process.chdir(tmp);
+
+    // Internal app: private: true but NO workspaces field — must preserve its own version
+    fs.writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({ name: 'internal-app', version: '2.4.1', private: true }),
+      'utf8'
+    );
+
+    const result = await generateBrief({ configPath: '.charter' });
+
+    expect(result.markdown).toContain('v2.4.1');
   });
 
   it('uses the repo package.json version for normal non-private packages', async () => {
