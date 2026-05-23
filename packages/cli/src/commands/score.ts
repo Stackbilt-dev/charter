@@ -980,18 +980,25 @@ function isSubstantiveInstruction(content: string): boolean {
 function extractPathCandidates(content: string): string[] {
   const candidates = new Set<string>();
 
+  // Markdown link targets: [text](path)
   for (const match of content.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
     const target = normalizePathCandidate(match[1]);
     if (looksLikePath(target)) candidates.add(target);
   }
 
+  // Backtick inline code: `path`
   for (const match of content.matchAll(/`([^`\n]+)`/g)) {
     const candidate = normalizePathCandidate(match[1]);
     if (looksLikePath(candidate)) candidates.add(candidate);
   }
 
+  // Raw path patterns in prose/tables — require explicit relative prefix (./  ../) or a known
+  // file extension. This avoids false positives from Windows path fragments, cross-repo refs,
+  // and HTTP route tables captured in freeform text.
   for (const match of content.matchAll(/(^|[\s(])((?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(?:\.[A-Za-z0-9._-]+)?)/gm)) {
     const candidate = normalizePathCandidate(match[2]);
+    const ext = path.posix.extname(candidate).toLowerCase();
+    if (!candidate.startsWith('./') && !candidate.startsWith('../') && !KNOWN_PATH_EXTENSIONS.has(ext)) continue;
     if (looksLikePath(candidate)) candidates.add(candidate);
   }
 
@@ -1009,7 +1016,8 @@ function normalizePathCandidate(raw: string): string {
 }
 
 function resolveReferencedPath(sourceFile: string, candidate: string): ResolvedPathReference {
-  if (candidate.startsWith('/')) {
+  // path.isAbsolute handles both Unix (/foo) and Windows (C:\foo, C:/foo) absolute paths.
+  if (path.isAbsolute(candidate) || candidate.startsWith('/')) {
     return {
       source: sourceFile,
       candidate,
@@ -1030,10 +1038,26 @@ function resolveReferencedPath(sourceFile: string, candidate: string): ResolvedP
 
 function looksLikePath(candidate: string): boolean {
   if (!candidate) return false;
-  if (candidate.startsWith('http://') || candidate.startsWith('https://') || candidate.startsWith('mailto:')) return false;
+  // URL schemes
+  if (candidate.startsWith('http://') || candidate.startsWith('https://') || candidate.startsWith('mailto:') || candidate.startsWith('ftp://')) return false;
+  // CLI flags and fragment anchors
   if (candidate.startsWith('#') || candidate.startsWith('--')) return false;
+  // Template expressions, globs, angle-bracket types
   if (candidate.includes('<') || candidate.includes('>') || candidate.includes('*') || candidate.includes('${')) return false;
+  // Spaces mean prose, not a path
   if (candidate.includes(' ')) return false;
+  // Env-var assignments pulled from code blocks (DATABASE_URL=postgres://...)
+  if (candidate.includes('=')) return false;
+  // Windows drive-letter absolute paths (C:\..., D:/...)
+  if (/^[A-Za-z]:[\\/]/.test(candidate)) return false;
+  // hostname:port patterns (localhost:3000, api.example.com:8080)
+  if (/^[a-zA-Z0-9][a-zA-Z0-9.-]*:[0-9]+$/.test(candidate)) return false;
+  // HTTP API route paths (/api/v1/users) — starts with slash, multiple path segments, no known extension
+  if (
+    candidate.startsWith('/') &&
+    !KNOWN_PATH_EXTENSIONS.has(path.posix.extname(candidate).toLowerCase()) &&
+    candidate.split('/').filter(Boolean).length > 1
+  ) return false;
   if (KNOWN_PATH_FILENAMES.has(candidate) || KNOWN_PATH_FILENAMES.has(path.posix.basename(candidate))) return true;
   if (candidate.includes('/')) return true;
   return KNOWN_PATH_EXTENSIONS.has(path.posix.extname(candidate).toLowerCase());
