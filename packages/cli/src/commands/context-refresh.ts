@@ -113,6 +113,10 @@ interface RefreshOptionsResolved {
   config: ContextConfig;
 }
 
+interface ContextRefreshIO {
+  log?: (message: string) => void;
+}
+
 const SOURCE_SET = new Set<ContextSource>(['git', 'github']);
 const DEFAULT_CONFIG: ContextConfig = {
   version: 1,
@@ -139,7 +143,12 @@ const DEFAULT_CONFIG: ContextConfig = {
   },
 };
 
-export async function contextRefreshCommand(options: CLIOptions, args: string[]): Promise<number> {
+export async function contextRefreshCommand(
+  options: CLIOptions,
+  args: string[],
+  io?: ContextRefreshIO,
+): Promise<number> {
+  const log = io?.log ?? console.log;
   const resolved = resolveOptions(options, args);
   const snapshotPath = path.join(resolved.aiDirAbs, 'context.snapshot.json');
   const contextAdfPath = path.join(resolved.aiDirAbs, 'context.adf');
@@ -156,7 +165,7 @@ export async function contextRefreshCommand(options: CLIOptions, args: string[])
           : null,
       };
       if (options.format === 'json') {
-        console.log(JSON.stringify({
+        log(JSON.stringify({
           status: 'skipped',
           reason: 'fresh_snapshot',
           generatedAt: existing?.generatedAt ?? null,
@@ -168,12 +177,12 @@ export async function contextRefreshCommand(options: CLIOptions, args: string[])
           errors: [],
         }, null, 2));
       } else {
-        console.log('');
-        console.log('  charter context-refresh');
-        console.log('  Status:       skipped (fresh snapshot)');
-        console.log(`  Snapshot:     ${files.snapshotJson}`);
-        console.log(`  TTL (mins):   ${resolved.ttlMinutes}`);
-        console.log('');
+        log('');
+        log('  charter context-refresh');
+        log('  Status:       skipped (fresh snapshot)');
+        log(`  Snapshot:     ${files.snapshotJson}`);
+        log(`  TTL (mins):   ${resolved.ttlMinutes}`);
+        log('');
       }
       return EXIT_CODE.SUCCESS;
     }
@@ -204,7 +213,7 @@ export async function contextRefreshCommand(options: CLIOptions, args: string[])
   };
 
   if (options.format === 'json') {
-    console.log(JSON.stringify({
+    log(JSON.stringify({
       status: 'ok',
       reason: status,
       generatedAt: snapshot.generatedAt,
@@ -216,22 +225,22 @@ export async function contextRefreshCommand(options: CLIOptions, args: string[])
       errors: snapshot.errors,
     }, null, 2));
   } else {
-    console.log('');
-    console.log('  charter context-refresh');
-    console.log(`  Status:       ${status}`);
-    console.log(`  Sources:      ${snapshot.sourcesUsed.join(', ') || '(none)'}`);
-    console.log(`  Wrote:        ${files.contextAdf}`);
-    console.log(`  Snapshot:     ${files.snapshotJson}`);
+    log('');
+    log('  charter context-refresh');
+    log(`  Status:       ${status}`);
+    log(`  Sources:      ${snapshot.sourcesUsed.join(', ') || '(none)'}`);
+    log(`  Wrote:        ${files.contextAdf}`);
+    log(`  Snapshot:     ${files.snapshotJson}`);
     if (files.outputMarkdown) {
-      console.log(`  Mirrored MD:  ${files.outputMarkdown}`);
+      log(`  Mirrored MD:  ${files.outputMarkdown}`);
     }
     if (snapshot.warnings.length > 0) {
-      console.log(`  Warnings:     ${snapshot.warnings.length}`);
+      log(`  Warnings:     ${snapshot.warnings.length}`);
     }
     if (snapshot.errors.length > 0) {
-      console.log(`  Errors:       ${snapshot.errors.length}`);
+      log(`  Errors:       ${snapshot.errors.length}`);
     }
-    console.log('');
+    log('');
   }
 
   return EXIT_CODE.SUCCESS;

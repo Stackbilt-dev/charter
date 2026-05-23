@@ -627,7 +627,8 @@ function runSetupPhase(
       created.push('.mcp.json');
     } else if (mcpConfig.updated) {
       updated.push('.mcp.json');
-    } else if (mcpConfig.warning) {
+    }
+    if (mcpConfig.warning) {
       warnings.push(mcpConfig.warning);
     }
 
@@ -713,12 +714,13 @@ function ensureProjectMcpConfig(
   mcpServers.charter = desiredServer;
   root.mcpServers = mcpServers;
   fs.writeFileSync(configPath, JSON.stringify(root, null, 2) + '\n');
+  const absolutePathWarning = 'Generated .mcp.json uses an absolute --ai-dir path. Update it if you share this file across machines.';
 
   if (!configExists) {
-    return { created: true, updated: false };
+    return { created: true, updated: false, warning: absolutePathWarning };
   }
 
-  return { created: false, updated: true };
+  return { created: false, updated: true, warning: absolutePathWarning };
 }
 
 // ============================================================================
@@ -1267,6 +1269,9 @@ function isAlreadyThinPointer(filePath: string): boolean {
  * Prompt user for a yes/no answer via readline.
  */
 function promptYesNo(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    return Promise.resolve(false);
+  }
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,

@@ -49,11 +49,19 @@ const CONTEXT_SOURCE_SET = new Set(['git', 'github'] as const);
 
 type ContextSourceName = 'git' | 'github';
 
-interface CharterContextInput {
-  refresh?: boolean;
-  sources?: ContextSourceName[];
-  ttlMinutes?: number;
-}
+const CharterContextInputSchema = z.object({
+  refresh: z.boolean().optional().describe(
+    'If true, refresh context before reading by running context-refresh.',
+  ),
+  sources: z.array(z.enum(['git', 'github'])).optional().describe(
+    'Optional source override used only when refresh=true (for example ["git","github"]).',
+  ),
+  ttlMinutes: z.number().optional().describe(
+    'Optional TTL override used only when refresh=true.',
+  ),
+});
+
+type CharterContextInput = z.infer<typeof CharterContextInputSchema>;
 
 // ============================================================================
 // Command Entry
@@ -123,21 +131,11 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions): v
     {
       description:
         'Returns the current `.ai/context.snapshot.json` payload as structured JSON. Set refresh=true to run `charter context-refresh` first, then return the refreshed snapshot.',
-      inputSchema: {
-        refresh: z.boolean().optional().describe(
-          'If true, refresh context before reading by running context-refresh.',
-        ),
-        sources: z.array(z.enum(['git', 'github'])).optional().describe(
-          'Optional source override used only when refresh=true (for example ["git","github"]).',
-        ),
-        ttlMinutes: z.number().optional().describe(
-          'Optional TTL override used only when refresh=true.',
-        ),
-      },
+      inputSchema: CharterContextInputSchema.shape,
     },
     async (rawInput: unknown) => {
       try {
-        const input = (rawInput ?? {}) as CharterContextInput;
+        const input = CharterContextInputSchema.parse(rawInput ?? {});
         const result = await loadCharterContextSnapshot(options, aiDir, input);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
@@ -649,11 +647,12 @@ export async function loadCharterContextSnapshot(
 ): Promise<{ refreshed: boolean; snapshotPath: string; snapshot: unknown }> {
   const refresh = input?.refresh ?? false;
   const snapshotPathAbs = path.join(aiDir, 'context.snapshot.json');
-  const snapshotPathRel = path.relative(process.cwd(), snapshotPathAbs) || '.';
+  const snapshotPathRel = path.relative(process.cwd(), snapshotPathAbs);
 
   if (refresh) {
     const args = ['--ai-dir', aiDir];
     if (input?.sources && input.sources.length > 0) {
+      // Defensive guard: this helper is exported and may be called from plain JS.
       const invalid = input.sources.filter((entry) => !CONTEXT_SOURCE_SET.has(entry));
       if (invalid.length > 0) {
         throw new CLIError(`Invalid sources: ${invalid.join(', ')}. Supported: git, github.`);
@@ -667,18 +666,13 @@ export async function loadCharterContextSnapshot(
       args.push('--ttl-minutes', String(Math.floor(input.ttlMinutes)));
     }
 
-    const originalLog = console.log;
-    try {
-      console.log = () => {};
-      const exitCode = await contextRefreshCommand(
-        { ...options, format: 'json' },
-        args,
-      );
-      if (exitCode !== EXIT_CODE.SUCCESS) {
-        throw new CLIError(`context-refresh exited with code ${exitCode}`);
-      }
-    } finally {
-      console.log = originalLog;
+    const exitCode = await contextRefreshCommand(
+      { ...options, format: 'json' },
+      args,
+      { log: () => {} },
+    );
+    if (exitCode !== EXIT_CODE.SUCCESS) {
+      throw new CLIError(`context-refresh exited with code ${exitCode}`);
     }
   }
 
