@@ -35,7 +35,18 @@
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
+  "keywords": [
+    "charter",
+    "ci",
+    "github-actions",
+    "governance",
+    "continuous-integration",
+    "ai",
+    "llm"
+  ],
+  "author": "Stackbilt LLC",
   "license": "Apache-2.0"
 }

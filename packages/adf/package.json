@@ -29,7 +29,19 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
+  "keywords": [
+    "charter",
+    "adf",
+    "governance",
+    "ai",
+    "agent",
+    "context",
+    "format",
+    "llm"
+  ],
+  "author": "Stackbilt LLC",
   "license": "Apache-2.0"
 }

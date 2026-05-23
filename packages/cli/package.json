@@ -33,8 +33,21 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
+  "keywords": [
+    "charter",
+    "cli",
+    "governance",
+    "scaffold",
+    "monorepo",
+    "typescript",
+    "architecture",
+    "ai",
+    "agent",
+    "llm"
+  ],
   "scripts": {
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs",
     "build": "pnpm exec tsc -p tsconfig.json"

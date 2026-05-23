@@ -32,7 +32,18 @@
     "zod": "^3.24.1"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
+  "keywords": [
+    "charter",
+    "core",
+    "schema",
+    "validation",
+    "governance",
+    "ai",
+    "llm"
+  ],
+  "author": "Stackbilt LLC",
   "license": "Apache-2.0"
 }
