@@ -484,12 +484,13 @@ Seeds for hotspot analysis are chosen by resolved preset (from `.charter/config.
 
 Generates a live session snapshot and writes it to `.ai/context.adf` plus `.ai/context.snapshot.json`.
 
-Phase 2 supports `git` and `github` sources with fail-closed behavior for missing GitHub credentials.
+Supports `git`, `github`, and `repo-intel` sources with fail-closed behavior for missing GitHub credentials and graceful skip when the `gh` CLI is unavailable.
 
 ```bash
 npx charter context-refresh
 npx charter context-refresh --sources git
 npx charter context-refresh --sources git,github
+npx charter context-refresh --sources repo-intel
 npx charter context-refresh --output CONTEXT.md
 npx charter context-refresh --ai-dir .ai
 npx charter context-refresh --once --ttl-minutes 30
@@ -498,7 +499,7 @@ npx charter context-refresh --format json
 
 #### Flags
 
-- `--sources <csv>` — context sources to include. Supported: `git`, `github`.
+- `--sources <csv>` — context sources to include. Supported: `git`, `github`, `repo-intel`.
 - `--output <path>` — optionally mirror a markdown snapshot to a file (for session briefs/docs).
 - `--ai-dir <dir>` — target ADF directory (default: `.ai`), output file is `<dir>/context.adf`.
 - `--once` — skip refresh when an existing snapshot is newer than TTL.
@@ -527,6 +528,16 @@ Optional config path: `.charter/context-sources.json`
 - `sources.github` — repo + strict label filter setup
 
 If `github` is enabled but `GITHUB_TOKEN` is missing, refresh continues without hard failure and records `sources.github.available = false` plus warnings.
+
+If `repo-intel` is enabled but the `gh` CLI is not installed or has no GitHub remote, refresh continues without hard failure and records a warning. When available, `repo-intel` writes a full payload to `.charter/repo-intel/snapshot.json`.
+
+#### Sources reference
+
+| Source | Description |
+|--------|-------------|
+| `git` | Local git branch, working tree, and recent commit log. |
+| `github` | Open issues from the GitHub API (requires `GITHUB_TOKEN`). |
+| `repo-intel` | GitHub history via the `gh` CLI — open/closed issues, PRs, releases, and a computed summary (`openIssueCount`, `mergeVelocity`, `stalledIssues`, `recurringLabels`, `releaseCadence`). Writes `.charter/repo-intel/snapshot.json`. Skips gracefully when `gh` is unavailable. |
 
 For active implementation status and next-session handoff details, see [Context Refresh Resume Guide](/context-refresh-resume).
 
