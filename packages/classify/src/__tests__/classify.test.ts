@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { heuristicClassify, determineRecommendation } from '../index';
+import { heuristicClassify, determineRecommendation, formatChangeClassification } from '../index';
+import type { ChangeClassification } from '@stackbilt/types';
 
 describe('heuristicClassify', () => {
   it('classifies "readme" as SURFACE', () => {
@@ -43,6 +44,37 @@ describe('heuristicClassify', () => {
   it('returns default signal for LOCAL classification', () => {
     const result = heuristicClassify('fix button color');
     expect(result.signals).toContain('No strong patterns detected - defaulting to LOCAL');
+  });
+});
+
+describe('formatChangeClassification export boundary', () => {
+  it('is exported as a function', () => {
+    expect(typeof formatChangeClassification).toBe('function');
+  });
+
+  it('returns a markdown string with required sections', () => {
+    const classification: ChangeClassification = {
+      id: 'test-1',
+      subjectType: 'PR',
+      subjectReference: 'PR-42',
+      subjectSummary: 'Add new auth middleware',
+      changeClass: 'CROSS_CUTTING',
+      affectedSystems: ['auth-service', 'api-gateway'],
+      affectedCount: 2,
+      policyViolations: [],
+      governanceStatus: 'CLEAR',
+      temporalAnalysisId: null,
+      recommendation: 'ESCALATE',
+      mitigations: [],
+      rationale: 'Cross-cutting change requires architecture review.',
+      projectId: null,
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+    const output = formatChangeClassification(classification);
+    expect(typeof output).toBe('string');
+    expect(output).toContain('CROSS_CUTTING');
+    expect(output).toContain('ESCALATE');
+    expect(output).toContain('auth-service');
   });
 });
 
