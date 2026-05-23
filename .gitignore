@@ -12,6 +12,9 @@ coverage/
 plans/
 governance/
 
+# npm lockfile — this repo uses pnpm (pnpm-lock.yaml); ignore npm-generated lockfile
+package-lock.json
+
 # local telemetry artifacts
 .charter/telemetry/
 

@@ -18,10 +18,6 @@ import { adfCommand } from './commands/adf';
 import { serveCommand } from './commands/serve';
 import { bootstrapCommand } from './commands/bootstrap';
 import { telemetryCommand } from './commands/telemetry';
-import { loginCommand } from './commands/login';
-import { architectCommand } from './commands/architect';
-import { scaffoldCommand } from './commands/scaffold';
-import { runCommand } from './commands/run';
 import { scoreCommand } from './commands/score';
 import { blastCommand } from './commands/blast';
 import { surfaceCommand } from './commands/surface';
@@ -45,7 +41,7 @@ Usage:
                                    --security-sensitive adds SECURITY.md, hard security drift denies, and a security test check
   charter context [--stdout-only] [--verbose] [--write]
                                    Pre-digested repo brief for AI agents (routes, hotspots, governance)
-  charter context-refresh [--sources git,github] [--output CONTEXT.md] [--ai-dir <dir>] [--once] [--ttl-minutes <n>] [--force]
+  charter context-refresh [--sources git,github,repo-intel] [--output CONTEXT.md] [--ai-dir <dir>] [--once] [--ttl-minutes <n>] [--force]
                                    Live session snapshot to .ai/context.adf + .ai/context.snapshot.json
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
@@ -72,14 +68,6 @@ Usage:
   charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
   charter serve [--name <name>] [--ai-dir <dir>]
                                    Expose ADF project context as an MCP server (stdio, for Claude Code/Codex/Cursor)
-  charter login --key <key>        Store Stackbilt API key
-  charter login --logout           Clear stored credentials
-  charter architect <description>  Generate tech stack from project description
-  charter architect --file <path>  Generate tech stack from spec file
-  charter scaffold [--output <dir>] [--dry-run]
-                                   Write scaffold files from last build
-  charter run <description>      Architect + scaffold in one step (animated)
-  charter run --file <path>      Same, from spec file
   charter score [--ai-dir <dir>] AI-readiness audit for the current repo
   charter blast <file> [<file> ...] [--root <dir>] [--depth <n>]
                                    Compute blast radius: which files transitively depend on the seeds
@@ -101,8 +89,6 @@ Options:
   --detect-only      Setup only: print detected stack/preset and exit
   --no-dependency-sync
                      Setup only: do not rewrite devDependencies["@stackbilt/cli"]
-  --no-deprecation-warning
-                     Suppress deprecation warnings for login/architect/scaffold/run
 `;
 
 export const EXIT_CODE = {
@@ -228,18 +214,6 @@ export async function run(args: string[]): Promise<number> {
         break;
       case 'telemetry':
         exitCode = await telemetryCommand(options, restArgs);
-        break;
-      case 'login':
-        exitCode = await loginCommand(options, restArgs);
-        break;
-      case 'architect':
-        exitCode = await architectCommand(options, restArgs);
-        break;
-      case 'scaffold':
-        exitCode = await scaffoldCommand(options, restArgs);
-        break;
-      case 'run':
-        exitCode = await runCommand(options, restArgs);
         break;
       case 'score':
         exitCode = await scoreCommand(options, restArgs);
