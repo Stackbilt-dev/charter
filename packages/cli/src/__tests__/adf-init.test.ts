@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { adfCommand } from '../commands/adf';
+import { adfCommand, POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID } from '../commands/adf';
 
 const originalCwd = process.cwd();
 const tempDirs: string[] = [];
@@ -77,6 +77,42 @@ describe('charter adf init — scaffolding guard', () => {
     const written = fs.readFileSync(path.join(tmp, '.ai', 'core.adf'), 'utf-8');
     expect(written).not.toBe('custom content');
     expect(written).toContain('ADF: 0.1');
+  });
+});
+
+describe('charter adf init --emit-pointers — CLAUDE.md Session Start section', () => {
+  it('POINTER_CLAUDE_MD contains a Session Start section', () => {
+    expect(POINTER_CLAUDE_MD).toContain('## Session Start');
+    expect(POINTER_CLAUDE_MD).toContain('charter_context');
+  });
+
+  it('POINTER_CLAUDE_MD_HYBRID contains a Session Start section', () => {
+    expect(POINTER_CLAUDE_MD_HYBRID).toContain('## Session Start');
+    expect(POINTER_CLAUDE_MD_HYBRID).toContain('charter_context');
+  });
+
+  it('POINTER_CLAUDE_MD Session Start section appears before Environment section', () => {
+    const sessionStartIdx = POINTER_CLAUDE_MD.indexOf('## Session Start');
+    const environmentIdx = POINTER_CLAUDE_MD.indexOf('## Environment');
+    expect(sessionStartIdx).toBeGreaterThan(-1);
+    expect(environmentIdx).toBeGreaterThan(-1);
+    expect(sessionStartIdx).toBeLessThan(environmentIdx);
+  });
+
+  it('POINTER_CLAUDE_MD_HYBRID Session Start section appears before Module Index section', () => {
+    const sessionStartIdx = POINTER_CLAUDE_MD_HYBRID.indexOf('## Session Start');
+    const moduleIndexIdx = POINTER_CLAUDE_MD_HYBRID.indexOf('## Module Index');
+    expect(sessionStartIdx).toBeGreaterThan(-1);
+    expect(moduleIndexIdx).toBeGreaterThan(-1);
+    expect(sessionStartIdx).toBeLessThan(moduleIndexIdx);
+  });
+
+  it('writes CLAUDE.md with Session Start section when --emit-pointers is used', async () => {
+    const tmp = makeTmp();
+    await adfCommand(DEFAULT_OPTIONS, ['init', '--emit-pointers']);
+    const claudeMd = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(claudeMd).toContain('## Session Start');
+    expect(claudeMd).toContain('charter_context');
   });
 });
 
