@@ -15,7 +15,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 
-type ContextSource = 'git' | 'github';
+type ContextSource = 'git' | 'github' | 'repo-intel';
 
 interface GitCommit {
   hash: string;
@@ -50,6 +50,60 @@ interface GitHubSnapshot {
   error?: string;
 }
 
+// repo-intel types
+interface RepoIntelIssue {
+  number: number;
+  title: string;
+  labels: Array<{ name: string }>;
+  assignees: Array<{ login: string }>;
+  createdAt: string;
+  updatedAt: string;
+  comments: number;
+}
+
+interface RepoIntelClosedIssue {
+  number: number;
+  title: string;
+  labels: Array<{ name: string }>;
+  closedAt: string;
+}
+
+interface RepoIntelPR {
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string };
+  mergedAt: string | null;
+  createdAt: string;
+  reviewDecision: string | null;
+  labels: Array<{ name: string }>;
+}
+
+interface RepoIntelRelease {
+  tagName: string;
+  publishedAt: string;
+  isLatest: boolean;
+}
+
+interface RepoIntelSummary {
+  openIssueCount: number;
+  stalledIssues: number;
+  recurringLabels: string[];
+  mergeVelocity: number;
+  releaseCadence: number | null;
+}
+
+interface RepoIntelSnapshot {
+  available: boolean;
+  generatedAt: string;
+  openIssues: RepoIntelIssue[];
+  closedIssues: RepoIntelClosedIssue[];
+  pullRequests: RepoIntelPR[];
+  releases: RepoIntelRelease[];
+  summary: RepoIntelSummary;
+  error?: string;
+}
+
 interface DerivedItem {
   source: ContextSource;
   type: string;
@@ -70,6 +124,7 @@ interface ContextSnapshot {
   sources: {
     git: GitSnapshot;
     github: GitHubSnapshot;
+    'repo-intel': RepoIntelSnapshot;
   };
   openWork: DerivedItem[];
   recentActivity: DerivedItem[];
@@ -100,6 +155,9 @@ interface ContextConfig {
       includePullRequests: boolean;
       includeChecks: boolean;
     };
+    'repo-intel': {
+      enabled: boolean;
+    };
   };
 }
 
@@ -117,7 +175,7 @@ interface ContextRefreshIO {
   log?: (message: string) => void;
 }
 
-const SOURCE_SET = new Set<ContextSource>(['git', 'github']);
+const SOURCE_SET = new Set<ContextSource>(['git', 'github', 'repo-intel']);
 const DEFAULT_CONFIG: ContextConfig = {
   version: 1,
   defaults: {
@@ -139,6 +197,9 @@ const DEFAULT_CONFIG: ContextConfig = {
       labels: [],
       includePullRequests: true,
       includeChecks: true,
+    },
+    'repo-intel': {
+      enabled: true,
     },
   },
 };
@@ -335,6 +396,11 @@ function loadContextConfig(configPath: string): ContextConfig {
         cfg.sources.github.includeChecks = github.includeChecks;
       }
     }
+    const repoIntelCfg = sources['repo-intel'];
+    if (repoIntelCfg && typeof repoIntelCfg === 'object') {
+      const ri = repoIntelCfg as Record<string, unknown>;
+      if (typeof ri.enabled === 'boolean') cfg.sources['repo-intel'].enabled = ri.enabled;
+    }
   }
 
   return cfg;
@@ -348,7 +414,7 @@ function parseRequestedSources(sourcesFlag: string | undefined, fallback: Contex
     .filter((entry) => entry.length > 0);
   const invalid = requested.filter((entry) => !SOURCE_SET.has(entry as ContextSource));
   if (invalid.length > 0) {
-    throw new CLIError(`Unsupported --sources value(s): ${invalid.join(', ')}. Supported: git, github.`);
+    throw new CLIError(`Unsupported --sources value(s): ${invalid.join(', ')}. Supported: git, github, repo-intel.`);
   }
   return [...new Set(requested as ContextSource[])];
 }
@@ -410,7 +476,21 @@ async function buildSnapshot(cwd: string, resolved: RefreshOptionsResolved): Pro
     }
   }
 
-  const derived = deriveAggregates(git, github);
+  const repoIntelEnabled = resolved.sourcesRequested.includes('repo-intel') && resolved.config.sources['repo-intel'].enabled;
+  const repoIntel = repoIntelEnabled
+    ? collectRepoIntelSnapshot(cwd, generatedAt)
+    : { available: false, generatedAt, openIssues: [], closedIssues: [], pullRequests: [], releases: [], summary: { openIssueCount: 0, stalledIssues: 0, recurringLabels: [], mergeVelocity: 0, releaseCadence: null }, error: 'disabled' };
+  if (repoIntel.available) {
+    sourcesUsed.push('repo-intel');
+    // Persist full snapshot to .charter/repo-intel/snapshot.json
+    const repoIntelSnapshotPath = path.resolve(cwd, '.charter', 'repo-intel', 'snapshot.json');
+    fs.mkdirSync(path.dirname(repoIntelSnapshotPath), { recursive: true });
+    fs.writeFileSync(repoIntelSnapshotPath, JSON.stringify(repoIntel, null, 2), 'utf8');
+  } else if (resolved.sourcesRequested.includes('repo-intel') && repoIntel.error && repoIntel.error !== 'disabled') {
+    warnings.push(`repo-intel source unavailable: ${repoIntel.error}`);
+  }
+
+  const derived = deriveAggregates(git, github, repoIntel);
 
   return {
     version: 1,
@@ -425,6 +505,7 @@ async function buildSnapshot(cwd: string, resolved: RefreshOptionsResolved): Pro
     sources: {
       git,
       github,
+      'repo-intel': repoIntel,
     },
     openWork: derived.openWork,
     recentActivity: derived.recentActivity,
@@ -598,9 +679,154 @@ async function collectGitHubSnapshot(config: ContextConfig, issueLimit: number):
   };
 }
 
+function runGhCommand(args: string[], cwd?: string): string | null {
+  try {
+    const output = execFileSync('gh', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return output.trim();
+  } catch {
+    return null;
+  }
+}
+
+function collectRepoIntelSnapshot(cwd: string, generatedAt: string): RepoIntelSnapshot {
+
+  const empty: RepoIntelSnapshot = {
+    available: false,
+    generatedAt,
+    openIssues: [],
+    closedIssues: [],
+    pullRequests: [],
+    releases: [],
+    summary: { openIssueCount: 0, stalledIssues: 0, recurringLabels: [], mergeVelocity: 0, releaseCadence: null },
+  };
+
+  // Check if gh CLI is available
+  const ghVersion = runGhCommand(['--version'], cwd);
+  if (!ghVersion) {
+    return { ...empty, error: 'gh CLI not available' };
+  }
+
+  // Open issues (last 50, sorted by updated)
+  const openIssuesRaw = runGhCommand([
+    'issue', 'list', '--limit', '50', '--state', 'open',
+    '--json', 'number,title,labels,assignees,createdAt,updatedAt,comments',
+  ], cwd);
+  if (!openIssuesRaw) {
+    return { ...empty, error: 'no GitHub remote or gh auth required' };
+  }
+
+  let openIssues: RepoIntelIssue[];
+  try {
+    openIssues = JSON.parse(openIssuesRaw) as RepoIntelIssue[];
+  } catch {
+    return { ...empty, error: 'invalid_json: open issues response' };
+  }
+
+  // Recent closed issues (last 20)
+  const closedIssuesRaw = runGhCommand([
+    'issue', 'list', '--limit', '20', '--state', 'closed',
+    '--json', 'number,title,labels,closedAt',
+  ], cwd);
+  let closedIssues: RepoIntelClosedIssue[] = [];
+  if (closedIssuesRaw) {
+    try {
+      closedIssues = JSON.parse(closedIssuesRaw) as RepoIntelClosedIssue[];
+    } catch { /* ignore parse failures for supplemental data */ }
+  }
+
+  // Recent PRs (last 30, all states)
+  const prsRaw = runGhCommand([
+    'pr', 'list', '--limit', '30', '--state', 'all',
+    '--json', 'number,title,state,author,mergedAt,createdAt,reviewDecision,labels',
+  ], cwd);
+  let pullRequests: RepoIntelPR[] = [];
+  if (prsRaw) {
+    try {
+      pullRequests = JSON.parse(prsRaw) as RepoIntelPR[];
+    } catch { /* ignore */ }
+  }
+
+  // Release cadence (last 10 releases)
+  const releasesRaw = runGhCommand([
+    'release', 'list', '--limit', '10',
+    '--json', 'tagName,publishedAt,isLatest',
+  ], cwd);
+  let releases: RepoIntelRelease[] = [];
+  if (releasesRaw) {
+    try {
+      releases = JSON.parse(releasesRaw) as RepoIntelRelease[];
+    } catch { /* ignore */ }
+  }
+
+  // Compute summary
+  const now = Date.now();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+  const stalledIssues = openIssues.filter((issue) => {
+    const updatedMs = Date.parse(issue.updatedAt);
+    return Number.isFinite(updatedMs) && (now - updatedMs) > thirtyDaysMs;
+  }).length;
+
+  // Count label occurrences in closed issues
+  const labelCounts = new Map<string, number>();
+  for (const issue of closedIssues) {
+    for (const label of issue.labels) {
+      const name = label.name;
+      labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1);
+    }
+  }
+  const recurringLabels = [...labelCounts.entries()]
+    .filter(([, count]) => count >= 3)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => name);
+
+  const mergeVelocity = pullRequests.filter((pr) => {
+    if (!pr.mergedAt) return false;
+    const mergedMs = Date.parse(pr.mergedAt);
+    return Number.isFinite(mergedMs) && (now - mergedMs) <= thirtyDaysMs;
+  }).length;
+
+  let releaseCadence: number | null = null;
+  const lastFiveReleases = releases
+    .slice(0, 5)
+    .map((r) => Date.parse(r.publishedAt))
+    .filter((ms) => Number.isFinite(ms))
+    .sort((a, b) => b - a);
+  if (lastFiveReleases.length >= 2) {
+    const gaps: number[] = [];
+    for (let i = 0; i < lastFiveReleases.length - 1; i++) {
+      gaps.push((lastFiveReleases[i]! - lastFiveReleases[i + 1]!) / (24 * 60 * 60 * 1000));
+    }
+    releaseCadence = Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
+  }
+
+  const summary: RepoIntelSummary = {
+    openIssueCount: openIssues.length,
+    stalledIssues,
+    recurringLabels,
+    mergeVelocity,
+    releaseCadence,
+  };
+
+  return {
+    available: true,
+    generatedAt,
+    openIssues,
+    closedIssues,
+    pullRequests,
+    releases,
+    summary,
+  };
+}
+
 function deriveAggregates(
   git: GitSnapshot,
   github: GitHubSnapshot,
+  repoIntel: RepoIntelSnapshot,
 ): {
   openWork: DerivedItem[];
   recentActivity: DerivedItem[];
@@ -659,6 +885,36 @@ function deriveAggregates(
         type: 'issue-update',
         summary: `Issue #${issue.number} updated ${issue.updatedAt}`,
         ref: issue.url,
+      });
+    }
+  }
+
+  if (repoIntel.available) {
+    const s = repoIntel.summary;
+    recentActivity.push({
+      source: 'repo-intel',
+      type: 'summary',
+      summary: `repo-intel: ${s.openIssueCount} open issues, ${s.mergeVelocity} PRs merged in last 30d, ${s.stalledIssues} stalled`,
+    });
+    if (s.stalledIssues > 0) {
+      openWork.push({
+        source: 'repo-intel',
+        type: 'stalled-issues',
+        summary: `${s.stalledIssues} open issue(s) with no activity in 30+ days`,
+      });
+    }
+    if (s.recurringLabels.length > 0) {
+      pendingDecisions.push({
+        source: 'repo-intel',
+        type: 'recurring-labels',
+        summary: `Recurring closed-issue labels (≥3 times): ${s.recurringLabels.slice(0, 5).join(', ')}`,
+      });
+    }
+    if (s.releaseCadence !== null) {
+      recentActivity.push({
+        source: 'repo-intel',
+        type: 'release-cadence',
+        summary: `Avg release cadence: ~${s.releaseCadence} day(s) between last 5 releases`,
       });
     }
   }
