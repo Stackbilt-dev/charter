@@ -1,2 +1,11 @@
-# Require explicit review for governance context changes
+# Catch-all: require review across the repo
+* @stackbilt-admin
+
+# Governance context files
 /.ai/* admin@stackbilt.dev
+
+# CLI command surface
+/packages/cli/src/commands/ @stackbilt-admin
+
+# High-risk release pipeline
+/.github/workflows/release.yml @stackbilt-admin
