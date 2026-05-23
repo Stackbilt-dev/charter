@@ -44,22 +44,22 @@ describe('annotateDriftViolations', () => {
       line: 10,
       patternName: 'no-eval',
       snippet: 'eval(code)',
+      antiPattern: 'eval usage',
       severity: 'BLOCKER',
-      category: 'style',
     };
     annotateDriftViolations([violation]);
     expect(logs[0]).toContain('::error');
     expect(logs[0]).toContain('src/index.ts');
   });
 
-  it('emits ::warning for LOW severity', () => {
+  it('emits ::warning for MINOR severity', () => {
     const violation: DriftViolation = {
       file: 'src/util.ts',
       line: 5,
       patternName: 'prefer-const',
       snippet: 'let x = 1',
-      severity: 'LOW',
-      category: 'style',
+      antiPattern: 'mutable binding where const is sufficient',
+      severity: 'MINOR',
     };
     annotateDriftViolations([violation]);
     expect(logs[0]).toContain('::warning');
@@ -106,7 +106,7 @@ describe('formatPRComment', () => {
 
   it('includes violations table when violations are provided', () => {
     const violations: DriftViolation[] = [
-      { file: 'src/a.ts', line: 1, patternName: 'no-any', snippet: 'any', severity: 'CRITICAL', category: 'types' },
+      { file: 'src/a.ts', line: 1, patternName: 'no-any', snippet: 'any', antiPattern: 'untyped any', severity: 'CRITICAL' },
     ];
     const result = formatPRComment({ status: 'FAIL', summary: 'Issues found', violations });
     expect(result).toContain('Violations');
