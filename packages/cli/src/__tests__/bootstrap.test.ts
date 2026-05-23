@@ -165,6 +165,57 @@ STATE:
     expect(updatedSecurityCheck.status).toBe('PASS');
   });
 
+  it('creates .mcp.json with charter MCP server wiring for Codex/Cursor', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync('.mcp.json')).toBe(true);
+
+    const parsed = JSON.parse(fs.readFileSync('.mcp.json', 'utf-8'));
+    expect(parsed).toHaveProperty('mcpServers.charter');
+    expect(parsed.mcpServers.charter.command).toBe('npx');
+    expect(parsed.mcpServers.charter.args).toEqual([
+      '@stackbilt/cli',
+      'serve',
+      '--ai-dir',
+      path.resolve('.ai'),
+    ]);
+  });
+
+  it('does not overwrite existing mcpServers.charter without --force', async () => {
+    fs.writeFileSync(
+      '.mcp.json',
+      JSON.stringify(
+        {
+          mcpServers: {
+            charter: {
+              command: 'charter',
+              args: ['serve'],
+            },
+            github: {
+              command: 'npx',
+              args: ['@modelcontextprotocol/server-github'],
+            },
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+
+    const before = fs.readFileSync('.mcp.json', 'utf-8');
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync('.mcp.json', 'utf-8')).toBe(before);
+  });
+
   it('treats security deny drift matches as CI policy violations', async () => {
     await bootstrapCommand(
       { ...baseOptions, yes: true },

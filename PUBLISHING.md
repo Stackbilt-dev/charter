@@ -157,6 +157,25 @@ Confirm:
 - behavior matches docs and exit-code contract.
 - mixed-stack repos are detected correctly, or can be corrected with explicit `--preset fullstack`.
 
+Release completion gates (required before declaring release complete):
+
+1. GitHub artifacts:
+   - release exists for the tag (for example `v0.16.0`)
+   - `release.yml` run for the tag is `success`
+2. npm publication:
+   - all 12 workspace packages are resolvable at the target version
+3. tracker hygiene:
+   - release-scoped issues/PR follow-ups are closed or explicitly carried forward
+
+Example npm verification command for a target version:
+
+```bash
+VERSION=0.16.0
+for p in types core adf git classify validate drift blast surface policies ci cli; do
+  npm view "@stackbilt/${p}@${VERSION}" version
+done
+```
+
 ## Release Artifacts
 
 After successful publish:

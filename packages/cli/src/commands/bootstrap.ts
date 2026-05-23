@@ -330,9 +330,9 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
 
   // Build next steps
   result.nextSteps.push({
-    cmd: 'charter serve  # start MCP server for Claude Code / Cursor integration',
+    cmd: 'charter serve  # start MCP server for Claude Code / Codex / Cursor integration',
     required: false,
-    reason: 'Enable real-time governance via MCP (add to .claude/settings.json)',
+    reason: 'Enable real-time governance via MCP (wire in .mcp.json or .claude/settings.json)',
   });
   result.nextSteps.push({
     cmd: 'Review .charter/patterns/ and customize for your stack',
@@ -622,6 +622,16 @@ function runSetupPhase(
       updated.push('package.json (devDependencies)');
     }
 
+    const mcpConfig = ensureProjectMcpConfig('.ai', force);
+    if (mcpConfig.created) {
+      created.push('.mcp.json');
+    } else if (mcpConfig.updated) {
+      updated.push('.mcp.json');
+    }
+    if (mcpConfig.warning) {
+      warnings.push(mcpConfig.warning);
+    }
+
     return {
       step: {
         name: 'setup',
@@ -642,6 +652,75 @@ function runSetupPhase(
       },
     };
   }
+}
+
+function ensureProjectMcpConfig(
+  aiDir: string,
+  force: boolean,
+): { created: boolean; updated: boolean; warning?: string } {
+  const configPath = path.resolve('.mcp.json');
+  const desiredServer = {
+    command: 'npx',
+    args: ['@stackbilt/cli', 'serve', '--ai-dir', path.resolve(aiDir)],
+  };
+
+  const configExists = fs.existsSync(configPath);
+  let root: Record<string, unknown> = {};
+  if (configExists) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {
+          created: false,
+          updated: false,
+          warning: 'Skipped MCP config update: .mcp.json must contain a JSON object at the top level.',
+        };
+      }
+      root = { ...(parsed as Record<string, unknown>) };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        created: false,
+        updated: false,
+        warning: `Skipped MCP config update: .mcp.json is not valid JSON (${msg}).`,
+      };
+    }
+  }
+
+  const mcpServersRaw = root.mcpServers;
+  if (mcpServersRaw !== undefined && (typeof mcpServersRaw !== 'object' || mcpServersRaw === null || Array.isArray(mcpServersRaw))) {
+    return {
+      created: false,
+      updated: false,
+      warning: 'Skipped MCP config update: .mcp.json#mcpServers must be a JSON object.',
+    };
+  }
+
+  const mcpServers = { ...((mcpServersRaw as Record<string, unknown> | undefined) ?? {}) };
+  const existingCharter = mcpServers.charter;
+  const sameServer = JSON.stringify(existingCharter) === JSON.stringify(desiredServer);
+  if (sameServer) {
+    return { created: false, updated: false };
+  }
+
+  if (existingCharter !== undefined && !force) {
+    return {
+      created: false,
+      updated: false,
+      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (use --force to replace it).',
+    };
+  }
+
+  mcpServers.charter = desiredServer;
+  root.mcpServers = mcpServers;
+  fs.writeFileSync(configPath, JSON.stringify(root, null, 2) + '\n');
+  const absolutePathWarning = 'Generated .mcp.json uses an absolute --ai-dir path. Update it if you share this file across machines.';
+
+  if (!configExists) {
+    return { created: true, updated: false, warning: absolutePathWarning };
+  }
+
+  return { created: false, updated: true, warning: absolutePathWarning };
 }
 
 // ============================================================================
@@ -1190,6 +1269,9 @@ function isAlreadyThinPointer(filePath: string): boolean {
  * Prompt user for a yes/no answer via readline.
  */
 function promptYesNo(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    return Promise.resolve(false);
+  }
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
