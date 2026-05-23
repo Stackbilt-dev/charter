@@ -100,6 +100,21 @@ To add personal overrides, create `.claude/settings.local.json`:
 }
 ```
 
+### Policy-Block Fallback For OSS Governance Files
+
+If an assistant run is blocked by model policy while editing standard OSS
+governance/security-posture files (for example `CODE_OF_CONDUCT.md`,
+`.github/CODEOWNERS`, `.github/workflows/codeql.yml`, `SECURITY.md`):
+
+1. Continue delivery on a normal git branch using manual edits or an alternate tool.
+2. Record reproducible evidence in a GitHub issue:
+   - exact request text
+   - exact error text
+   - UTC timestamp
+   - repo + branch context
+3. Link the upstream provider escalation issue from the local issue.
+4. Do not leave the repository blocked while waiting for a provider-side policy fix.
+
 ## Reporting Issues
 
 Use GitHub Issues for bugs/features. Include Node.js version, OS, and `charter --version` output.
