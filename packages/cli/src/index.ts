@@ -69,7 +69,7 @@ Usage:
                                    Install git pre-commit hook for ADF evidence gate
   charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
   charter serve [--name <name>] [--ai-dir <dir>]
-                                   Expose ADF project context as an MCP server (stdio, for Claude Code)
+                                   Expose ADF project context as an MCP server (stdio, for Claude Code/Codex/Cursor)
   charter login --key <key>        Store Stackbilt API key
   charter login --logout           Clear stored credentials
   charter architect <description>  Generate tech stack from project description

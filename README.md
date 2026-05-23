@@ -20,7 +20,7 @@ Detects your stack, scaffolds `.ai/`, migrates existing CLAUDE.md / `.cursorrule
 - **Measurable constraints** — per-module metric ceilings (LOC, complexity, bloat) validated at commit time and in CI.
 - **Codebase analysis** — `charter blast` reverse-dependency graphs, `charter surface` route/schema fingerprints. Deterministic, zero runtime deps.
 - **Drift + audit** — anti-pattern scans, commit governance, CI-ready exit codes.
-- **MCP server** — `charter serve` exposes project context to Claude Code.
+- **MCP server** — `charter serve` exposes project context to Claude Code, Codex, and Cursor.
 
 Compose with the broader [Stackbilt ecosystem](https://github.com/Stackbilt-dev) — [audit-chain](https://github.com/Stackbilt-dev/audit-chain), [worker-observability](https://github.com/Stackbilt-dev/worker-observability), [llm-providers](https://github.com/Stackbilt-dev/llm-providers), [adf](https://www.npmjs.com/package/@stackbilt/adf) — when you need them.
 
@@ -84,7 +84,7 @@ METRICS [load-bearing]:
 
 `charter adf evidence --auto-measure` validates these live. Pre-commit hooks reject code that exceeds ceilings. CI workflows gate merges. Charter enforces its own rules on its own codebase -- every commit.
 
-### MCP server for Claude Code
+### MCP server for Claude Code and Codex
 
 ```json
 {
@@ -98,6 +98,19 @@ METRICS [load-bearing]:
 ```
 
 Claude Code can query `getProjectContext`, `getArchitecturalDecisions`, `getProjectState`, and `getRecentChanges` directly.
+
+Codex/Cursor can use the same MCP wiring via `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "charter": {
+      "command": "npx",
+      "args": ["@stackbilt/cli", "serve", "--ai-dir", "/absolute/path/to/.ai"]
+    }
+  }
+}
+```
 
 The `charter_brief` MCP tool composes routes, hotspots, and governance into a single pre-digested brief — call it first in any agent session to skip 15-30 cold-boot discovery calls.
 

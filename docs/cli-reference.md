@@ -341,12 +341,12 @@ npx charter blast src/foo.ts --root ./packages/server       # scan a subdirector
 
 ### charter serve
 
-Expose ADF project context as an MCP server over stdio, for use with Claude Code.
+Expose ADF project context as an MCP server over stdio, for use with Claude Code, Codex, and Cursor.
 
 ```bash
 npx charter serve                             # stdio MCP server (default)
 npx charter serve --ai-dir /abs/path/.ai      # explicit ADF directory
-npx charter serve --name "my-project"         # override the server name shown in Claude Code
+npx charter serve --name "my-project"         # override the server name shown in MCP clients
 ```
 
 - `--ai-dir <dir>` — path to the `.ai/` ADF directory (default: `.ai`). **Always resolved to an absolute path at startup.** When wiring in `.mcp.json`, use an absolute path or a path relative to the project root — relative paths are resolved against the working directory at spawn time, which may differ from the project root in multi-repo setups.
@@ -381,6 +381,7 @@ If startup validation fails (missing `.ai/` directory or `manifest.adf`), `chart
 | Tool | Description |
 |------|-------------|
 | `charter_brief` | **Call first.** Pre-digested repo brief — routes, hotspots, governance. |
+| `charter_context` | Session continuity snapshot reader/refresher (`.ai/context.snapshot.json`). Use `refresh=true` to run `context-refresh` before reading. |
 | `getProjectContext` | ADF bundle resolved for a given task or trigger keywords. |
 | `getProjectState` | Constraint validation results across all loaded modules. |
 | `getArchitecturalDecisions` | Load-bearing constraints from `core.adf`. |

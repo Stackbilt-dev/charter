@@ -29,6 +29,7 @@ import {
 } from '@stackbilt/adf';
 import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
 import { generateBrief } from './context';
+import { contextRefreshCommand } from './context-refresh';
 import {
   analyze as analyzeSurface,
   SurfaceInputSchema,
@@ -44,6 +45,15 @@ import { detectTsconfigAliases } from './blast';
 // ============================================================================
 
 const DEFAULT_PORT = 3847;
+const CONTEXT_SOURCE_SET = new Set(['git', 'github'] as const);
+
+type ContextSourceName = 'git' | 'github';
+
+interface CharterContextInput {
+  refresh?: boolean;
+  sources?: ContextSourceName[];
+  ttlMinutes?: number;
+}
 
 // ============================================================================
 // Command Entry
@@ -88,7 +98,7 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
     version: '1.0.0',
   });
 
-  registerTools(server, aiDir);
+  registerTools(server, aiDir, options);
   registerResources(server, aiDir);
 
   if (options.format !== 'json') {
@@ -106,7 +116,40 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
 // Tool Registration
 // ============================================================================
 
-function registerTools(server: McpServer, aiDir: string): void {
+function registerTools(server: McpServer, aiDir: string, options: CLIOptions): void {
+
+  (server.registerTool as Function)(
+    'charter_context',
+    {
+      description:
+        'Returns the current `.ai/context.snapshot.json` payload as structured JSON. Set refresh=true to run `charter context-refresh` first, then return the refreshed snapshot.',
+      inputSchema: {
+        refresh: z.boolean().optional().describe(
+          'If true, refresh context before reading by running context-refresh.',
+        ),
+        sources: z.array(z.enum(['git', 'github'])).optional().describe(
+          'Optional source override used only when refresh=true (for example ["git","github"]).',
+        ),
+        ttlMinutes: z.number().optional().describe(
+          'Optional TTL override used only when refresh=true.',
+        ),
+      },
+    },
+    async (rawInput: unknown) => {
+      try {
+        const input = (rawInput ?? {}) as CharterContextInput;
+        const result = await loadCharterContextSnapshot(options, aiDir, input);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
 
   (server.registerTool as Function)(
     'getProjectContext',
@@ -597,4 +640,66 @@ function inferProjectName(aiDir: string): string {
 
   // Fall back to directory name
   return path.basename(process.cwd());
+}
+
+export async function loadCharterContextSnapshot(
+  options: CLIOptions,
+  aiDir: string,
+  input?: CharterContextInput,
+): Promise<{ refreshed: boolean; snapshotPath: string; snapshot: unknown }> {
+  const refresh = input?.refresh ?? false;
+  const snapshotPathAbs = path.join(aiDir, 'context.snapshot.json');
+  const snapshotPathRel = path.relative(process.cwd(), snapshotPathAbs) || '.';
+
+  if (refresh) {
+    const args = ['--ai-dir', aiDir];
+    if (input?.sources && input.sources.length > 0) {
+      const invalid = input.sources.filter((entry) => !CONTEXT_SOURCE_SET.has(entry));
+      if (invalid.length > 0) {
+        throw new CLIError(`Invalid sources: ${invalid.join(', ')}. Supported: git, github.`);
+      }
+      args.push('--sources', input.sources.join(','));
+    }
+    if (input?.ttlMinutes !== undefined) {
+      if (!Number.isFinite(input.ttlMinutes) || input.ttlMinutes <= 0) {
+        throw new CLIError(`Invalid ttlMinutes: ${input.ttlMinutes}. Must be a positive number.`);
+      }
+      args.push('--ttl-minutes', String(Math.floor(input.ttlMinutes)));
+    }
+
+    const originalLog = console.log;
+    try {
+      console.log = () => {};
+      const exitCode = await contextRefreshCommand(
+        { ...options, format: 'json' },
+        args,
+      );
+      if (exitCode !== EXIT_CODE.SUCCESS) {
+        throw new CLIError(`context-refresh exited with code ${exitCode}`);
+      }
+    } finally {
+      console.log = originalLog;
+    }
+  }
+
+  if (!fs.existsSync(snapshotPathAbs)) {
+    throw new CLIError(
+      `Context snapshot not found at ${snapshotPathRel}. Run \`charter context-refresh\` or call charter_context with refresh=true.`,
+    );
+  }
+
+  let snapshot: unknown;
+  try {
+    snapshot = JSON.parse(fs.readFileSync(snapshotPathAbs, 'utf-8'));
+  } catch (err) {
+    throw new CLIError(
+      `Failed to parse context snapshot at ${snapshotPathRel}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return {
+    refreshed: refresh,
+    snapshotPath: snapshotPathRel,
+    snapshot,
+  };
 }

@@ -330,9 +330,9 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
 
   // Build next steps
   result.nextSteps.push({
-    cmd: 'charter serve  # start MCP server for Claude Code / Cursor integration',
+    cmd: 'charter serve  # start MCP server for Claude Code / Codex / Cursor integration',
     required: false,
-    reason: 'Enable real-time governance via MCP (add to .claude/settings.json)',
+    reason: 'Enable real-time governance via MCP (wire in .mcp.json or .claude/settings.json)',
   });
   result.nextSteps.push({
     cmd: 'Review .charter/patterns/ and customize for your stack',
