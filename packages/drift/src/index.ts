@@ -57,6 +57,32 @@ export function scanForDrift(
         }
       }
     }
+
+    // Also scan extracted template literals as virtual files
+    const templateVirtualFiles = extractTemplateLiterals(content, filename);
+    for (const [vFilename, vContent] of Object.entries(templateVirtualFiles)) {
+      for (const pattern of patterns) {
+        if (pattern.antiPatterns) {
+          const rules = extractRules(pattern.antiPatterns);
+
+          for (const rule of rules) {
+            const lines = vContent.split('\n');
+            lines.forEach((line, index) => {
+              if (rule.test(line)) {
+                violations.push({
+                  file: vFilename,
+                  line: index + 1,
+                  snippet: line.trim().substring(0, 100),
+                  patternName: pattern.name,
+                  antiPattern: pattern.antiPatterns!,
+                  severity: 'MAJOR'
+                });
+              }
+            });
+          }
+        }
+      }
+    }
   }
 
   const score = Math.max(0, 1.0 - (violations.length * 0.1));
@@ -68,6 +94,39 @@ export function scanForDrift(
     scannedPatterns: patterns.length,
     timestamp: new Date().toISOString()
   };
+}
+
+/**
+ * Extract template literal bodies from a source file.
+ *
+ * For .ts, .tsx, .js, and .mjs files, finds all backtick template literal
+ * bodies and returns them as a map of virtual filenames to extracted content.
+ * Virtual filenames have the format: `filename[template:N]`
+ *
+ * Handles nested backticks conservatively via non-greedy matching.
+ * Short template literals (≤20 chars) are skipped as trivially uninteresting.
+ *
+ * @param content - File content to extract from
+ * @param filename - Filename used to determine extension and virtual names
+ * @returns Map of virtual filename → extracted template body
+ */
+export function extractTemplateLiterals(content: string, filename: string): Record<string, string> {
+  const supportedExtensions = ['.ts', '.tsx', '.js', '.mjs'];
+  const isSupported = supportedExtensions.some(ext => filename.endsWith(ext));
+  if (!isSupported) return {};
+
+  const result: Record<string, string> = {};
+  // Match outermost backtick strings — simplified: find `...` blocks
+  const re = /`([\s\S]*?)`/g;
+  let match: RegExpExecArray | null;
+  let i = 0;
+  while ((match = re.exec(content)) !== null) {
+    const body = match[1];
+    if (body.length > 20) { // skip trivially short template strings
+      result[`${filename}[template:${i++}]`] = body;
+    }
+  }
+  return result;
 }
 
 // ============================================================================
