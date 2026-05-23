@@ -1,0 +1,24 @@
+{
+  "patterns": [
+    {
+      "id": "adf-mutation-review",
+      "name": "ADF Module Mutation Review",
+      "category": "GOVERNANCE",
+      "status": "ACTIVE",
+      "blessed_solution": "Run `charter doctor` before merging any change to .ai/*.adf files. Include output in PR description.",
+      "rationale": "ADF modules are load-bearing context files that route AI agent behavior. Silent mutations break agent routing without visible test failures.",
+      "anti_patterns": "Merging .adf edits without running charter doctor. Editing DEFAULT_LOAD entries without updating dependent module triggers. Removing SENSITIVITY blocks without an explicit architecture decision.",
+      "created_at": "2026-05-23T00:00:00.000Z"
+    },
+    {
+      "id": "adf-manifest-pointer-integrity",
+      "name": "ADF Manifest Pointer Integrity",
+      "category": "GOVERNANCE",
+      "status": "ACTIVE",
+      "blessed_solution": "Every module path listed in manifest.adf DEFAULT_LOAD or ON_DEMAND must resolve to an existing .adf file. Use `charter doctor` to validate before merge.",
+      "rationale": "Broken manifest pointers cause silent context loss for AI agents — the agent loads fewer modules than expected with no error surface.",
+      "anti_patterns": "Listing module paths in manifest.adf that do not exist on disk. Renaming .adf files without updating manifest.adf references.",
+      "created_at": "2026-05-23T00:00:00.000Z"
+    }
+  ]
+}
