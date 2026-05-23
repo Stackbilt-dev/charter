@@ -622,6 +622,15 @@ function runSetupPhase(
       updated.push('package.json (devDependencies)');
     }
 
+    const mcpConfig = ensureProjectMcpConfig('.ai', force);
+    if (mcpConfig.created) {
+      created.push('.mcp.json');
+    } else if (mcpConfig.updated) {
+      updated.push('.mcp.json');
+    } else if (mcpConfig.warning) {
+      warnings.push(mcpConfig.warning);
+    }
+
     return {
       step: {
         name: 'setup',
@@ -642,6 +651,74 @@ function runSetupPhase(
       },
     };
   }
+}
+
+function ensureProjectMcpConfig(
+  aiDir: string,
+  force: boolean,
+): { created: boolean; updated: boolean; warning?: string } {
+  const configPath = path.resolve('.mcp.json');
+  const desiredServer = {
+    command: 'npx',
+    args: ['@stackbilt/cli', 'serve', '--ai-dir', path.resolve(aiDir)],
+  };
+
+  const configExists = fs.existsSync(configPath);
+  let root: Record<string, unknown> = {};
+  if (configExists) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {
+          created: false,
+          updated: false,
+          warning: 'Skipped MCP config update: .mcp.json must contain a JSON object at the top level.',
+        };
+      }
+      root = { ...(parsed as Record<string, unknown>) };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        created: false,
+        updated: false,
+        warning: `Skipped MCP config update: .mcp.json is not valid JSON (${msg}).`,
+      };
+    }
+  }
+
+  const mcpServersRaw = root.mcpServers;
+  if (mcpServersRaw !== undefined && (typeof mcpServersRaw !== 'object' || mcpServersRaw === null || Array.isArray(mcpServersRaw))) {
+    return {
+      created: false,
+      updated: false,
+      warning: 'Skipped MCP config update: .mcp.json#mcpServers must be a JSON object.',
+    };
+  }
+
+  const mcpServers = { ...((mcpServersRaw as Record<string, unknown> | undefined) ?? {}) };
+  const existingCharter = mcpServers.charter;
+  const sameServer = JSON.stringify(existingCharter) === JSON.stringify(desiredServer);
+  if (sameServer) {
+    return { created: false, updated: false };
+  }
+
+  if (existingCharter !== undefined && !force) {
+    return {
+      created: false,
+      updated: false,
+      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (use --force to replace it).',
+    };
+  }
+
+  mcpServers.charter = desiredServer;
+  root.mcpServers = mcpServers;
+  fs.writeFileSync(configPath, JSON.stringify(root, null, 2) + '\n');
+
+  if (!configExists) {
+    return { created: true, updated: false };
+  }
+
+  return { created: false, updated: true };
 }
 
 // ============================================================================

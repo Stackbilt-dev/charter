@@ -369,7 +369,7 @@ Use an absolute path for `--ai-dir`. A relative path like `.ai` resolves against
 
 #### Startup errors
 
-If startup validation fails (missing `.ai/` directory or `manifest.adf`), `charter serve` emits a structured JSON-RPC error to stdout before exiting so Claude Code can surface a human-readable message:
+If startup validation fails (missing `.ai/` directory or `manifest.adf`), `charter serve` emits a structured JSON-RPC error to stdout before exiting so MCP clients can surface a human-readable message:
 
 | Condition | Error message | Fix |
 |-----------|--------------|-----|

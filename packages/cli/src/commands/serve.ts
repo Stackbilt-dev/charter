@@ -5,7 +5,7 @@
  * Supports stdio (default) and SSE transports.
  *
  * Usage:
- *   charter serve                              # stdio, for Claude Code
+ *   charter serve                              # stdio, for Claude Code/Codex/Cursor
  *   charter serve --transport sse --port 3847  # SSE, for network access
  *   charter serve --name "my-project"          # custom server name
  */

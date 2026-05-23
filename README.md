@@ -142,7 +142,7 @@ charter adf migrate                      # Migrate existing configs
 charter adf sync --check                 # Verify files match lock
 charter adf fmt .ai/core.adf --write     # Reformat to canonical form
 charter adf metrics recalibrate          # Adjust ceilings to current state
-charter serve                            # MCP server for Claude Code
+charter serve                            # MCP server for Claude Code, Codex, Cursor
 ```
 
 ### Analyze
