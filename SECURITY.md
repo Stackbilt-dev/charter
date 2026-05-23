@@ -31,12 +31,15 @@ This policy covers Charter Kit OSS packages:
 - `@stackbilt/types`
 - `@stackbilt/core`
 - `@stackbilt/adf`
+- `@stackbilt/blast`
 - `@stackbilt/git`
 - `@stackbilt/classify`
 - `@stackbilt/validate`
 - `@stackbilt/drift`
 - `@stackbilt/cli`
 - `@stackbilt/ci`
+- `@stackbilt/policies`
+- `@stackbilt/surface`
 
 
 ## Security Design
