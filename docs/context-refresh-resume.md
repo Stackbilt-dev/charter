@@ -51,6 +51,32 @@ To close `#155`, complete:
    - TTL tuning guidance
    - example hook wiring
 
+## Phase 3 Kickoff Checklist (v0.16.0+)
+
+Track this as the active implementation sequence for `#155`:
+
+1. `serve` wiring:
+   - add MCP tool contract for `charter_context`
+   - support read-only mode (`refresh=false`) and refresh mode (`refresh=true`)
+2. runtime behavior:
+   - return structured JSON from `.ai/context.snapshot.json` when available
+   - on missing snapshot + `refresh=false`, return explicit actionable error
+   - on `refresh=true`, invoke existing `context-refresh` pipeline and return refreshed snapshot
+3. tests:
+   - tool reads existing snapshot
+   - tool refresh path returns updated snapshot
+   - missing snapshot behavior is deterministic and documented
+4. docs:
+   - `docs/cli-reference.md` tool contract
+   - `README.md` session-start flow using `--once` and TTL guidance
+
+Definition of done for Phase 3:
+
+- `charter serve` exposes `charter_context` with stable JSON output
+- end-to-end tests pass for read/refresh/error paths
+- docs include a copy/pasteable session-start hook example
+- issue `#155` can close with no remaining TODOs
+
 ## Suggested Restart Plan (Next Session)
 
 1. Add `charter_context` tool registration in `packages/cli/src/commands/serve.ts`
