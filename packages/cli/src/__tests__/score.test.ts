@@ -228,6 +228,60 @@ DEFAULT_LOAD:
     expect(report.signals.agentConfig.manifest.path).toBe('.ai/manifest.adf');
     expect(findCategory(report, 'architecture')?.summary).not.toContain('no ADF manifest');
   });
+
+  it('grounding checker does not count URLs, env-var assignments, Windows paths, or HTTP routes as broken file references', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'fp-test', version: '1.0.0' }, null, 2));
+
+    // CLAUDE.md intentionally contains every false-positive category from issues #163/#164.
+    // None of these strings should appear in the broken-path list.
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), `# Rules
+
+Env var assignment in a code block: \`AEGIS_LOCAL_URL=http://localhost:11434\`
+Windows absolute path: \`C:/Users/kover/Documents/aegis-daemon\`
+Bare Windows path fragment in prose: Files/Git/mingw64/bin/git-credential-manager.exe
+
+HTTP API routes (from a routes table):
+| /chat | Chat endpoint |
+| /api/runs | Run list |
+| /webhooks/voice/complete | Voice webhook |
+
+URL-only link: [docs](https://example.com/guide)
+
+Hostname with port: localhost:3000
+`);
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+
+    // None of the false-positive patterns should appear as broken references
+    expect(broken.some((b: string) => b.includes('localhost:11434'))).toBe(false);
+    expect(broken.some((b: string) => b.includes('AEGIS_LOCAL_URL'))).toBe(false);
+    expect(broken.some((b: string) => /^[A-Za-z]:[\\/]/.test(b) || b.startsWith('C:/'))).toBe(false);
+    expect(broken.some((b: string) => b === '/chat' || b === '/api/runs' || b.startsWith('/webhooks/'))).toBe(false);
+    expect(broken.some((b: string) => b.includes('example.com'))).toBe(false);
+    expect(broken.some((b: string) => b === 'localhost:3000')).toBe(false);
+  });
+
+  it('grounding checker correctly tracks ./path-without-extension as a broken reference', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'rel-test', version: '1.0.0' }, null, 2));
+
+    // ./docs/runbooks has no file extension — it must still be tracked because the explicit
+    // ./ prefix makes the intent unambiguous. Regression for the normalizePathCandidate
+    // stripping ./ before the prefix check ran.
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), 'See ./docs/runbooks for on-call procedures.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).toContain('docs/runbooks');
+  });
 });
 
 function createTempRepo(): string {
