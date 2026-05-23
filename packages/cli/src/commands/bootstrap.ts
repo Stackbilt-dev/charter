@@ -364,6 +364,12 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     });
   }
 
+  result.nextSteps.push({
+    cmd: 'charter hook print --claude  # paste output into .claude/settings.json → hooks.UserPromptSubmit',
+    required: false,
+    reason: 'Auto-refresh context at session start so charter_context returns live state, not a cold snapshot, before the agent acts',
+  });
+
   // ========================================================================
   // Governance Gaps — surface what's configured but not enforced
   // ========================================================================

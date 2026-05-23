@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { hookCommand } from '../commands/hook';
+import { hookCommand, printClaudeHookConfig } from '../commands/hook';
 import type { CLIOptions } from '../index';
 
 const baseOptions: CLIOptions = {
@@ -55,5 +55,39 @@ describe('hookCommand', () => {
 
     const content = fs.readFileSync(hookPath, 'utf-8');
     expect(content).toContain('echo "custom"');
+  });
+
+  it('hook print --claude returns 0 and outputs UserPromptSubmit config', async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+
+    const exitCode = await hookCommand(baseOptions, ['print', '--claude']);
+    expect(exitCode).toBe(0);
+
+    const output = logs.join('\n');
+    expect(output).toContain('UserPromptSubmit');
+    expect(output).toContain('charter context-refresh --once');
+  });
+
+  it('printClaudeHookConfig outputs valid JSON with correct shape', () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+
+    printClaudeHookConfig();
+
+    const output = logs.join('\n');
+    const parsed = JSON.parse(output) as {
+      hooks: { UserPromptSubmit: Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }> };
+    };
+    expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('charter context-refresh --once');
+  });
+
+  it('hook print without --claude throws', async () => {
+    await expect(hookCommand(baseOptions, ['print'])).rejects.toThrow('hook print requires --claude');
   });
 });

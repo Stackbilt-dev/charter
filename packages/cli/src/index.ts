@@ -67,6 +67,7 @@ Usage:
                                    Install git commit-msg hook for trailer normalization
   charter hook install --pre-commit [--force]
                                    Install git pre-commit hook for ADF evidence gate
+  charter hook print --claude      Print Claude Code session hook config (paste into .claude/settings.json)
   charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
   charter serve [--name <name>] [--ai-dir <dir>]
                                    Expose ADF project context as an MCP server (stdio, for Claude Code/Codex/Cursor)

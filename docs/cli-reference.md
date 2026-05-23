@@ -154,7 +154,7 @@ npx charter adf init --module testing         # add a single module to existing 
 
 - `--ai-dir <dir>` — custom directory path (default: `.ai`). Resolved to an absolute path at runtime.
 - `--force` — overwrite existing files. Without this flag, existing `.adf` files are skipped and reported; only the missing `manifest.adf` is written.
-- `--emit-pointers` — generate thin pointer files (`CLAUDE.md`, `.cursorrules`, `agents.md`)
+- `--emit-pointers` — generate thin pointer files (`CLAUDE.md`, `.cursorrules`, `agents.md`). The generated `CLAUDE.md` includes a `## Session Start` section with guidance to call the `charter_context` MCP tool at session start, giving agents the live constraint surface before any other action.
 - `--module <name>` — add a single module to existing `.ai/` (delegates to `adf create`)
 
 **Default scaffolding** (worker/frontend/backend/fullstack presets):

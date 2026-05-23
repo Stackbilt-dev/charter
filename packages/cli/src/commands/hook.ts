@@ -96,14 +96,40 @@ if [ -f ".ai/manifest.adf" ]; then
 fi
 `;
 
+// Charter cannot write to .claude/settings.json safely — it's user-controlled.
+// `print --claude` emits the config snippet for the user to paste instead.
+const CLAUDE_SESSION_HOOK_CONFIG = {
+  hooks: {
+    UserPromptSubmit: [
+      {
+        matcher: '.*',
+        hooks: [{ type: 'command', command: 'charter context-refresh --once' }],
+      },
+    ],
+  },
+};
+
+export function printClaudeHookConfig(): void {
+  console.log(JSON.stringify(CLAUDE_SESSION_HOOK_CONFIG, null, 2));
+}
+
 export async function hookCommand(options: CLIOptions, args: string[]): Promise<number> {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     printHelp();
     return EXIT_CODE.SUCCESS;
   }
 
+  if (args[0] === 'print') {
+    const wantClaude = args.includes('--claude');
+    if (!wantClaude) {
+      throw new CLIError('hook print requires --claude.');
+    }
+    printClaudeHookConfig();
+    return EXIT_CODE.SUCCESS;
+  }
+
   if (args[0] !== 'install') {
-    throw new CLIError(`Unknown hook subcommand: ${args[0]}. Supported: install`);
+    throw new CLIError(`Unknown hook subcommand: ${args[0]}. Supported: install, print`);
   }
 
   const wantCommitMsg = args.includes('--commit-msg');
@@ -240,6 +266,7 @@ function printHelp(): void {
   console.log('  Usage:');
   console.log('    charter hook install --commit-msg [--force]');
   console.log('    charter hook install --pre-commit [--force]');
+  console.log('    charter hook print --claude');
   console.log('');
   console.log('  --commit-msg: Install a git commit-msg hook that normalizes Governed-By and');
   console.log('  Resolves-Request trailers using git interpret-trailers.');
@@ -248,5 +275,9 @@ function printHelp(): void {
   console.log('  (CLAUDE.md, .cursorrules, agents.md, etc.) and runs ADF evidence checks.');
   console.log('  Vendor file bloat is extracted, routed to .adf modules, and re-staged.');
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
+  console.log('');
+  console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');
+  console.log('  Paste into .claude/settings.json → hooks.UserPromptSubmit to auto-refresh');
+  console.log('  context at session start so charter_context returns live state.');
   console.log('');
 }
