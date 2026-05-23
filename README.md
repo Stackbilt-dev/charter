@@ -32,9 +32,41 @@ npm install --save-dev @stackbilt/cli
 
 For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm install -g @stackbilt/cli`.
 
-> If you installed `@stackbilt/cli@0.12.0`, upgrade to `0.12.1` or later. `0.12.0` was deprecated due to invalid published `workspace:` dependency specifiers for external consumers.
+### Non-Node repos (C++, Go, Rust, etc.)
 
-> **WSL2 note:** If your project lives on the Windows filesystem (`/mnt/c/...`), pnpm may fail with `EACCES` permission errors due to WSL2/NTFS cross-filesystem limitations with atomic renames. Use `pnpm add --force` to work around this, or move your project to a Linux-native path (e.g., `~/projects/`) for best performance.
+Charter works as a local governance tool in any repo — Node is not required as your primary build system. Add it as a dev dependency and invoke it without a global install:
+
+```bash
+# Install (WSL-safe mode if you hit symlink errors — see below)
+npm install --save-dev @stackbilt/cli --no-bin-links
+
+# Run via npx (resolves from local node_modules, no global install needed)
+npx --no-install charter bootstrap --yes
+npx --no-install charter doctor --adf-only
+
+# Or invoke directly
+./node_modules/.bin/charter doctor --adf-only
+```
+
+Add to your `package.json` scripts for convenience:
+
+```json
+"scripts": {
+  "governance:check": "charter audit --ci",
+  "governance:doctor": "charter doctor --adf-only"
+}
+```
+
+### WSL / DrvFs installs
+
+Two distinct issues can appear when the repo lives on a Windows-mounted filesystem (`/mnt/c/...`, `/mnt/d/...`):
+
+| Symptom | Package manager | Fix |
+|---------|----------------|-----|
+| `EPERM: operation not permitted, symlink` on `.bin/charter` | npm | `npm install --save-dev @stackbilt/cli --no-bin-links` — skips symlink creation; use `npx --no-install charter` or `./node_modules/.bin/charter` to invoke |
+| `EACCES` on atomic rename during install | pnpm | `pnpm add --force` or move the repo to a Linux-native path (`~/projects/`) |
+
+Both flags are safe for CI environments where the filesystem is Linux-native — the workarounds only matter locally on DrvFs mounts.
 
 ## AI agent governance with ADF
 
