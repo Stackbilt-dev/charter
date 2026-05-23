@@ -1,11 +1,11 @@
 # Catch-all: require review across the repo
-* @Stackbilt-dev/charter-maintainers
+* @stackbilt-admin
 
 # Governance context files
 /.ai/* admin@stackbilt.dev
 
 # CLI command surface
-/packages/cli/src/commands/ @Stackbilt-dev/charter-maintainers
+/packages/cli/src/commands/ @stackbilt-admin
 
 # High-risk release pipeline
-/.github/workflows/release.yml @Stackbilt-dev/charter-maintainers
+/.github/workflows/release.yml @stackbilt-admin
