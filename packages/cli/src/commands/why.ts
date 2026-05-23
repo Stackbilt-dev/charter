@@ -5,6 +5,9 @@ import { EXIT_CODE } from '../index';
 import { parseAllTrailers, assessCommitRisk } from '@stackbilt/git';
 import type { GitCommit } from '@stackbilt/types';
 import { runGit, isGitRepo, hasCommits, parseCommitMetadata, parseChangedFilesByCommit } from '../git-helpers';
+import { loadPatterns } from '../config';
+
+type Signal = 'ok' | 'warn' | 'fail';
 
 interface SnapshotResult {
   inGitRepo: boolean;
@@ -12,7 +15,24 @@ interface SnapshotResult {
   commitsScanned: number;
   coveragePercent: number;
   highRiskUnlinked: number;
+  activePatterns: number;
   nextAction: string;
+}
+
+function coverageSignal(pct: number): Signal {
+  if (pct >= 50) return 'ok';
+  if (pct >= 10) return 'warn';
+  return 'fail';
+}
+
+function patternSignal(count: number): Signal {
+  if (count >= 3) return 'ok';
+  if (count >= 1) return 'warn';
+  return 'fail';
+}
+
+function signalTag(s: Signal): string {
+  return s === 'ok' ? '' : s === 'warn' ? '  [warn]' : '  [fail]';
 }
 
 export async function quickstartCommand(options: CLIOptions): Promise<number> {
@@ -23,6 +43,34 @@ export async function quickstartCommand(options: CLIOptions): Promise<number> {
     return EXIT_CODE.SUCCESS;
   }
 
+  if (snapshot.hasBaseline) {
+    return printPostureView(snapshot, options.ciMode);
+  }
+
+  return printAdoptionPitch(snapshot);
+}
+
+function printPostureView(snapshot: SnapshotResult, ci: boolean): number {
+  const covSig = coverageSignal(snapshot.coveragePercent);
+  const patSig = patternSignal(snapshot.activePatterns);
+  const hasFail = covSig === 'fail' || patSig === 'fail';
+
+  const date = new Date().toISOString().slice(0, 10);
+  console.log('');
+  console.log(`  charter — governance snapshot (${date})`);
+  console.log(`    Coverage:  ${snapshot.coveragePercent}% of last ${snapshot.commitsScanned} commits${signalTag(covSig)}`);
+  console.log(`    Patterns:  ${snapshot.activePatterns} active${signalTag(patSig)}`);
+  if (snapshot.highRiskUnlinked > 0) {
+    console.log(`    Risk:      ${snapshot.highRiskUnlinked} high-risk commit(s) without governance links  [warn]`);
+  }
+  console.log('');
+  console.log("  Run 'charter audit' for full report · 'charter why' for adoption info");
+  console.log('');
+
+  return ci && hasFail ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+}
+
+function printAdoptionPitch(snapshot: SnapshotResult): number {
   console.log('');
   console.log('  Charter Quickstart');
   console.log('  Turns governance from abstract policy into merge-time guardrails.');
@@ -89,6 +137,7 @@ export async function whyCommand(options: CLIOptions): Promise<number> {
 function getSnapshot(configPath: string): SnapshotResult {
   const inGitRepo = isGitRepo();
   const hasBaseline = fs.existsSync(path.join(configPath, 'config.json'));
+  const activePatterns = hasBaseline ? loadPatterns(configPath).filter((p) => p.status === 'ACTIVE').length : 0;
 
   if (!inGitRepo) {
     return {
@@ -97,6 +146,7 @@ function getSnapshot(configPath: string): SnapshotResult {
       commitsScanned: 0,
       coveragePercent: 0,
       highRiskUnlinked: 0,
+      activePatterns,
       nextAction: 'Run this inside a git repository, then run: charter setup --ci github',
     };
   }
@@ -128,6 +178,7 @@ function getSnapshot(configPath: string): SnapshotResult {
     commitsScanned: commits.length,
     coveragePercent,
     highRiskUnlinked,
+    activePatterns,
     nextAction,
   };
 }
