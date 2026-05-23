@@ -8,6 +8,16 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Added
 
+## [0.17.0] - 2026-05-23
+
+Minor release closing issue #155 — session continuity is now first-class in the charter toolchain.
+
+### Added
+
+- **`charter hook print --claude`** (`hook.ts`): New subcommand on the existing `hook` command. Prints a copy-pasteable `UserPromptSubmit` hook config JSON to stdout. Pasting into `.claude/settings.json` makes Claude Code auto-run `charter context-refresh --once` at every session open, so `charter_context` returns live project state before the agent acts. The command is a deliberate generator (not a writer) — `.claude/settings.json` is user-controlled.
+- **Session-start next step in `charter bootstrap`** (`bootstrap.ts`): After setup, bootstrap now surfaces `charter hook print --claude` as a next step with an explicit reason: agents that skip this start cold, re-inferring constraints already declared in `.ai/`.
+- **`## Session Start` section in generated `CLAUDE.md`** (`adf.ts`): Both `POINTER_CLAUDE_MD` (thin) and `POINTER_CLAUDE_MD_HYBRID` (with module index) now include a `## Session Start` section telling the agent to call `charter_context` before any other action. Includes fallback instructions for sessions where `charter serve` is not running.
+
 - **`charter context-refresh` Phase 1 + 2** (`context-refresh.ts`, `index.ts`, docs/tests): new live-context refresh command that writes both `.ai/context.adf` and `.ai/context.snapshot.json`.
   - Phase 1 (`c5e90fd`): git-source snapshot generation, optional markdown mirror via `--output`, initial command wiring and tests.
   - Phase 2 (`5fb4a44`): source expansion (`git`, `github`), config contract support via `.charter/context-sources.json`, TTL controls (`--once`, `--ttl-minutes`, `--force`), and machine-readable refresh status.
