@@ -265,6 +265,23 @@ Hostname with port: localhost:3000
     expect(broken.some((b: string) => b.includes('example.com'))).toBe(false);
     expect(broken.some((b: string) => b === 'localhost:3000')).toBe(false);
   });
+
+  it('grounding checker correctly tracks ./path-without-extension as a broken reference', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'rel-test', version: '1.0.0' }, null, 2));
+
+    // ./docs/runbooks has no file extension — it must still be tracked because the explicit
+    // ./ prefix makes the intent unambiguous. Regression for the normalizePathCandidate
+    // stripping ./ before the prefix check ran.
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), 'See ./docs/runbooks for on-call procedures.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).toContain('docs/runbooks');
+  });
 });
 
 function createTempRepo(): string {

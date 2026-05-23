@@ -995,10 +995,13 @@ function extractPathCandidates(content: string): string[] {
   // Raw path patterns in prose/tables — require explicit relative prefix (./  ../) or a known
   // file extension. This avoids false positives from Windows path fragments, cross-repo refs,
   // and HTTP route tables captured in freeform text.
+  // NOTE: check `raw` (pre-normalization) for the ./ prefix — normalizePathCandidate strips it,
+  // so checking the already-normalized candidate would silently drop ./path-without-extension refs.
   for (const match of content.matchAll(/(^|[\s(])((?:\.{1,2}\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+(?:\.[A-Za-z0-9._-]+)?)/gm)) {
-    const candidate = normalizePathCandidate(match[2]);
+    const raw = match[2];
+    const candidate = normalizePathCandidate(raw);
     const ext = path.posix.extname(candidate).toLowerCase();
-    if (!candidate.startsWith('./') && !candidate.startsWith('../') && !KNOWN_PATH_EXTENSIONS.has(ext)) continue;
+    if (!raw.startsWith('./') && !raw.startsWith('../') && !KNOWN_PATH_EXTENSIONS.has(ext)) continue;
     if (looksLikePath(candidate)) candidates.add(candidate);
   }
 
