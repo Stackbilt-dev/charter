@@ -29,7 +29,17 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
+  "keywords": [
+    "charter",
+    "types",
+    "typescript",
+    "governance",
+    "ai",
+    "llm"
+  ],
+  "author": "Stackbilt LLC",
   "license": "Apache-2.0"
 }
