@@ -8,6 +8,20 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Added
 
+## [1.0.0] - 2026-05-23
+
+**Breaking:** `run`, `architect`, `scaffold`, and `login` commands removed from `@stackbilt/cli`. The `stackbilt` binary alias is also removed. These commands have moved to [`@stackbilt/build`](https://www.npmjs.com/package/@stackbilt/build) — install it with `npm install -g @stackbilt/build`. Migration tracked in [RFC #112](https://github.com/Stackbilt-dev/charter/issues/112).
+
+### Removed
+
+- `charter run`, `charter architect`, `charter scaffold`, `charter login` — removed after four minor release cycles of deprecation warnings (0.13–0.17). All four commands live in `@stackbilt/build@0.1.0+`.
+- `stackbilt` bin alias — `@stackbilt/cli` now ships only the `charter` binary. Run `npm install -g @stackbilt/build` to get the `stackbilt` bin.
+- `credentials.ts`, `http-client.ts`, `types/scaffold-contract-types.ts` — removed with the commands. `@stackbilt/cli` now has zero network calls, no bearer-token handling, and no references to `stackbilt.dev`.
+
+### Changed
+
+- Package description updated: "Charter CLI — repo-level governance toolkit" (drops scaffolding claim).
+
 ## [0.17.0] - 2026-05-23
 
 Minor release closing issue #155 — session continuity is now first-class in the charter toolchain.

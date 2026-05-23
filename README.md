@@ -177,17 +177,6 @@ Deterministic codebase analysis — no LLM calls, zero runtime dependencies. `bl
 
 All commands support `--format json` with `nextActions` hints for agent workflows.
 
-### Build (deprecated — moving to `@stackbilt/build`)
-
-> These four commands reach external Stackbilt endpoints and are being extracted into a separate `@stackbilt/build` npm package. Governance-only users don't need them. Migration tracked in [RFC #112](https://github.com/Stackbilt-dev/charter/issues/112).
-
-```bash
-stackbilt run "description"              # Architect + scaffold in one step
-charter architect "description"          # Generate stack selection
-charter scaffold --output ./my-project   # Write files from last build
-charter login --key sb_live_xxx          # Store API key (deprecated — prefer STACKBILT_API_KEY env var)
-```
-
 ### Exit codes
 
 - `0`: success

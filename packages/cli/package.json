@@ -1,11 +1,10 @@
 {
   "name": "@stackbilt/cli",
   "sideEffects": false,
-  "version": "0.17.0",
-  "description": "Charter CLI — repo-level governance checks + architecture scaffolding",
+  "version": "1.0.0",
+  "description": "Charter CLI — repo-level governance toolkit",
   "bin": {
-    "charter": "./dist/bin.js",
-    "stackbilt": "./dist/bin.js"
+    "charter": "./dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
