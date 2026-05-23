@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
 import { generateBrief, contextCommand } from '../commands/context';
+import cliPkg from '../../package.json';
 
 const options: CLIOptions = {
   configPath: '.charter',
@@ -201,5 +202,57 @@ describe('contextCommand writes .charter/context.md', () => {
     expect(fs.existsSync(outPath)).toBe(true);
     const content = fs.readFileSync(outPath, 'utf8');
     expect(content).toContain('## Identity');
+  });
+});
+
+describe('generateBrief version resolution', () => {
+  it('uses CLI package version when repo package.json is a private workspace root', async () => {
+    const tmp = makeTempDir();
+    process.chdir(tmp);
+
+    // Monorepo workspace root: private: true AND workspaces field present
+    fs.writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({ name: 'my-monorepo', version: '0.1.0', private: true, workspaces: ['packages/*'] }),
+      'utf8'
+    );
+
+    const result = await generateBrief({ configPath: '.charter' });
+
+    // Should NOT show the stale workspace version
+    expect(result.markdown).not.toContain('v0.1.0');
+    // Should show the actual installed CLI version
+    expect(result.markdown).toContain(`v${cliPkg.version}`);
+  });
+
+  it('keeps the repo version for a private package that is not a workspace root', async () => {
+    const tmp = makeTempDir();
+    process.chdir(tmp);
+
+    // Internal app: private: true but NO workspaces field — must preserve its own version
+    fs.writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({ name: 'internal-app', version: '2.4.1', private: true }),
+      'utf8'
+    );
+
+    const result = await generateBrief({ configPath: '.charter' });
+
+    expect(result.markdown).toContain('v2.4.1');
+  });
+
+  it('uses the repo package.json version for normal non-private packages', async () => {
+    const tmp = makeTempDir();
+    process.chdir(tmp);
+
+    fs.writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({ name: 'my-app', version: '3.7.2' }),
+      'utf8'
+    );
+
+    const result = await generateBrief({ configPath: '.charter' });
+
+    expect(result.markdown).toContain('v3.7.2');
   });
 });
