@@ -455,7 +455,9 @@ export function detectStack(contexts: PackageContext[]): DetectionResult {
   const hasPnpm = contexts.some((ctx) => !!ctx.engines?.pnpm)
     || contexts.some((ctx) => typeof ctx.packageManager === 'string' && ctx.packageManager.toLowerCase().startsWith('pnpm@'))
     || fs.existsSync(path.resolve('pnpm-lock.yaml'));
-  const monorepo = contexts.length > 1 || fs.existsSync(path.resolve('pnpm-workspace.yaml'));
+  const monorepo = contexts.length > 1
+    || fs.existsSync(path.resolve('pnpm-workspace.yaml'))
+    || hasWorkspacesField();
   const agentStandards = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
     .filter((filename) => fs.existsSync(path.resolve(filename)));
 
@@ -669,6 +671,9 @@ export function loadPackageContexts(): PackageContext[] {
   for (const workspaceManifest of resolvePnpmWorkspacePackageJsons()) {
     candidates.add(workspaceManifest);
   }
+  for (const workspaceManifest of resolveNpmWorkspacePackageJsons()) {
+    candidates.add(workspaceManifest);
+  }
 
   const contexts: PackageContext[] = [];
   for (const relativePath of candidates) {
@@ -722,6 +727,45 @@ function resolvePnpmWorkspacePackageJsons(): string[] {
     }
   }
   return [...resolved];
+}
+
+function resolveNpmWorkspacePackageJsons(): string[] {
+  const rootPkgPath = path.resolve('package.json');
+  if (!fs.existsSync(rootPkgPath)) return [];
+  let pkg: { workspaces?: unknown };
+  try {
+    pkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf-8')) as { workspaces?: unknown };
+  } catch {
+    return [];
+  }
+  const raw = pkg.workspaces;
+  const globs: string[] = Array.isArray(raw)
+    ? (raw as unknown[]).filter((g): g is string => typeof g === 'string')
+    : Array.isArray((raw as { packages?: unknown })?.packages)
+      ? ((raw as { packages: unknown[] }).packages).filter((g): g is string => typeof g === 'string')
+      : [];
+  const resolved = new Set<string>();
+  for (const glob of globs) {
+    for (const match of expandWorkspacePackageJsonGlob(glob)) {
+      resolved.add(match);
+    }
+  }
+  return [...resolved];
+}
+
+function hasWorkspacesField(): boolean {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf-8')) as { workspaces?: unknown };
+    const ws = pkg.workspaces;
+    if (Array.isArray(ws)) return ws.length > 0;
+    if (ws && typeof ws === 'object') {
+      const pkgs = (ws as { packages?: unknown[] }).packages;
+      return Array.isArray(pkgs) && pkgs.length > 0;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function parsePnpmWorkspaceGlobs(content: string): string[] {

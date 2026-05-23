@@ -19,6 +19,7 @@ import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
 import { analyze as analyzeSurface, SurfaceInputSchema } from '@stackbilt/surface';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
 import { detectTsconfigAliases } from './blast';
+import { detectStack, loadPackageContexts } from './setup';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 
@@ -597,6 +598,15 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
   }
   if ((stack === 'unknown' || stack.length === 0) && preset !== 'default') {
     stack = preset;
+  }
+  if (stack === 'unknown' || stack.length === 0) {
+    try {
+      const detection = detectStack(loadPackageContexts());
+      if (preset === 'default') preset = detection.suggestedPreset;
+      stack = detection.suggestedPreset;
+    } catch {
+      // detection unavailable — stack stays 'unknown'
+    }
   }
   const sensitivityTags = [...sensitivityTagSet];
 
