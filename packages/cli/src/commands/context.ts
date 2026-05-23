@@ -14,6 +14,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
+import cliPkg from '../../package.json';
 import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
 import { analyze as analyzeSurface, SurfaceInputSchema } from '@stackbilt/surface';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
@@ -477,6 +478,9 @@ export async function generateBrief(options?: BriefOptions): Promise<BriefResult
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as Record<string, unknown>;
       if (typeof pkg.name === 'string') packageName = pkg.name;
       if (typeof pkg.version === 'string') version = pkg.version;
+      // Private workspace roots (monorepos) carry a stale or meaningless version — use the
+      // actual published CLI version instead so the brief reflects what's installed.
+      if (pkg.private === true) version = cliPkg.version;
       if (typeof pkg.description === 'string') description = pkg.description;
       if (pkg.bin && typeof pkg.bin === 'object' && pkg.bin !== null) {
         pkgBin = pkg.bin as Record<string, string>;
