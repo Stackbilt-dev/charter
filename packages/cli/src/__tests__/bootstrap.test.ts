@@ -301,4 +301,87 @@ load state.adf always
     const hasHint = installStep.warnings.some((w: string) => w.includes('--no-frozen-lockfile'));
     expect(hasHint).toBe(true);
   });
+
+  describe('--mode lean', () => {
+    it('skips migrate, install, and populate phases (status: skip)', async () => {
+      logs = [];
+      await bootstrapCommand(
+        { ...baseOptions, format: 'json' },
+        ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
+      );
+
+      const report = JSON.parse(logs[0]);
+      const migrateStep = report.steps.find((s: { name: string }) => s.name === 'migrate');
+      const installStep = report.steps.find((s: { name: string }) => s.name === 'install');
+      const populateStep = report.steps.find((s: { name: string }) => s.name === 'populate');
+      expect(migrateStep.status).toBe('skip');
+      expect(installStep.status).toBe('skip');
+      expect(populateStep.status).toBe('skip');
+    });
+
+    it('exits with status success even when install would have failed', async () => {
+      execSyncOverride = () => {
+        throw new Error('ERR_PNPM_FROZEN_LOCKFILE: Lockfile is not up-to-date');
+      };
+
+      logs = [];
+      try {
+        await bootstrapCommand(
+          { ...baseOptions, format: 'json' },
+          ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
+        );
+      } finally {
+        execSyncOverride = null;
+      }
+
+      const report = JSON.parse(logs[0]);
+      expect(report.status).toBe('success');
+      const installStep = report.steps.find((s: { name: string }) => s.name === 'install');
+      expect(installStep.status).toBe('skip');
+    });
+
+    it('emits the detected package manager install command as the first required next step', async () => {
+      fs.writeFileSync('pnpm-lock.yaml', '');
+
+      logs = [];
+      await bootstrapCommand(
+        { ...baseOptions, format: 'json' },
+        ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
+      );
+
+      const report = JSON.parse(logs[0]);
+      expect(report.nextSteps.length).toBe(4);
+      const first = report.nextSteps[0];
+      expect(first.cmd).toBe('pnpm install');
+      expect(first.required).toBe(true);
+    });
+
+    it('emits exactly 4 deterministic next steps in the correct order', async () => {
+      logs = [];
+      await bootstrapCommand(
+        { ...baseOptions, format: 'json' },
+        ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
+      );
+
+      const report = JSON.parse(logs[0]);
+      expect(report.nextSteps.length).toBe(4);
+      expect(report.nextSteps[0].cmd).toMatch(/install$/);
+      expect(report.nextSteps[1].cmd).toBe('charter hook install --commit-msg');
+      expect(report.nextSteps[2].cmd).toBe('charter hook install --pre-commit');
+      expect(report.nextSteps[3].cmd).toBe('charter serve');
+    });
+
+    it('--mode lean combined with --skip-install is not an error', async () => {
+      logs = [];
+      const exitCode = await bootstrapCommand(
+        { ...baseOptions, format: 'json' },
+        ['--preset', 'worker', '--mode', 'lean', '--skip-install', '--skip-doctor'],
+      );
+
+      expect(exitCode).toBe(0);
+      const report = JSON.parse(logs[0]);
+      const installStep = report.steps.find((s: { name: string }) => s.name === 'install');
+      expect(installStep.status).toBe('skip');
+    });
+  });
 });

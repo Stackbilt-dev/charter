@@ -39,8 +39,9 @@ charter - repo-level governance toolkit
 
 Usage:
   charter                          Show immediate governance value + risk snapshot
-  charter bootstrap [--ci github] [--preset <name>] [--yes] [--force] [--skip-install] [--skip-doctor]
+  charter bootstrap [--ci github] [--preset <name>] [--yes] [--force] [--skip-install] [--skip-doctor] [--mode lean]
                                    One-command repo onboarding (detect + setup + ADF + install + doctor)
+                                   --mode lean: run only detect, setup, adf-init, doctor; skip migrate/install/populate
                                    --security-sensitive adds SECURITY.md, hard security drift denies, and a security test check
   charter context [--stdout-only] [--verbose] [--write]
                                    Pre-digested repo brief for AI agents (routes, hotspots, governance)

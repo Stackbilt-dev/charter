@@ -82,6 +82,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const securitySensitive = args.includes('--security-sensitive');
   const nonInteractive = options.yes;
   const setupOverwrite = options.yes || force;
+  const leanMode = getFlag(args, '--mode') === 'lean';
 
   if (ciTarget && ciTarget !== 'github') {
     throw new CLIError(`Unsupported CI target: ${ciTarget}. Supported: github`);
@@ -121,7 +122,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   }
 
   if (options.format === 'text') {
-    console.log('[1/7] Detecting stack...');
+    console.log(`[1/${leanMode ? '4' : '7'}] Detecting stack...`);
     console.log(`  Stack: ${selectedPreset} (${detection.confidence} confidence)`);
     console.log(`  Monorepo: ${detection.monorepo ? 'yes' : 'no'}${detection.monorepo && detection.signals.hasPnpm ? ' (pnpm workspace)' : ''}`);
     if (detection.warnings.length > 0) {
@@ -145,7 +146,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += setupResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[2/7] Setting up governance...');
+    console.log(`[2/${leanMode ? '4' : '7'}] Setting up governance...`);
     for (const f of (setupResult.step.details.created as string[] || [])) {
       console.log(`  Created ${f}`);
     }
@@ -163,7 +164,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += adfResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[3/7] Initializing ADF context...');
+    console.log(`[3/${leanMode ? '4' : '7'}] Initializing ADF context...`);
     for (const f of (adfResult.step.details.files as string[] || [])) {
       console.log(`  Created ${f}`);
     }
@@ -234,11 +235,13 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 4: Migrate Agent Configs
   // ========================================================================
-  const migrateResult = runMigratePhase(options, nonInteractive);
+  const migrateResult = leanMode
+    ? { step: { name: 'migrate' as StepName, status: 'skip' as StepStatus, details: { reason: 'lean mode' }, warnings: [] as string[] } }
+    : runMigratePhase(options, nonInteractive);
   result.steps.push(migrateResult.step);
   warnings += migrateResult.step.warnings.length;
 
-  if (options.format === 'text') {
+  if (options.format === 'text' && !leanMode) {
     console.log('[4/7] Migrating agent configs...');
     if (migrateResult.step.status === 'skip') {
       console.log('  Skipped (no migratable files)');
@@ -256,11 +259,13 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 5: Install
   // ========================================================================
-  const installResult = runInstallPhase(options, skipInstall);
+  const installResult = leanMode
+    ? { step: { name: 'install' as StepName, status: 'skip' as StepStatus, details: { reason: 'lean mode' }, warnings: [] as string[] } }
+    : runInstallPhase(options, skipInstall);
   result.steps.push(installResult.step);
   warnings += installResult.step.warnings.length;
 
-  if (options.format === 'text') {
+  if (options.format === 'text' && !leanMode) {
     console.log('[5/7] Installing dependencies...');
     if (skipInstall) {
       console.log('  Skipped (--skip-install)');
@@ -285,11 +290,13 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 6: Populate (#89)
   // ========================================================================
-  const populateResult = await runPopulatePhase(options);
+  const populateResult = leanMode
+    ? { step: { name: 'populate' as StepName, status: 'skip' as StepStatus, details: { reason: 'lean mode' }, warnings: [] as string[] } }
+    : await runPopulatePhase(options);
   result.steps.push(populateResult.step);
   warnings += populateResult.step.warnings.length;
 
-  if (options.format === 'text') {
+  if (options.format === 'text' && !leanMode) {
     console.log('[6/7] Auto-populating ADF modules...');
     const populated = populateResult.step.details.populated as number;
     const skipped = populateResult.step.details.skipped as number;
@@ -309,7 +316,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   warnings += doctorResult.step.warnings.length;
 
   if (options.format === 'text') {
-    console.log('[7/7] Running health check...');
+    console.log(`[${leanMode ? '4/4' : '7/7'}] Running health check...`);
     if (skipDoctor) {
       console.log('  Skipped (--skip-doctor)');
     } else {
@@ -328,29 +335,12 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const failCount = result.steps.filter(s => s.status === 'fail').length;
   result.status = failCount === 0 ? 'success' : failCount < result.steps.length ? 'partial' : 'failure';
 
-  // Build next steps
-  result.nextSteps.push({
-    cmd: 'charter serve  # start MCP server for Claude Code / Codex / Cursor integration',
-    required: false,
-    reason: 'Enable real-time governance via MCP (wire in .mcp.json or .claude/settings.json)',
-  });
-  result.nextSteps.push({
-    cmd: 'Review .charter/patterns/ and customize for your stack',
-    required: false,
-    reason: 'Customize blessed stack patterns',
-  });
-  result.nextSteps.push({
-    cmd: 'git add .charter .ai CLAUDE.md .cursorrules agents.md && git commit -m "chore: bootstrap charter governance"',
-    required: false,
-    reason: 'Commit governance baseline',
-  });
-
-  // Gate hook next-steps on being inside a git repo
-  if (inGitRepo) {
+  if (leanMode) {
+    const leanPm = detectPackageManagerFromLockfiles();
     result.nextSteps.push({
-      cmd: 'charter hook install --pre-commit',
-      required: false,
-      reason: 'Install pre-commit hook for ADF evidence gate',
+      cmd: `${leanPm} install`,
+      required: true,
+      reason: 'Install dependencies (skipped in lean mode)',
     });
     result.nextSteps.push({
       cmd: 'charter hook install --commit-msg',
@@ -358,17 +348,58 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       reason: 'Install commit-msg hook for trailer enforcement',
     });
     result.nextSteps.push({
-      cmd: 'echo \'charter context --write\' >> .git/hooks/post-commit && chmod +x .git/hooks/post-commit',
+      cmd: 'charter hook install --pre-commit',
       required: false,
-      reason: 'Keep .charter/context.md fresh after each commit (charter brief auto-refresh)',
+      reason: 'Install pre-commit hook for ADF evidence gate',
+    });
+    result.nextSteps.push({
+      cmd: 'charter serve',
+      required: false,
+      reason: 'Enable real-time governance via MCP (wire in .mcp.json or .claude/settings.json)',
+    });
+  } else {
+    // Build next steps
+    result.nextSteps.push({
+      cmd: 'charter serve  # start MCP server for Claude Code / Codex / Cursor integration',
+      required: false,
+      reason: 'Enable real-time governance via MCP (wire in .mcp.json or .claude/settings.json)',
+    });
+    result.nextSteps.push({
+      cmd: 'Review .charter/patterns/ and customize for your stack',
+      required: false,
+      reason: 'Customize blessed stack patterns',
+    });
+    result.nextSteps.push({
+      cmd: 'git add .charter .ai CLAUDE.md .cursorrules agents.md && git commit -m "chore: bootstrap charter governance"',
+      required: false,
+      reason: 'Commit governance baseline',
+    });
+
+    // Gate hook next-steps on being inside a git repo
+    if (inGitRepo) {
+      result.nextSteps.push({
+        cmd: 'charter hook install --pre-commit',
+        required: false,
+        reason: 'Install pre-commit hook for ADF evidence gate',
+      });
+      result.nextSteps.push({
+        cmd: 'charter hook install --commit-msg',
+        required: false,
+        reason: 'Install commit-msg hook for trailer enforcement',
+      });
+      result.nextSteps.push({
+        cmd: 'echo \'charter context --write\' >> .git/hooks/post-commit && chmod +x .git/hooks/post-commit',
+        required: false,
+        reason: 'Keep .charter/context.md fresh after each commit (charter brief auto-refresh)',
+      });
+    }
+
+    result.nextSteps.push({
+      cmd: 'charter hook print --claude  # paste output into .claude/settings.json → hooks.UserPromptSubmit',
+      required: false,
+      reason: 'Auto-refresh context at session start so charter_context returns live state, not a cold snapshot, before the agent acts',
     });
   }
-
-  result.nextSteps.push({
-    cmd: 'charter hook print --claude  # paste output into .claude/settings.json → hooks.UserPromptSubmit',
-    required: false,
-    reason: 'Auto-refresh context at session start so charter_context returns live state, not a cold snapshot, before the agent acts',
-  });
 
   // ========================================================================
   // Governance Gaps — surface what's configured but not enforced
