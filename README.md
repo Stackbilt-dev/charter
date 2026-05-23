@@ -116,6 +116,25 @@ The `charter_brief` MCP tool composes routes, hotspots, and governance into a si
 
 For live session continuity snapshots, use `charter context-refresh` to produce `.ai/context.adf` + `.ai/context.snapshot.json` (with optional GitHub source and TTL controls).
 
+## Which command do I run?
+
+| Situation | Command |
+|---|---|
+| I want to inspect a repo without changing anything | `charter setup --detect-only --format json` |
+| I want the fastest full repo onboarding path | `charter bootstrap --ci github` |
+| I want to install GitHub PR governance | `charter setup --ci github --yes` |
+| I want to initialize ADF context modules | `charter adf init` |
+| I want to compile task-specific agent context | `charter adf bundle --task "Fix the login flow"` |
+| I want to enforce metric/file-size ceilings | `charter adf evidence --auto-measure --ci` |
+| I want to migrate existing agent docs | `charter adf migrate --dry-run` |
+| I want to validate governance in CI | `charter validate --ci --format json` |
+| I want to check pattern drift | `charter drift --ci --format json` |
+| I want to audit governance coverage | `charter audit --ci --format json` |
+| I want to install commit trailer normalization | `charter hook install --commit-msg` |
+| I want to install ADF pre-commit checks | `charter hook install --pre-commit` |
+| I want session context for agent workflows | `charter context-refresh --once` or `charter hook print --claude` |
+| I want to start the MCP server for Claude Code / Codex / Cursor | `charter serve` |
+
 ## Commands
 
 ### Govern
