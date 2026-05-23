@@ -342,16 +342,18 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       required: true,
       reason: 'Install dependencies (skipped in lean mode)',
     });
-    result.nextSteps.push({
-      cmd: 'charter hook install --commit-msg',
-      required: false,
-      reason: 'Install commit-msg hook for trailer enforcement',
-    });
-    result.nextSteps.push({
-      cmd: 'charter hook install --pre-commit',
-      required: false,
-      reason: 'Install pre-commit hook for ADF evidence gate',
-    });
+    if (inGitRepo) {
+      result.nextSteps.push({
+        cmd: 'charter hook install --commit-msg',
+        required: false,
+        reason: 'Install commit-msg hook for trailer enforcement',
+      });
+      result.nextSteps.push({
+        cmd: 'charter hook install --pre-commit',
+        required: false,
+        reason: 'Install pre-commit hook for ADF evidence gate',
+      });
+    }
     result.nextSteps.push({
       cmd: 'charter serve',
       required: false,

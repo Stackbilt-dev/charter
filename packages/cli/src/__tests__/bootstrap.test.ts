@@ -8,6 +8,13 @@ import { driftCommand } from '../commands/drift';
 import type { CLIOptions } from '../index';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
 
+// Controlled per-test override for isGitRepo (git-helpers uses execFileSync, not execSync)
+let mockIsGitRepo: boolean | null = null;
+vi.mock('../git-helpers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../git-helpers')>();
+  return { ...actual, isGitRepo: () => mockIsGitRepo !== null ? mockIsGitRepo : actual.isGitRepo() };
+});
+
 // Controlled per-test override for execSync (module-level mock needed for ESM-treated builtins)
 let execSyncOverride: (((...args: unknown[]) => unknown) | null) = null;
 vi.mock('node:child_process', async (importOriginal) => {
@@ -342,12 +349,13 @@ load state.adf always
 
     it('emits the detected package manager install command as the first required next step', async () => {
       fs.writeFileSync('pnpm-lock.yaml', '');
-
+      mockIsGitRepo = true;
       logs = [];
       await bootstrapCommand(
         { ...baseOptions, format: 'json' },
         ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
       );
+      mockIsGitRepo = null;
 
       const report = JSON.parse(logs[0]);
       expect(report.nextSteps.length).toBe(4);
@@ -356,12 +364,14 @@ load state.adf always
       expect(first.required).toBe(true);
     });
 
-    it('emits exactly 4 deterministic next steps in the correct order', async () => {
+    it('emits exactly 4 deterministic next steps in the correct order (in a git repo)', async () => {
+      mockIsGitRepo = true;
       logs = [];
       await bootstrapCommand(
         { ...baseOptions, format: 'json' },
         ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
       );
+      mockIsGitRepo = null;
 
       const report = JSON.parse(logs[0]);
       expect(report.nextSteps.length).toBe(4);
@@ -369,6 +379,19 @@ load state.adf always
       expect(report.nextSteps[1].cmd).toBe('charter hook install --commit-msg');
       expect(report.nextSteps[2].cmd).toBe('charter hook install --pre-commit');
       expect(report.nextSteps[3].cmd).toBe('charter serve');
+    });
+
+    it('emits only install + serve next steps outside a git repo', async () => {
+      logs = [];
+      await bootstrapCommand(
+        { ...baseOptions, format: 'json' },
+        ['--preset', 'worker', '--mode', 'lean', '--skip-doctor'],
+      );
+
+      const report = JSON.parse(logs[0]);
+      expect(report.nextSteps.length).toBe(2);
+      expect(report.nextSteps[0].cmd).toMatch(/install$/);
+      expect(report.nextSteps[1].cmd).toBe('charter serve');
     });
 
     it('--mode lean combined with --skip-install is not an error', async () => {
