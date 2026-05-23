@@ -1,0 +1,18 @@
+{
+  "patterns": [
+    {
+      "id": "tests-travel-with-exports",
+      "name": "Tests Travel with Public Exports",
+      "category": "TESTING",
+      "status": "ACTIVE",
+      "blessed_solution": "Every new public export added to a @stackbilt/* package must have at minimum one test exercising it as a callable function. Add the test in the same PR as the export.",
+      "rationale": "Silent export removal is the primary regression vector in OSS packages. A test that imports and calls the function will fail loudly if the export disappears.",
+      "anti_patterns": [
+        "Merging a new exported function with no corresponding test",
+        "Adding a type-only export without a runtime test that imports it",
+        "Testing implementation details instead of the exported surface"
+      ],
+      "created_at": "2026-05-23T00:00:00.000Z"
+    }
+  ]
+}

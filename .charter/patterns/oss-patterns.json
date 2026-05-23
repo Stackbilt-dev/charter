@@ -1,0 +1,32 @@
+{
+  "patterns": [
+    {
+      "id": "oss-additive-only-api",
+      "name": "OSS Additive-Only Public API",
+      "category": "API",
+      "status": "ACTIVE",
+      "blessed_solution": "Add new exports freely. To rename or remove a public export: bump major version, add a deprecation notice in the prior minor, and document the migration path in CHANGELOG.md.",
+      "rationale": "Charter packages are public infrastructure. Consumers pin exact versions; breaking changes without a major bump silently break downstream builds.",
+      "anti_patterns": [
+        "Removing or renaming an exported function without a major version bump",
+        "Changing a function signature in a backward-incompatible way in a patch or minor release",
+        "Deleting exported types that appear in @stackbilt/types"
+      ],
+      "created_at": "2026-05-23T00:00:00.000Z"
+    },
+    {
+      "id": "oss-no-product-logic",
+      "name": "No Product Logic in OSS Packages",
+      "category": "ARCHITECTURE",
+      "status": "ACTIVE",
+      "blessed_solution": "Keep packages to framework patterns and generic utilities. If a feature requires knowledge of Stackbilt product internals (tenant IDs, billing tiers, proprietary schemas), it belongs in a private package, not here.",
+      "rationale": "This is a public infrastructure package. Embedding product logic would expose Stackbilt architecture and violate the OSS policy.",
+      "anti_patterns": [
+        "Importing Stackbilt-internal constants or types directly in OSS package source",
+        "Adding cloud-API calls that require Stackbilt auth tokens",
+        "Hardcoding product-specific behavior (e.g., tenant routing) in generic utilities"
+      ],
+      "created_at": "2026-05-23T00:00:00.000Z"
+    }
+  ]
+}
