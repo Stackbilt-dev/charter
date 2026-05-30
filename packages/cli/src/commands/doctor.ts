@@ -8,8 +8,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
-import { loadPatterns } from '../config';
-import { parseAdf, parseManifest, stripCharterSentinels } from '@stackbilt/adf';
+import { loadPatterns, loadConfig } from '../config';
+import { parseAdf, parseManifest, stripCharterSentinels, evaluateLocBudgets, matchPath } from '@stackbilt/adf';
+import type { LocBudgetRule } from '@stackbilt/adf';
 import { isGitRepo } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
 
@@ -27,6 +28,10 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
   const adfOnly = args.includes('--adf-only');
   const configFile = path.join(options.configPath, 'config.json');
   const inGitRepo = isGitRepo();
+  const config = loadConfig(options.configPath);
+  // Number of files with per-file LOC measurement declared in manifest METRICS;
+  // set during manifest parse, used by the source LOC budget coverage check.
+  let manifestLocMetricCount = 0;
 
   checks.push({
     name: 'git repository',
@@ -95,6 +100,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
       const manifestDoc = parseAdf(manifestContent);
       const manifest = parseManifest(manifestDoc);
+      manifestLocMetricCount = manifest.metrics.length;
 
       checks.push({
         name: 'adf manifest parse',
@@ -332,6 +338,53 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
     }
   }
 
+  // Source LOC budget coverage + enforcement (#186).
+  // Runs regardless of --adf-only so the pre-commit/CI gate surfaces it.
+  const locBudgets = config.locBudgets;
+  const budgetRules = locBudgets?.paths ?? [];
+  const budgetsEnabled = !!locBudgets && locBudgets.enabled !== false && budgetRules.length > 0;
+
+  if (budgetsEnabled) {
+    const measured = collectBudgetFiles('.', budgetRules);
+    const results = evaluateLocBudgets(measured, budgetRules, {
+      warn: locBudgets!.defaultWarn,
+      fail: locBudgets!.defaultFail,
+    });
+    const failed = results.filter(r => r.status === 'fail');
+    const warned = results.filter(r => r.status === 'warn');
+
+    if (failed.length > 0) {
+      // Over the fail ceiling → WARN (doctor fails CI on any WARN in --ci mode).
+      checks.push({
+        name: 'source loc budget',
+        status: 'WARN',
+        details: `${failed.length} file(s) over their fail ceiling:\n    ${failed.map(r => r.message).join('\n    ')}`,
+      });
+    } else if (warned.length > 0) {
+      // Over the warn ceiling only → advisory INFO (does not break CI).
+      checks.push({
+        name: 'source loc budget',
+        status: 'INFO',
+        details: `${warned.length} file(s) over their warn ceiling (advisory):\n    ${warned.map(r => r.message).join('\n    ')}`,
+      });
+    } else {
+      checks.push({
+        name: 'source loc budget',
+        status: 'PASS',
+        details: `${results.length} file(s) within configured source LOC budgets.`,
+      });
+    }
+  } else if (manifestLocMetricCount === 0) {
+    // No runtime LOC coverage from either source → soft, non-blocking nudge.
+    // Intentionally INFO, not WARN: doctor fails CI on any WARN, and emitting
+    // a warning here would break every repo that hasn't opted in yet (#186).
+    checks.push({
+      name: 'source loc budget',
+      status: 'INFO',
+      details: 'No runtime source LOC coverage configured. Only ADF entry_loc (if declared) is enforced, so other files can grow into god-objects unchecked. Add a `locBudgets` block to .charter/config.json to set per-path warn/fail ceilings.',
+    });
+  }
+
   const hasWarn = checks.some((check) => check.status === 'WARN');
   const result: DoctorResult = {
     status: hasWarn ? 'WARN' : 'PASS',
@@ -353,6 +406,52 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
   }
 
   return EXIT_CODE.SUCCESS;
+}
+
+/**
+ * Walk the repo and measure line counts for files matching any LOC budget rule.
+ * Skips the same heavy/managed directories as the security-test walk. Paths are
+ * returned repo-relative with forward slashes so they match POSIX-style patterns.
+ */
+function collectBudgetFiles(
+  rootPath: string,
+  rules: LocBudgetRule[],
+): Array<{ path: string; lines: number }> {
+  const skipDirs = new Set(['.git', 'node_modules', 'dist', 'coverage', '.ai', '.charter', '.pnpm-store']);
+  const out: Array<{ path: string; lines: number }> = [];
+
+  function walk(dir: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relPath = (path.relative(rootPath, fullPath) || entry.name).replace(/\\/g, '/');
+
+      if (entry.isDirectory()) {
+        if (!skipDirs.has(entry.name)) {
+          walk(fullPath);
+        }
+        continue;
+      }
+
+      if (entry.isFile() && rules.some(r => matchPath(relPath, r.pattern))) {
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          out.push({ path: relPath, lines: content.split('\n').length });
+        } catch {
+          // Skip unreadable files.
+        }
+      }
+    }
+  }
+
+  walk(rootPath);
+  return out;
 }
 
 function findSecurityTestFiles(rootPath: string): string[] {

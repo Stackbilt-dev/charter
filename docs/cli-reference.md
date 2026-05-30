@@ -128,6 +128,38 @@ npx charter doctor --ci --format json # CI mode: exit 1 on warnings
 - `--adf-only` — run only ADF readiness checks, skip Charter config validation
 - `--ci` — non-interactive, exits with policy violation code on warnings
 
+#### Source LOC budgets (god-object drift)
+
+The ADF `entry_loc` metric only caps the single entry file. To stop *other*
+runtime source files from quietly growing into god-objects, declare per-path LOC
+budgets in `.charter/config.json`. `charter doctor` then measures matching files
+and reports them:
+
+```jsonc
+{
+  "locBudgets": {
+    "defaultWarn": 300,
+    "defaultFail": 600,
+    "paths": [
+      { "pattern": "src/index.ts", "warn": 200, "fail": 500, "reason": "entry should stay thin" },
+      { "pattern": "src/**", "warn": 300, "fail": 600 }
+    ]
+  }
+}
+```
+
+- **Patterns** match repo-relative paths: `*` within a single path segment, `**`
+  across segments, everything else literal. The first matching rule wins, so list
+  more specific patterns first. Per-rule `warn`/`fail` fall back to
+  `defaultWarn`/`defaultFail`.
+- **Enforcement is opt-in and graduated.** A file *over its `fail` ceiling* is a
+  `WARN` doctor check — under `--ci` this exits non-zero, failing the build. A
+  file *over `warn` but within `fail`* is advisory (`INFO`) and never fails CI.
+  Set `"enabled": false` to keep a config block without enforcing it.
+- **No budgets configured?** `doctor` emits a soft, non-blocking `INFO` nudge so
+  teams know `entry_loc` alone leaves other files uncovered — it never fails an
+  existing repo's CI on upgrade.
+
 ### charter why
 
 Prints a quick explanation of Charter's governance value and adoption ROI.

@@ -9,6 +9,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Pattern } from '@stackbilt/types';
+import type { LocBudgetRule } from '@stackbilt/adf';
 
 // ============================================================================
 // Config Types
@@ -90,6 +91,25 @@ export interface CharterConfig {
      * alias is globally noisy; use this list for repo-local overrides.
      */
     ignoreAliases?: string[];
+  };
+
+  /**
+   * Per-path source LOC budgets. Catches god-object drift across runtime
+   * source files beyond the single ADF `entry_loc` metric (see #186).
+   *
+   * Entirely opt-in: when this block is absent, Charter enforces no source
+   * LOC budgets and `charter doctor` only emits a soft, non-blocking
+   * informational nudge that no runtime LOC coverage is configured.
+   */
+  locBudgets?: {
+    /** Master switch. Defaults to true when the block is present. */
+    enabled?: boolean;
+    /** Default warn ceiling applied to rules that omit their own `warn`. */
+    defaultWarn?: number;
+    /** Default fail ceiling applied to rules that omit their own `fail`. */
+    defaultFail?: number;
+    /** Ordered budget rules; the first pattern that matches a file applies. */
+    paths?: LocBudgetRule[];
   };
 }
 
@@ -176,6 +196,7 @@ export function loadConfig(configPath: string): CharterConfig {
         },
       },
       ontology: parsed.ontology,
+      locBudgets: parsed.locBudgets,
     };
   } catch (err) {
     console.warn(`Warning: Failed to parse ${configFile}, using defaults`);
