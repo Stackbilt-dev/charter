@@ -68,6 +68,25 @@ Two distinct issues can appear when the repo lives on a Windows-mounted filesyst
 
 Both flags are safe for CI environments where the filesystem is Linux-native — the workarounds only matter locally on DrvFs mounts.
 
+### npm peer-dependency conflicts on install/upgrade
+
+Installing or upgrading `@stackbilt/cli` can fail under npm's strict peer resolver with an `ERESOLVE` error — for example, a conflict involving `zod` when your app already depends on a package whose peer range differs from Charter's (`zod@^3`):
+
+```text
+npm error ERESOLVE could not resolve
+npm error While resolving: your-app@x.y.z
+npm error Found: zod@3.x  …  peer zod@"^4.0.0" from agents@0.12.3
+```
+
+This is a conflict in your existing dependency tree that npm surfaces while re-resolving — Charter's runtime is unaffected once installed. Fix it one of two ways:
+
+| Fix | When |
+|-----|------|
+| `npm install --save-dev @stackbilt/cli --legacy-peer-deps` | Fastest unblock; tells npm to use the looser legacy resolution it used before v7 |
+| Align the conflicting dependency's version in your app (e.g. upgrade/downgrade `zod` so one range satisfies both) | Preferred long-term; removes the conflict at its source |
+
+`pnpm` and `yarn` use a more permissive resolver and generally install without this flag.
+
 ## AI agent governance with ADF
 
 Charter replaces monolithic agent config files (CLAUDE.md, .cursorrules, GEMINI.md) with **ADF (Attention-Directed Format)** -- a modular context system where agents load only the rules they need.
