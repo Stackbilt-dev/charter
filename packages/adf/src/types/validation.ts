@@ -44,3 +44,44 @@ export interface AdfSyncStatus {
   lockedHash: string | null;
   inSync: boolean;
 }
+
+/**
+ * A per-path source LOC budget rule. Lets teams cap how large runtime
+ * source files may grow (god-object drift) beyond the single `entry_loc`
+ * metric, with separate warn/fail ceilings per path pattern.
+ *
+ * Shape is intentionally a plain serializable object so a future Zod
+ * schema can validate it as a drop-in (see config Zod-migration direction).
+ */
+export interface LocBudgetRule {
+  /**
+   * Path glob matched against repo-relative file paths. Supports `*` (within a
+   * single path segment), `**` (across segments, including none), and literal
+   * text. Examples: an exact path like `src/index.ts`, or a recursive glob that
+   * targets every TypeScript file under `src`.
+   */
+  pattern: string;
+  /** Warn ceiling: a file exceeding this (but not `fail`) yields `warn`. Falls back to the budget default when omitted. */
+  warn?: number;
+  /** Fail ceiling: a file exceeding this yields `fail`. Falls back to the budget default when omitted. */
+  fail?: number;
+  /** Optional human rationale for the budget, surfaced in output. */
+  reason?: string;
+}
+
+/** Result of evaluating one matched file against its LOC budget rule. */
+export interface LocBudgetResult {
+  /** Repo-relative path of the measured file. */
+  path: string;
+  /** The rule pattern that matched this file. */
+  pattern: string;
+  /** Measured line count. */
+  lines: number;
+  /** Effective warn ceiling applied (after default fallback), or null if none. */
+  warn: number | null;
+  /** Effective fail ceiling applied (after default fallback), or null if none. */
+  fail: number | null;
+  status: ConstraintStatus;
+  reason?: string;
+  message: string;
+}

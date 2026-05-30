@@ -3,6 +3,7 @@ export { formatAdf } from './formatter';
 export { applyPatches } from './patcher';
 export { parseManifest, resolveModules, bundleModules } from './bundler';
 export { validateConstraints, computeWeightSummary } from './validator';
+export { evaluateLocBudgets, resolveBudgetStatus, matchPath } from './loc-budget';
 export { evaluateEvidence } from './evidence';
 export type { EvidenceReport, StaleBaselineWarning } from './evidence';
 export { parseMarkdownSections } from './markdown-parser';
