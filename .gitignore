@@ -15,8 +15,16 @@ governance/
 # npm lockfile — this repo uses pnpm (pnpm-lock.yaml); ignore npm-generated lockfile
 package-lock.json
 
-# local telemetry artifacts
+# local telemetry artifacts (root and per-package)
 .charter/telemetry/
+**/.charter/telemetry/
+
+# local charter runtime artifacts (generated brief + private data registry — never commit)
+.charter/context.md
+.charter/data-registry.yaml
+
+# stray empty marker file
+.codex
 
 # scenario harness results
 harness/results/
