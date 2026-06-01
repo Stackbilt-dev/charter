@@ -163,6 +163,33 @@ describe('adf patch JSON changes array', () => {
     expect(fs.readFileSync(file, 'utf-8')).not.toContain('Prefer immutability');
   });
 
+  it('malformed ops: null array element is rejected cleanly, not as a TypeError', async () => {
+    const dir = tmpDir();
+    const file = path.join(dir, 'core.adf');
+    fs.writeFileSync(file, METRIC_ADF);
+
+    // Previously crashed in the before-capture pass with an uncaught
+    // "Cannot read properties of null (reading 'op')" TypeError.
+    await expect(adfCommand(baseOptions, ['patch', file, '--ops', '[null]'])).rejects.toMatchObject({
+      name: 'CLIError',
+      message: expect.stringContaining('Invalid --ops operation'),
+    });
+    // The file must be left untouched when validation fails.
+    expect(fs.readFileSync(file, 'utf-8')).toBe(METRIC_ADF);
+  });
+
+  it('malformed ops: non-object and unknown-op elements are rejected with CLIError', async () => {
+    const dir = tmpDir();
+    const file = path.join(dir, 'core.adf');
+    fs.writeFileSync(file, METRIC_ADF);
+
+    for (const bad of ['[123]', '[{"section":"x","index":0}]', '[{"op":"FROBNICATE","section":"x"}]']) {
+      await expect(adfCommand(baseOptions, ['patch', file, '--ops', bad])).rejects.toMatchObject({
+        name: 'CLIError',
+      });
+    }
+  });
+
   it('error: returns patched:false with error message, no changes', async () => {
     const dir = tmpDir();
     const file = path.join(dir, 'core.adf');
