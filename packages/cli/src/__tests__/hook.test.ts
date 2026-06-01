@@ -57,6 +57,21 @@ describe('hookCommand', () => {
     expect(content).toContain('echo "custom"');
   });
 
+  it('surfaces a CLIError (not a raw fs Error) when the hook file cannot be written', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Point the hooks dir at an existing regular file so creating the hooks
+    // directory fails for real — no fs mocking, exercises the actual guard.
+    const blocker = path.join(tempDir, 'blocker');
+    fs.writeFileSync(blocker, 'i am a file, not a directory');
+    execFileSync('git', ['config', 'core.hooksPath', blocker], { stdio: 'ignore' });
+
+    await expect(hookCommand(baseOptions, ['install', '--commit-msg'])).rejects.toMatchObject({
+      name: 'CLIError',
+      message: expect.stringContaining('Could not write git hook'),
+    });
+  });
+
   it('hook print --claude returns 0 and outputs UserPromptSubmit config', async () => {
     const logs: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {

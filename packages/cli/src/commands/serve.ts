@@ -74,14 +74,15 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
   const customName = getFlag(args, '--name');
 
   if (!fs.existsSync(aiDir)) {
-    const errMsg = `No .ai/ directory found. Run: charter init`;
+    const errMsg = `No .ai/ directory found at ${aiDir}. Run: charter init (or pass --ai-dir <path>)`;
     if (transport === 'stdio') {
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: `charter serve: ${errMsg}` } }) + '\n');
     }
     throw new CLIError(errMsg);
   }
-  if (!fs.existsSync(path.join(aiDir, 'manifest.adf'))) {
-    const errMsg = `.ai/manifest.adf not found. Run: charter adf init`;
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  if (!fs.existsSync(manifestPath)) {
+    const errMsg = `ADF manifest not found at ${manifestPath}. Run: charter adf init`;
     if (transport === 'stdio') {
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: `charter serve: ${errMsg}` } }) + '\n');
     }
