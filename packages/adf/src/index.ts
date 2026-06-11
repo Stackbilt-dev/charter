@@ -21,5 +21,18 @@ export type {
   ClassifierConfig,
 } from './content-classifier';
 export { stripCharterSentinels, isCharterSentinel } from './sentinels';
+export {
+  compileAdf,
+  buildBanner,
+  COMPILE_TARGETS,
+  TARGET_FILENAMES,
+  COMPILE_BANNER_MARKER,
+  MODULE_INDEX_FENCE,
+} from './compiler';
+export type {
+  CompileTarget,
+  CompileOptions,
+  CompileResult,
+} from './compiler';
 export * from './types';
 export * from './errors';

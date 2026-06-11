@@ -24,6 +24,7 @@ import { adfMetricsCommand } from './adf-metrics';
 import { adfTidyCommand } from './adf-tidy';
 import { adfPopulateCommand } from './adf-populate';
 import { adfContextCommand } from './adf-context';
+import { adfCompileCommand } from './adf-compile';
 import {
   NAMED_MODULE_SCAFFOLDS,
   NAMED_MODULE_DEFAULT_TRIGGERS,
@@ -225,8 +226,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfPopulateCommand(options, restArgs);
     case 'context':
       return adfContextCommand(options, restArgs);
+    case 'compile':
+      return adfCompileCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics, context`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics, context, compile`);
   }
 }
 
@@ -879,6 +882,15 @@ function printHelp(): void {
   console.log('');
   console.log('    charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]');
   console.log('      Recalibrate metric baselines/ceilings from current LOC with required rationale.');
+  console.log('');
+  console.log('    charter adf compile --target <claude|agents|cursor|gemini|all> [--ai-dir <dir>] [--write] [--check] [--force]');
+  console.log('      Outbound compiler: render .ai/*.adf source tree to flat vendor agent-config files.');
+  console.log('      --target: vendor target (claude→CLAUDE.md, agents→AGENTS.md, cursor→.cursorrules, gemini→GEMINI.md)');
+  console.log('      --target all: compile all four targets (requires --write or --check)');
+  console.log('      --write: write output file(s) to repo root (refuses to overwrite hand-written files)');
+  console.log('      --check: diff compiled output against files on disk; exit 1 if stale (CI drift gate)');
+  console.log('      --force: with --write, overwrite even files that lack the compile banner');
+  console.log('      Default (no --write/--check): print to stdout (single target only)');
   console.log('');
 }
 
