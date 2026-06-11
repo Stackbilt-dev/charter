@@ -75,6 +75,7 @@ function makeOptions(target: CompileOptions['target'], extra?: Record<string, st
   return {
     target,
     aiDir: '/ai',
+    displayAiDir: '.ai',
     readFile: makeReadFile({ ...FILES, ...extra }),
   };
 }
@@ -275,10 +276,10 @@ describe('compileAdf — on-demand module index (spec §4.2)', () => {
     expect(result.output).not.toContain(`<!-- ${MODULE_INDEX_FENCE} -->`);
   });
 
-  it('lists each on-demand module with its aiDir-prefixed path and triggers', () => {
+  it('lists each on-demand module with its displayAiDir-relative path and triggers', () => {
     const result = compileAdf(makeOptions('claude'));
-    expect(result.output).toContain('`/ai/frontend.adf` — Triggers: React, CSS, UI');
-    expect(result.output).toContain('`/ai/backend.adf` — Triggers: API, Node, DB');
+    expect(result.output).toContain('`.ai/frontend.adf` — Triggers: React, CSS, UI');
+    expect(result.output).toContain('`.ai/backend.adf` — Triggers: API, Node, DB');
   });
 
   it('omits the index when no on-demand modules exist', () => {
@@ -308,9 +309,10 @@ describe('compileAdf — on-demand module index (spec §4.2)', () => {
     const result = compileAdf({
       target: 'claude',
       aiDir: '/ai',
+      displayAiDir: '.ai',
       readFile: makeReadFile({ ...FILES, '/ai/manifest.adf': manifestNoTriggers }),
     });
-    expect(result.output).toContain('`/ai/extras.adf`');
+    expect(result.output).toContain('`.ai/extras.adf`');
     // No trigger annotation for modules without triggers
     expect(result.output).not.toContain('extras.adf` — Triggers:');
   });

@@ -27,6 +27,8 @@ export interface CompileOptions {
   target: CompileTarget;
   /** Base directory for resolving module paths (e.g. '.ai') */
   aiDir: string;
+  /** Display path used in the module index entries — should be cwd-relative (e.g. '.ai'). Defaults to the last segment of aiDir. */
+  displayAiDir?: string;
   /** File reader injection — allows DI for testing without disk access */
   readFile: (path: string) => string;
 }
@@ -123,6 +125,8 @@ export interface CompileResult {
  */
 export function compileAdf(options: CompileOptions): CompileResult {
   const { target, aiDir, readFile } = options;
+  // Use the caller-supplied display path, or fall back to the last path segment
+  const displayAiDir = options.displayAiDir ?? lastSegment(aiDir);
 
   // Load and parse manifest
   const manifestPath = joinPath(aiDir, 'manifest.adf');
@@ -140,7 +144,7 @@ export function compileAdf(options: CompileOptions): CompileResult {
   }
 
   const config = TARGET_CONFIGS[target];
-  const output = renderToVendorFormat(config, manifest, defaultSections, manifest.onDemand, aiDir);
+  const output = renderToVendorFormat(config, manifest, defaultSections, manifest.onDemand, displayAiDir);
 
   return {
     target,
@@ -159,7 +163,7 @@ function renderToVendorFormat(
   manifest: Manifest,
   defaultSections: AdfSection[],
   onDemandModules: ManifestModule[],
-  aiDir: string,
+  displayAiDir: string,
 ): string {
   const lines: string[] = [];
 
@@ -200,7 +204,7 @@ function renderToVendorFormat(
       const triggerStr = mod.triggers.length > 0
         ? ` — Triggers: ${mod.triggers.join(', ')}`
         : '';
-      lines.push(`- \`${joinPath(aiDir, mod.path)}\`${triggerStr}`);
+      lines.push(`- \`${joinPath(displayAiDir, mod.path)}\`${triggerStr}`);
     }
     lines.push(buildModuleIndexFence(config.commentStyle, 'close'));
     lines.push('');
@@ -295,4 +299,10 @@ function renderContent(content: AdfContent): string[] {
 function joinPath(base: string, relative: string): string {
   if (base.endsWith('/')) return base + relative;
   return base + '/' + relative;
+}
+
+function lastSegment(p: string): string {
+  const trimmed = p.replace(/\/$/, '');
+  const idx = trimmed.lastIndexOf('/');
+  return idx < 0 ? trimmed : trimmed.slice(idx + 1);
 }

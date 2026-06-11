@@ -56,6 +56,7 @@ export function adfCompileCommand(options: CLIOptions, args: string[]): number {
   const targetOrAll: CompileTargetOrAll = targetParsed.data;
 
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
+  const displayAiDir = path.relative(process.cwd(), path.resolve(aiDir)) || aiDir;
   const writeMode = args.includes('--write');
   const checkMode = args.includes('--check');
   const forceWrite = args.includes('--force');
@@ -80,11 +81,11 @@ export function adfCompileCommand(options: CLIOptions, args: string[]): number {
   const readFile = (p: string): string => fs.readFileSync(p, 'utf-8');
 
   if (checkMode) {
-    return runCheckMode(options, targets, aiDir, readFile);
+    return runCheckMode(options, targets, aiDir, displayAiDir, readFile);
   }
 
   if (writeMode) {
-    return runWriteMode(options, targets, aiDir, readFile, forceWrite);
+    return runWriteMode(options, targets, aiDir, displayAiDir, readFile, forceWrite);
   }
 
   // Default: stdout (single target only in non-write/check mode)
@@ -93,7 +94,7 @@ export function adfCompileCommand(options: CLIOptions, args: string[]): number {
       '--target all requires --write or --check. Use a single target to print to stdout.',
     );
   }
-  return runStdoutMode(options, targets[0], aiDir, readFile);
+  return runStdoutMode(options, targets[0], aiDir, displayAiDir, readFile);
 }
 
 // ============================================================================
@@ -104,9 +105,10 @@ function runStdoutMode(
   options: CLIOptions,
   target: CompileTarget,
   aiDir: string,
+  displayAiDir: string,
   readFile: (p: string) => string,
 ): number {
-  const result = compileAdf({ target, aiDir, readFile });
+  const result = compileAdf({ target, aiDir, displayAiDir, readFile });
 
   if (options.format === 'json') {
     console.log(JSON.stringify({
@@ -134,6 +136,7 @@ function runWriteMode(
   options: CLIOptions,
   targets: CompileTarget[],
   aiDir: string,
+  displayAiDir: string,
   readFile: (p: string) => string,
   force: boolean,
 ): number {
@@ -159,7 +162,7 @@ function runWriteMode(
       }
     }
 
-    const result = compileAdf({ target, aiDir, readFile });
+    const result = compileAdf({ target, aiDir, displayAiDir, readFile });
     fs.writeFileSync(filename, result.output, 'utf-8');
     written.push(filename);
 
@@ -194,6 +197,7 @@ function runCheckMode(
   options: CLIOptions,
   targets: CompileTarget[],
   aiDir: string,
+  displayAiDir: string,
   readFile: (p: string) => string,
 ): number {
   const stale: string[] = [];
@@ -212,7 +216,7 @@ function runCheckMode(
     }
 
     const onDisk = fs.readFileSync(filename, 'utf-8');
-    const result = compileAdf({ target, aiDir, readFile });
+    const result = compileAdf({ target, aiDir, displayAiDir, readFile });
 
     if (onDisk === result.output) {
       current.push(filename);
