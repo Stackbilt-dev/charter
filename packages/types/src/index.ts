@@ -343,3 +343,58 @@ export interface DriftReport {
   scannedPatterns: number;
   timestamp: string;
 }
+
+// ============================================================================
+// Authority-Gated Governance Contract (#200)
+//
+// Formalizes the propose→gate→commit invariant that emerges across governed
+// systems. The pattern has appeared independently in charter (dryRun flag on
+// applyPolicies) and colonyos (override_decision / autonomy_ceiling). Naming
+// and contracting it here makes the invariants enforceable at type-check time.
+//
+// Invariants:
+//   1. propose() is always called before commit() — the gate cannot be bypassed
+//   2. propose() is idempotent for the same input state
+//   3. commit('dismiss') leaves state unchanged
+//   4. Every commit() emits a GovernanceReceipt — auditability is non-optional
+//   5. Autonomy ceiling is externally set; implementations must never self-grant
+// ============================================================================
+
+export type GovernanceDecision = 'approve' | 'override' | 'dismiss';
+
+export interface GovernanceProposal {
+  /** Stable, deterministic ID for the same input state. */
+  readonly id: string;
+  /** True when the target is already in the desired state — commit would be a no-op. */
+  readonly alreadyCompliant: boolean;
+  /** Human-readable description of what would change on approve/override. */
+  readonly delta: readonly string[];
+  /** Optional Unix timestamp (ms) after which the proposal should be re-evaluated. */
+  readonly expires?: number;
+}
+
+export interface GovernanceReceipt {
+  readonly proposalId: string;
+  readonly decision: GovernanceDecision;
+  /** Unix timestamp (ms) when the commit was executed. */
+  readonly committedAt: number;
+}
+
+/**
+ * Authority-gated governance contract.
+ *
+ * @typeParam Context - Input to propose() that scopes the evaluation (e.g. a repo path).
+ * @typeParam P - Concrete proposal type; defaults to GovernanceProposal. Implementations
+ *   may extend GovernanceProposal to carry context needed for the commit phase.
+ */
+export interface GovernanceGate<Context, P extends GovernanceProposal = GovernanceProposal> {
+  /** Phase 1: evaluate without committing. Must be idempotent for the same input state. */
+  propose(context: Context): Promise<P>;
+  /**
+   * Phase 2: authorized actor commits a proposal.
+   * - 'approve': apply the proposed changes
+   * - 'override': apply despite compliance (force re-stamp)
+   * - 'dismiss': leave state unchanged; receipt still emitted
+   */
+  commit(proposal: P, decision: GovernanceDecision): Promise<GovernanceReceipt>;
+}
