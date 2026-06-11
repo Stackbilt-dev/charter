@@ -471,3 +471,32 @@ describe('checkOntologyDiff', () => {
     expect(violation!.sensitivity).toBe('billing_critical');
   });
 });
+
+// ============================================================================
+// ONTOLOGY_SENSITIVITY_TIERS — TierDefinition completeness (#201)
+// ============================================================================
+
+import { ONTOLOGY_SENSITIVITY_TIERS } from '../ontology';
+
+describe('ONTOLOGY_SENSITIVITY_TIERS', () => {
+  const ALL_TIERS = ['public', 'service_internal', 'cross_service_rpc', 'pii_scoped', 'billing_critical', 'secrets'];
+
+  it('contains all OntologySensitivityTier values in ascending severity order', () => {
+    expect([...ONTOLOGY_SENSITIVITY_TIERS.tiers]).toEqual(ALL_TIERS);
+  });
+
+  it('has a description and constraint for every tier', () => {
+    for (const tier of ALL_TIERS) {
+      expect(ONTOLOGY_SENSITIVITY_TIERS.descriptions[tier as keyof typeof ONTOLOGY_SENSITIVITY_TIERS.descriptions]).toBeTruthy();
+      expect(ONTOLOGY_SENSITIVITY_TIERS.constraints[tier as keyof typeof ONTOLOGY_SENSITIVITY_TIERS.constraints].description.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('secrets tier prohibits all cross-boundary access', () => {
+    expect(ONTOLOGY_SENSITIVITY_TIERS.constraints.secrets.description).toContain('any condition');
+  });
+
+  it('is absolute mode', () => {
+    expect(ONTOLOGY_SENSITIVITY_TIERS.mode).toBe('absolute');
+  });
+});

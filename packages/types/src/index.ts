@@ -345,6 +345,179 @@ export interface DriftReport {
 }
 
 // ============================================================================
+// Tiered Execution Contract (#201)
+//
+// Formalizes the tier-system pattern that appears independently across charter
+// (CommitRiskLevel, ChangeClass, AppMode, Urgency, Complexity) and colonyos
+// (cognitive-law tiers) and llm-providers (model-catalog tiers). Naming and
+// contracting it here lets new tier systems be verified at type-check time.
+//
+// Invariants (TierSelector):
+//   1. Deterministic — same input always yields the same tier
+//   2. Caller-overridable — an explicit hint takes precedence over inference
+//   3. Tier selection occurs before constraint application, never post-hoc
+//   4. Transitions are observable (onTransition is emitted on tier change)
+//   5. All declared tiers are reachable — no dead tiers in TierDefinition.tiers
+//
+// DegradationPolicy invariants (opt-in extension for health-signal-driven tiers):
+//   1. Degradation is immediate — signal detected → tier applied same tick
+//   2. Recovery is asymmetric — one step at a time, recoveryTicks stable ticks
+//   3. Ceiling bounded externally — implementations must never self-grant a higher ceiling
+// ============================================================================
+
+/** What a tier constrains and the semantic description of that constraint. */
+export interface TierConstraint {
+  /** Natural language description of what governance behavior this tier constrains. */
+  description: string;
+}
+
+/**
+ * Declares a tier system: its named tiers in ascending severity order,
+ * semantic descriptions, per-tier constraints, and composition mode.
+ *
+ * @typeParam T - The union type of valid tier values (string literals).
+ */
+export interface TierDefinition<T extends string> {
+  /** Human-readable name of this tier system, e.g. 'CommitRiskLevel'. */
+  name: string;
+  /** Ordered tier values, lowest severity first. All values must be reachable. */
+  tiers: readonly T[];
+  /** Semantic description for each tier. */
+  descriptions: Readonly<Record<T, string>>;
+  /** What each tier constrains. */
+  constraints: Readonly<Record<T, TierConstraint>>;
+  /** 'absolute' — tier overrides; 'additive' — tiers stack cumulatively. */
+  mode: 'additive' | 'absolute';
+}
+
+/**
+ * Selection contract for a tier system.
+ * Implementations must be deterministic and caller-overridable.
+ *
+ * @typeParam T     - The union type of valid tier values.
+ * @typeParam Input - The input from which the tier is inferred.
+ */
+export interface TierSelector<T extends string, Input> {
+  /**
+   * Select a tier from input. Deterministic: same input → same tier.
+   * When hint is provided it takes precedence over inference.
+   */
+  select(input: Input, hint?: T): T;
+  /** Optional observer called when the active tier transitions. */
+  onTransition?: (from: T, to: T, reason: string) => void;
+}
+
+/**
+ * Extension of TierSelector for health-signal-driven degradation.
+ * Opt-in — only systems driven by signal counts need this.
+ * Reference implementation: colonyos cognitive-law.ts
+ */
+export interface DegradationPolicy<T extends string> extends TierSelector<T, number> {
+  /** Degrade to the tier appropriate for signalCount. Immediate — same tick. */
+  degrade(signalCount: number): T;
+  /** Consecutive stable ticks required to recover one tier. Asymmetric recovery. */
+  readonly recoveryTicks: number;
+  /** Externally-configured ceiling — implementations must never self-grant above this. */
+  readonly ceiling: T;
+  /** Floor — minimum tier regardless of signal count. */
+  readonly floor: T;
+}
+
+// ============================================================================
+// TierDefinition constants for charter's built-in tier systems
+// ============================================================================
+
+export const APP_MODE_TIERS: TierDefinition<AppMode> = {
+  name: 'AppMode',
+  tiers: ['BRIEF', 'DRAFTER', 'STRATEGY', 'RED_TEAM', 'GOVERNANCE'],
+  descriptions: {
+    BRIEF:      'Executive summary — condensed context, low verbosity',
+    DRAFTER:    'Content authoring — proposal and document generation',
+    STRATEGY:   'Strategic planning — roadmap and initiative framing',
+    RED_TEAM:   'Adversarial review — challenge assumptions and find gaps',
+    GOVERNANCE: 'Governance enforcement — policy check and compliance gate',
+  },
+  constraints: {
+    BRIEF:      { description: 'Minimal toolset; response length capped' },
+    DRAFTER:    { description: 'Drafting tools enabled; no enforcement gates' },
+    STRATEGY:   { description: 'Strategy tools enabled; advisory posture' },
+    RED_TEAM:   { description: 'Adversarial tools enabled; challenge posture' },
+    GOVERNANCE: { description: 'Full policy toolset; enforcement gates active' },
+  },
+  mode: 'absolute',
+};
+
+export const URGENCY_TIERS: TierDefinition<Urgency> = {
+  name: 'Urgency',
+  tiers: ['LOW', 'STANDARD', 'ELEVATED', 'CRITICAL'],
+  descriptions: {
+    LOW:      'Routine — no SLA pressure; batch with next scheduled review',
+    STANDARD: 'Standard queue — normal review cadence applies',
+    ELEVATED: 'Elevated priority — review within one business day',
+    CRITICAL: 'Immediate escalation — blocks release or production safety',
+  },
+  constraints: {
+    LOW:      { description: 'Deferred to next review cycle' },
+    STANDARD: { description: 'Normal prioritization queue' },
+    ELEVATED: { description: 'Fast-tracked; skip standard queue' },
+    CRITICAL: { description: 'Immediate human escalation required' },
+  },
+  mode: 'absolute',
+};
+
+export const COMPLEXITY_TIERS: TierDefinition<Complexity> = {
+  name: 'Complexity',
+  tiers: ['TRIVIAL', 'SIMPLE', 'MODERATE', 'COMPLEX', 'EPIC'],
+  descriptions: {
+    TRIVIAL:  'Typo, formatting, or comment change; no logic affected',
+    SIMPLE:   'Single-file change; bounded, self-contained logic',
+    MODERATE: 'Cross-file change within one package',
+    COMPLEX:  'Cross-package change; interface or contract modification',
+    EPIC:     'Cross-system or cross-repo change; architecture-level impact',
+  },
+  constraints: {
+    TRIVIAL:  { description: 'Self-review sufficient; no governance trailer needed' },
+    SIMPLE:   { description: 'Self-review sufficient; governance trailer recommended' },
+    MODERATE: { description: 'Peer review required; governance trailer required' },
+    COMPLEX:  { description: 'Committee review required; ADR may be needed' },
+    EPIC:     { description: 'Architecture review required; ADR mandatory' },
+  },
+  mode: 'absolute',
+};
+
+export const CHANGE_CLASS_TIERS: TierDefinition<ChangeClass> = {
+  name: 'ChangeClass',
+  tiers: ['SURFACE', 'LOCAL', 'CROSS_CUTTING'],
+  descriptions: {
+    SURFACE:      'UI, style, docs, or test-only changes; no business logic affected',
+    LOCAL:        'Logic change scoped to a single package or subsystem',
+    CROSS_CUTTING: 'Change that crosses package or service boundaries',
+  },
+  constraints: {
+    SURFACE:      { description: 'No governance review gate; self-certify' },
+    LOCAL:        { description: 'Standard governance trailer required' },
+    CROSS_CUTTING: { description: 'Committee review and ADR required' },
+  },
+  mode: 'absolute',
+};
+
+export const COMMIT_RISK_TIERS: TierDefinition<CommitRiskLevel> = {
+  name: 'CommitRiskLevel',
+  tiers: ['LOW', 'MEDIUM', 'HIGH'],
+  descriptions: {
+    LOW:    'Docs, tests, tooling — no production logic changed',
+    MEDIUM: 'Feature or dependency change — standard governance applies',
+    HIGH:   'Auth, security, schema, or API surface change',
+  },
+  constraints: {
+    LOW:    { description: 'Governance trailer optional' },
+    MEDIUM: { description: 'Governance trailer required (Governed-By or Resolves-Request)' },
+    HIGH:   { description: 'Governance trailer required; human review mandatory' },
+  },
+  mode: 'absolute',
+};
+
+// ============================================================================
 // Authority-Gated Governance Contract (#200)
 //
 // Formalizes the propose→gate→commit invariant that emerges across governed

@@ -16,6 +16,8 @@
 // Types
 // ============================================================================
 
+import type { TierDefinition } from '@stackbilt/types';
+
 export type OntologySensitivityTier =
   | 'public'
   | 'service_internal'
@@ -23,6 +25,29 @@ export type OntologySensitivityTier =
   | 'pii_scoped'
   | 'billing_critical'
   | 'secrets';
+
+/** TierDefinition for the data-access sensitivity system (#201). */
+export const ONTOLOGY_SENSITIVITY_TIERS: TierDefinition<OntologySensitivityTier> = {
+  name: 'OntologySensitivityTier',
+  tiers: ['public', 'service_internal', 'cross_service_rpc', 'pii_scoped', 'billing_critical', 'secrets'],
+  descriptions: {
+    public:           'Readable from any service without auth (e.g. blog_post)',
+    service_internal: 'Readable/writable only by the owning service; raw D1 access is fine within the owner',
+    cross_service_rpc: 'Accessible only via declared RPC method or Service Binding — never raw D1 from a non-owner',
+    pii_scoped:       'Accessible only via owning service; audit_log entry required at every call site',
+    billing_critical: 'Writable only by the owning service + Stripe webhook handler; never leaves the service boundary',
+    secrets:          'Never leaves the owning service boundary under any circumstance',
+  },
+  constraints: {
+    public:           { description: 'No access restrictions' },
+    service_internal: { description: 'Owner-service access only; raw D1 permitted within the owner' },
+    cross_service_rpc: { description: 'RPC or Service Binding access only; raw D1 cross-service access is a DATA_AUTHORITY violation' },
+    pii_scoped:       { description: 'Owner-service access only; audit_log entry mandatory at every call site' },
+    billing_critical: { description: 'Owner-service + Stripe webhook access only; RPC is also prohibited' },
+    secrets:          { description: 'In-process only; no cross-boundary access permitted under any condition' },
+  },
+  mode: 'absolute',
+};
 
 export interface OntologyConcept {
   /** Canonical name, e.g. 'tenant', 'subscription', 'quota' */
