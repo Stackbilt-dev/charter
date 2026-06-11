@@ -457,6 +457,28 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
     });
   }
 
+  // Package ecosystem check (#90): verify enabled packages are installed.
+  // Charter does not maintain a hard-coded registry — it only checks that
+  // packages listed in config.packages are resolvable in node_modules.
+  const pkgEntries = Object.entries(config.packages ?? {}).filter(([, v]) => v.enabled);
+  if (pkgEntries.length > 0) {
+    const missing: string[] = [];
+    for (const [pkgName] of pkgEntries) {
+      try {
+        require.resolve(pkgName, { paths: [process.cwd()] });
+      } catch {
+        missing.push(pkgName);
+      }
+    }
+    checks.push({
+      name: 'packages',
+      status: missing.length > 0 ? 'WARN' : 'PASS',
+      details: missing.length > 0
+        ? `Enabled package(s) not installed: ${missing.join(', ')}. Run: npm install ${missing.join(' ')}`
+        : `${pkgEntries.length} enabled package(s) installed.`,
+    });
+  }
+
   const hasWarn = checks.some((check) => check.status === 'WARN');
   const result: DoctorResult = {
     status: hasWarn ? 'WARN' : 'PASS',

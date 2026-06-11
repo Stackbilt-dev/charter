@@ -262,3 +262,74 @@ describe('charter doctor --mcp (MCP wiring detection)', () => {
     expect(exitCode).toBe(EXIT_CODE.SUCCESS);
   });
 });
+
+describe('charter doctor packages check (#90)', () => {
+  async function runPackagesDoctor(configPkg: unknown): Promise<{ exitCode: number; output: DoctorOutput }> {
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'charter-doctor-pkgs-'));
+    tempDirs.push(tmp);
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+
+    fs.mkdirSync(path.join(tmp, '.ai'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.charter'), { recursive: true });
+
+    fs.writeFileSync(path.join(tmp, '.ai', 'manifest.adf'), 'ADF: 0.1\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n');
+    fs.writeFileSync(path.join(tmp, '.ai', 'core.adf'), 'ADF: 0.1\n\n📐 RULES:\n  - Example\n');
+    fs.writeFileSync(path.join(tmp, '.ai', 'state.adf'), 'ADF: 0.1\n\n📋 STATE:\n  - CURRENT: test\n');
+    fs.writeFileSync(path.join(tmp, '.charter', 'config.json'), JSON.stringify({ packages: configPkg }, null, 2));
+
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...msgs: unknown[]) => {
+      logs.push(msgs.map(String).join(' '));
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let exitCode: number;
+    try {
+      exitCode = await doctorCommand(ciOptions, ['--adf-only']);
+    } finally {
+      spy.mockRestore();
+    }
+    return { exitCode, output: JSON.parse(logs.join('\n').trim()) as DoctorOutput };
+  }
+
+  it('no packages check emitted when config.packages is absent', async () => {
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'charter-doctor-pkgs-absent-'));
+    tempDirs.push(tmp);
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+    writeFixture(tmp, { srcLines: 0 });
+
+    const { output } = await runDoctor(['--adf-only']);
+    const check = output.checks.find(c => c.name === 'packages');
+    expect(check).toBeUndefined();
+  });
+
+  it('PASS when all enabled packages are resolvable', async () => {
+    // 'path' is a built-in module — always resolvable
+    const { exitCode, output } = await runPackagesDoctor({ path: { enabled: true } });
+    const check = output.checks.find(c => c.name === 'packages');
+    expect(check?.status).toBe('PASS');
+    expect(check?.details).toContain('1 enabled package(s)');
+    expect(exitCode).toBe(EXIT_CODE.SUCCESS);
+  });
+
+  it('WARN when an enabled package is not installed', async () => {
+    const { exitCode, output } = await runPackagesDoctor({
+      '@some-org/definitely-not-installed-pkg-12345': { enabled: true },
+    });
+    const check = output.checks.find(c => c.name === 'packages');
+    expect(check?.status).toBe('WARN');
+    expect(check?.details).toContain('@some-org/definitely-not-installed-pkg-12345');
+    expect(exitCode).toBe(EXIT_CODE.POLICY_VIOLATION);
+  });
+
+  it('skips disabled packages in the check', async () => {
+    const { exitCode, output } = await runPackagesDoctor({
+      '@some-org/definitely-not-installed-pkg-12345': { enabled: false },
+    });
+    const check = output.checks.find(c => c.name === 'packages');
+    // disabled → no check emitted (no enabled entries)
+    expect(check).toBeUndefined();
+    expect(exitCode).toBe(EXIT_CODE.SUCCESS);
+  });
+});
