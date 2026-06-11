@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Added
 
+- **`charter score --badge`** (`score.ts`): New output mode that prints a [shields.io endpoint-schema](https://shields.io/badges/endpoint-badge) JSON payload to stdout (`{"schemaVersion":1,"label":"agent context","message":"A (92)","color":"brightgreen"}`). Grade-to-color mapping: A=brightgreen, B=green, C=yellowgreen, D=yellow, F=red. Combine with `--badge --write` to persist the payload to `.charter/badge.json` so it can be served via `raw.githubusercontent.com` as a live shields.io endpoint badge. Additive only — no existing flag, output, or exit-code behavior is changed. Exports `buildBadgePayload`, `gradeToColor`, and the `BadgePayload` type for downstream use.
 - **`charter adf compile`** — outbound compiler that renders the modular `.ai/*.adf` source tree to flat vendor agent-config files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `GEMINI.md`). "Babel for agent configs" — ADF is the source of truth, vendor files are build artifacts. This is the reverse of `charter adf migrate`.
   - `--target <claude|agents|cursor|gemini>` — render to stdout.
   - `--target all --write` — write all four files to repo root; refuses to overwrite hand-written files (or pointer stubs from `adf init --emit-pointers`) unless `--force` is passed.
