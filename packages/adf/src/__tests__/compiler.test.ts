@@ -11,6 +11,7 @@ import {
   buildBanner,
   COMPILE_BANNER_MARKER,
   COMPILE_TARGETS,
+  MODULE_INDEX_FENCE,
   TARGET_FILENAMES,
 } from '../compiler';
 import type { CompileOptions } from '../compiler';
@@ -258,26 +259,29 @@ describe('compileAdf — manifest-only sections excluded', () => {
 // compileAdf — on-demand listing
 // ============================================================================
 
-describe('compileAdf — on-demand module listing', () => {
-  it('includes "On-demand modules" section', () => {
+describe('compileAdf — on-demand module index (spec §4.2)', () => {
+  it('wraps the index in agents-modules HTML comment fences for markdown targets', () => {
     const result = compileAdf(makeOptions('claude'));
-    expect(result.output).toContain('## On-demand modules');
+    expect(result.output).toContain(`<!-- ${MODULE_INDEX_FENCE} -->`);
+    expect(result.output).toContain(`<!-- /${MODULE_INDEX_FENCE} -->`);
+    expect(result.output).toContain('## Additional instructions');
+    expect(result.output).toContain('Read the matching file before working in these areas:');
   });
 
-  it('lists each on-demand module with its triggers', () => {
-    const result = compileAdf(makeOptions('claude'));
-    expect(result.output).toContain('`frontend.adf`');
-    expect(result.output).toContain('React, CSS, UI');
-    expect(result.output).toContain('`backend.adf`');
-    expect(result.output).toContain('API, Node, DB');
+  it('uses hash-style fences for the cursor target', () => {
+    const result = compileAdf(makeOptions('cursor'));
+    expect(result.output).toContain(`# ${MODULE_INDEX_FENCE}`);
+    expect(result.output).toContain(`# /${MODULE_INDEX_FENCE}`);
+    expect(result.output).not.toContain(`<!-- ${MODULE_INDEX_FENCE} -->`);
   });
 
-  it('includes instruction to read .ai/<module>.adf', () => {
+  it('lists each on-demand module with its aiDir-prefixed path and triggers', () => {
     const result = compileAdf(makeOptions('claude'));
-    expect(result.output).toContain('.ai/<module>.adf');
+    expect(result.output).toContain('`/ai/frontend.adf` — Triggers: React, CSS, UI');
+    expect(result.output).toContain('`/ai/backend.adf` — Triggers: API, Node, DB');
   });
 
-  it('omits on-demand section when no on-demand modules exist', () => {
+  it('omits the index when no on-demand modules exist', () => {
     const noOnDemand = `ADF: 0.1
 
 📦 DEFAULT_LOAD:
@@ -288,7 +292,8 @@ describe('compileAdf — on-demand module listing', () => {
       aiDir: '/ai',
       readFile: makeReadFile({ ...FILES, '/ai/manifest.adf': noOnDemand }),
     });
-    expect(result.output).not.toContain('## On-demand modules');
+    expect(result.output).not.toContain(MODULE_INDEX_FENCE);
+    expect(result.output).not.toContain('## Additional instructions');
   });
 
   it('lists on-demand modules without triggers (no trigger string)', () => {
@@ -305,9 +310,9 @@ describe('compileAdf — on-demand module listing', () => {
       aiDir: '/ai',
       readFile: makeReadFile({ ...FILES, '/ai/manifest.adf': manifestNoTriggers }),
     });
-    expect(result.output).toContain('`extras.adf`');
+    expect(result.output).toContain('`/ai/extras.adf`');
     // No trigger annotation for modules without triggers
-    expect(result.output).not.toContain('extras.adf` — triggers:');
+    expect(result.output).not.toContain('extras.adf` — Triggers:');
   });
 });
 

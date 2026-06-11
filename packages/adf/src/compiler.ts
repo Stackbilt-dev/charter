@@ -89,6 +89,17 @@ export function buildBanner(style: 'html' | 'hash'): string {
   return `<!-- ${BANNER_BODY} -->`;
 }
 
+/** Fence name for the on-demand module index, per ADF spec §4.2. */
+export const MODULE_INDEX_FENCE = 'agents-modules';
+
+function buildModuleIndexFence(style: 'html' | 'hash', edge: 'open' | 'close'): string {
+  const name = edge === 'open' ? MODULE_INDEX_FENCE : `/${MODULE_INDEX_FENCE}`;
+  if (style === 'hash') {
+    return `# ${name}`;
+  }
+  return `<!-- ${name} -->`;
+}
+
 // ============================================================================
 // Compile result
 // ============================================================================
@@ -129,7 +140,7 @@ export function compileAdf(options: CompileOptions): CompileResult {
   }
 
   const config = TARGET_CONFIGS[target];
-  const output = renderToVendorFormat(config, manifest, defaultSections, manifest.onDemand);
+  const output = renderToVendorFormat(config, manifest, defaultSections, manifest.onDemand, aiDir);
 
   return {
     target,
@@ -148,6 +159,7 @@ function renderToVendorFormat(
   manifest: Manifest,
   defaultSections: AdfSection[],
   onDemandModules: ManifestModule[],
+  aiDir: string,
 ): string {
   const lines: string[] = [];
 
@@ -174,19 +186,23 @@ function renderToVendorFormat(
     }
   }
 
-  // On-demand modules index (listing only — bodies NOT inlined)
+  // On-demand module index — ADF spec §4.2 fenced form (listing only, bodies NOT inlined).
+  // The fence enables deterministic extraction by conforming tools; the body is plain
+  // Markdown that non-conforming agents can follow unaided (graceful degradation).
   if (onDemandModules.length > 0) {
-    lines.push('## On-demand modules');
+    lines.push(buildModuleIndexFence(config.commentStyle, 'open'));
+    lines.push('## Additional instructions');
     lines.push('');
-    lines.push('Load the following modules by reading `.ai/<module>.adf` when the listed triggers match your task.');
+    lines.push('Read the matching file before working in these areas:');
     lines.push('');
 
     for (const mod of onDemandModules) {
       const triggerStr = mod.triggers.length > 0
-        ? ` — triggers: ${mod.triggers.join(', ')}`
+        ? ` — Triggers: ${mod.triggers.join(', ')}`
         : '';
-      lines.push(`- \`${mod.path}\`${triggerStr}`);
+      lines.push(`- \`${joinPath(aiDir, mod.path)}\`${triggerStr}`);
     }
+    lines.push(buildModuleIndexFence(config.commentStyle, 'close'));
     lines.push('');
   }
 

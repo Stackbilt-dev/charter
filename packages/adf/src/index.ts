@@ -27,6 +27,7 @@ export {
   COMPILE_TARGETS,
   TARGET_FILENAMES,
   COMPILE_BANNER_MARKER,
+  MODULE_INDEX_FENCE,
 } from './compiler';
 export type {
   CompileTarget,
