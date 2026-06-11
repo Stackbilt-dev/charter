@@ -655,7 +655,8 @@ function printTextResult(result: TidyResult): void {
     console.log('');
     console.log('  Routing plan (run without --dry-run to apply, or adjust triggers first):');
     for (const r of result.itemRoutes) {
-      const preview = r.item.length > 70 ? r.item.slice(0, 67) + '...' : r.item;
+      const firstLine = r.item.split('\n')[0];
+      const preview = firstLine.length > 70 ? firstLine.slice(0, 67) + '...' : firstLine;
       console.log(`    "${preview}"`);
       console.log(`      \u2192 ${r.targetModule} / ${r.targetSection}`);
     }

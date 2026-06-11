@@ -118,26 +118,17 @@ export function printClaudeHookConfig(): void {
 const MCP_CLIENTS = ['claude', 'codex', 'cursor'] as const;
 type McpClient = typeof MCP_CLIENTS[number];
 
-function buildMcpConfigSnippet(client: McpClient, aiDir: string): object {
+function printMcpConfig(client: McpClient, aiDir: string): void {
   const serverEntry = {
     command: 'charter',
     args: aiDir !== '.ai' ? ['serve', '--ai-dir', aiDir] : ['serve'],
   };
-  if (client === 'claude') {
-    // .claude/settings.json shape
-    return { mcpServers: { charter: serverEntry } };
-  }
-  // .mcp.json shape — used by Codex and Cursor
-  return { mcpServers: { charter: serverEntry } };
-}
-
-function printMcpConfig(client: McpClient, aiDir: string): void {
-  const snippet = buildMcpConfigSnippet(client, aiDir);
+  const snippet = { mcpServers: { charter: serverEntry } };
   console.log(JSON.stringify(snippet, null, 2));
   if (client === 'claude') {
     console.error('  Paste the mcpServers entry into .claude/settings.json (or settings.local.json).');
   } else {
-    console.error(`  Paste the mcpServers entry into .mcp.json at the repo root.`);
+    console.error('  Paste the mcpServers entry into .mcp.json at the repo root.');
   }
 }
 
@@ -152,7 +143,8 @@ export async function hookCommand(options: CLIOptions, args: string[]): Promise<
     const wantMcpConfig = args.includes('--mcp-config');
 
     if (wantMcpConfig) {
-      const clientFlag = args[args.indexOf('--client') + 1] as McpClient | undefined;
+      const clientIdx = args.indexOf('--client');
+      const clientFlag = clientIdx !== -1 ? args[clientIdx + 1] : undefined;
       const client: McpClient = MCP_CLIENTS.includes(clientFlag as McpClient) ? clientFlag as McpClient : 'claude';
       const aiDir = getFlag(args, '--ai-dir') || '.ai';
       printMcpConfig(client, aiDir);

@@ -170,3 +170,95 @@ describe('charter doctor source LOC budget (integration)', () => {
     expect(exitCode).toBe(EXIT_CODE.SUCCESS);
   });
 });
+
+describe('charter doctor --mcp (MCP wiring detection)', () => {
+  async function runMcpDoctor(): Promise<{ exitCode: number; output: DoctorOutput }> {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...msgs: unknown[]) => {
+      logs.push(msgs.map(String).join(' '));
+    });
+    let exitCode: number;
+    try {
+      exitCode = await doctorCommand(ciOptions, ['--mcp']);
+    } finally {
+      spy.mockRestore();
+    }
+    return { exitCode, output: JSON.parse(logs.join('\n').trim()) as DoctorOutput };
+  }
+
+  it('WARN when no MCP config files exist at all', async () => {
+    const tmp = makeTempDir('mcp-none');
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+
+    const { exitCode, output } = await runMcpDoctor();
+    const check = output.checks.find(c => c.name === 'mcp wiring');
+    expect(check?.status).toBe('WARN');
+    expect(check?.details).toContain('charter hook print --mcp-config');
+    expect(exitCode).toBe(EXIT_CODE.POLICY_VIOLATION);
+  });
+
+  it('WARN when config file exists but has no mcpServers.charter entry', async () => {
+    const tmp = makeTempDir('mcp-missing-entry');
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.claude', 'settings.json'), JSON.stringify({ mcpServers: {} }));
+
+    const { exitCode, output } = await runMcpDoctor();
+    const check = output.checks.find(c => c.name === 'mcp wiring');
+    expect(check?.status).toBe('WARN');
+    expect(check?.details).toContain('no mcpServers.charter entry');
+    expect(exitCode).toBe(EXIT_CODE.POLICY_VIOLATION);
+  });
+
+  it('PASS when mcpServers.charter is present in .claude/settings.json', async () => {
+    const tmp = makeTempDir('mcp-wired');
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, '.claude', 'settings.json'),
+      JSON.stringify({ mcpServers: { charter: { command: 'charter', args: ['serve'] } } }),
+    );
+
+    const { exitCode, output } = await runMcpDoctor();
+    const check = output.checks.find(c => c.name === 'mcp wiring');
+    expect(check?.status).toBe('PASS');
+    expect(check?.details).toContain('charter serve wired in');
+    expect(exitCode).toBe(EXIT_CODE.SUCCESS);
+  });
+
+  it('WARN when config file contains invalid JSON', async () => {
+    const tmp = makeTempDir('mcp-bad-json');
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.claude', 'settings.json'), '{ bad json }');
+
+    const { exitCode, output } = await runMcpDoctor();
+    const check = output.checks.find(c => c.name === 'mcp wiring');
+    expect(check?.status).toBe('WARN');
+    expect(check?.details).toContain('invalid JSON');
+    expect(exitCode).toBe(EXIT_CODE.POLICY_VIOLATION);
+  });
+
+  it('PASS with partial wiring mentions unwired files in details', async () => {
+    const tmp = makeTempDir('mcp-partial');
+    process.chdir(tmp);
+    execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+    // Wire in settings.json but leave .mcp.json unwired
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, '.claude', 'settings.json'),
+      JSON.stringify({ mcpServers: { charter: { command: 'charter', args: ['serve'] } } }),
+    );
+    fs.writeFileSync(path.join(tmp, '.mcp.json'), JSON.stringify({ mcpServers: {} }));
+
+    const { exitCode, output } = await runMcpDoctor();
+    const check = output.checks.find(c => c.name === 'mcp wiring');
+    expect(check?.status).toBe('PASS');
+    expect(check?.details).toContain('Not wired');
+    expect(exitCode).toBe(EXIT_CODE.SUCCESS);
+  });
+});
