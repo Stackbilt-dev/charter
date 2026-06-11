@@ -92,6 +92,16 @@ const META_PATTERNS: RegExp[] = [
   /\bwhen (?:stackbilt)?charter is bootstrapped/i,
 ];
 
+// Headings that signal operational/session-protocol content. Items under these
+// headings describe runtime procedures, not project domain rules (#198).
+const STAY_HEADING_PATTERNS: RegExp[] = [
+  /^session\b/i,
+  /\bprotocol\b/i,
+  /\breceipt\b/i,
+  /\bprovenance\b/i,
+  /\bregistration\b/i,
+];
+
 // ============================================================================
 // Classification Helpers
 // ============================================================================
@@ -247,6 +257,19 @@ export function classifyElement(
       module = contentModule;
     }
     routingTrace = { headingModule, phraseOverride, candidateScores: scores };
+  }
+
+  // Heading-level STAY: operational/session-protocol headings (#198)
+  const headingLower = heading.toLowerCase();
+  if (STAY_HEADING_PATTERNS.some(p => p.test(headingLower))) {
+    return {
+      decision: 'STAY',
+      targetSection: 'CONTEXT',
+      targetModule: module,
+      weight: 'advisory',
+      reason: 'Operational/session-protocol heading — stay in vendor file',
+      routingTrace,
+    };
   }
 
   // Check STAY patterns first

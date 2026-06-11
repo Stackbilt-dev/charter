@@ -265,6 +265,41 @@ function analyzeVendorFile(
  * Any content before the first H2 that isn't part of the pointer is also bloat.
  * The ## Environment section and its items are legitimate retained content.
  */
+
+/** True for H2 headings that should stay in the vendor file verbatim (#198). */
+function isRetainedHeading(trimmedLine: string): boolean {
+  return (
+    /^## (Environment|Module Index)$/.test(trimmedLine) ||
+    /^## Session\b/i.test(trimmedLine) ||
+    /^## .*\b(Protocol|Receipt|Provenance|Registration)\b/i.test(trimmedLine)
+  );
+}
+
+/**
+ * Read all retained sections (Environment + operational protocol headings) from
+ * vendor file content and return them as a verbatim block to re-append after the
+ * thin pointer. Used by restorePointer to preserve section structure (#198).
+ */
+function readRetainedSections(content: string): string {
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let inRetained = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('## ')) {
+      inRetained = isRetainedHeading(trimmed);
+      if (inRetained) out.push(line);
+      continue;
+    }
+    if (inRetained) out.push(line);
+  }
+
+  // Trim trailing blank lines
+  while (out.length > 0 && out[out.length - 1].trim() === '') out.pop();
+  return out.length > 0 ? '\n' + out.join('\n') + '\n' : '';
+}
+
 function extractBeyondPointer(content: string, fileName: string): string {
   const baseName = path.basename(fileName);
   const template = getPointerTemplates()[baseName];
@@ -312,11 +347,7 @@ function extractBeyondPointer(content: string, fileName: string): string {
     // Section detection
     if (trimmed.startsWith('## ')) {
       // Charter-managed and operational protocol sections retained in the vendor file (#198).
-      // Environment: WSL/OS runtime config.
-      // Module Index: charter-generated on-demand listing.
-      // Session Start / Session Protocol: operational wiring steps that belong in the
-      //   vendor file as environment context, not in a domain ADF module.
-      const retained = /^## (Environment|Module Index|Session Start|Session Protocol|Session Setup)$/.test(trimmed);
+      const retained = isRetainedHeading(trimmed);
       if (retained) {
         inEnvironmentSection = true;
         continue;
@@ -470,7 +501,10 @@ function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
       '> See `.ai/manifest.adf` for the module routing manifest.\n';
   }
 
-  // Re-attach retained environment items
+  // Read current file before overwriting — used to preserve retained sections.
+  const currentContent = fs.readFileSync(fullPath, 'utf-8');
+
+  // Re-attach any freshly-classified STAY items into ## Environment.
   const envItems = stayItems.filter(i =>
     i.classification.reason.includes('Environment') ||
     i.classification.reason.includes('runtime') ||
@@ -488,33 +522,17 @@ function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
     }
   }
 
-  // Read current content to preserve any existing ## Environment items
-  // that were already there (not extracted as bloat)
-  const currentContent = fs.readFileSync(fullPath, 'utf-8');
-  const currentLines = currentContent.split('\n');
-  let inEnv = false;
-  const existingEnvLines: string[] = [];
-  for (const line of currentLines) {
-    if (line.trim() === '## Environment') {
-      inEnv = true;
-      continue;
-    }
-    if (line.startsWith('## ') && line.trim() !== '## Environment') {
-      inEnv = false;
-    }
-    if (inEnv && line.trim().startsWith('- ')) {
-      existingEnvLines.push(line);
-    }
-  }
-
-  // If we didn't extract any stay items but there are existing env lines, preserve them
-  if (envItems.length === 0 && existingEnvLines.length > 0) {
-    const envSection = '\n## Environment\n' + existingEnvLines.join('\n') + '\n';
-    if (pointer.includes('## Environment')) {
-      pointer = pointer.replace(/## Environment[\s\S]*$/, envSection.trim() + '\n');
-    } else {
-      pointer += envSection;
-    }
+  // Re-append all retained sections (Environment, Session *, Protocol, etc.) from
+  // the current file verbatim so that operational protocol blocks survive the rewrite
+  // (#198). readRetainedSections() covers the same heading set as extractBeyondPointer.
+  const retainedBlock = readRetainedSections(currentContent);
+  if (retainedBlock) {
+    // Drop any existing ## Environment block already in `pointer` — it will be
+    // replaced by the verbatim block from the current file (which is fresher).
+    pointer = pointer.replace(/\n## Environment[\s\S]*$/, '');
+    pointer = pointer.trimEnd() + retainedBlock;
+  } else if (envItems.length === 0) {
+    // Nothing retained and no stay items — pointer is clean, nothing to append.
   }
 
   fs.writeFileSync(fullPath, pointer);
