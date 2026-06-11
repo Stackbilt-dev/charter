@@ -303,4 +303,50 @@ describe('vendor bloat pipeline (integration)', () => {
     // Environment should be preserved
     expect(claudeContent).toContain('## Environment');
   });
+
+  it('adf tidy preserves Session/Protocol sections verbatim and does not route them to core.adf (#198)', async () => {
+    const tmp = makeTempDir('session-retain');
+    writeFixtureRepo(tmp);
+    process.chdir(tmp);
+
+    // CLAUDE.md with a thin pointer + operational protocol sections + bloat
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), `# CLAUDE.md
+
+> **DO NOT add rules, constraints, or context to this file.**
+> This file is auto-managed by Charter. All project rules live in \`.ai/\`.
+> New rules should be added to the appropriate \`.ai/*.adf\` module.
+> See \`.ai/manifest.adf\` for the module routing manifest.
+
+## Environment
+- Node 20
+- pnpm 9
+
+## Session Registration
+- Run: register --session
+- Submit the job via session CLI
+
+## Session Protocol
+- Always confirm receipt after submit
+
+## Architecture
+- NEVER bypass the repository layer
+- ALWAYS validate inputs at the boundary
+`);
+
+    // Apply tidy
+    const tidy = await captureJson(adfTidyCommand, jsonOptions, []);
+    const tidyResult = tidy.output as { totalExtracted: number };
+    expect(tidyResult.totalExtracted).toBeGreaterThan(0); // Architecture items extracted
+
+    // Session and Protocol sections must survive in CLAUDE.md
+    const after = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(after).toContain('## Session Registration');
+    expect(after).toContain('## Session Protocol');
+    expect(after).toContain('register --session');
+    expect(after).toContain('confirm receipt');
+
+    // Architecture bloat must NOT survive in CLAUDE.md
+    expect(after).not.toContain('## Architecture');
+    expect(after).not.toContain('bypass the repository layer');
+  });
 });

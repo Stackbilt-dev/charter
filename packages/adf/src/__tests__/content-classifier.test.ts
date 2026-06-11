@@ -185,6 +185,38 @@ describe('meta-comment filtering', () => {
 });
 
 // ============================================================================
+// Heading-level STAY — operational/session-protocol headings (#198)
+// ============================================================================
+
+describe('heading-level STAY for operational headings (#198)', () => {
+  it('returns STAY for imperative items under "Session Registration"', () => {
+    const result = classifyElement(rule('ALWAYS run: stackd register', 'imperative'), 'Session Registration');
+    expect(result.decision).toBe('STAY');
+    expect(result.reason).toContain('Operational');
+  });
+
+  it('returns STAY for items under "Session Protocol"', () => {
+    const result = classifyElement(rule('Submit the job via stackd submit', 'neutral'), 'Session Protocol');
+    expect(result.decision).toBe('STAY');
+  });
+
+  it('returns STAY for items under "AEGIS Task Provenance"', () => {
+    const result = classifyElement(prose('Record provenance in AEGIS.'), 'AEGIS Task Provenance');
+    expect(result.decision).toBe('STAY');
+  });
+
+  it('returns STAY for items under "Receipt" heading', () => {
+    const result = classifyElement(prose('Attach stackd receipt to PR.'), 'Receipt');
+    expect(result.decision).toBe('STAY');
+  });
+
+  it('does NOT suppress migration for regular domain headings', () => {
+    const result = classifyElement(rule('NEVER commit secrets', 'imperative'), 'API Endpoints', triggerMap);
+    expect(result.decision).toBe('MIGRATE');
+  });
+});
+
+// ============================================================================
 // Table-block classification (#51a)
 // ============================================================================
 

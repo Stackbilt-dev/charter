@@ -28,4 +28,5 @@ export {
   type OntologyViolation,
   type OntologyReference,
   type OntologyCheckResult,
+  ONTOLOGY_SENSITIVITY_TIERS,
 } from './ontology';
