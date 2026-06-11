@@ -86,8 +86,8 @@ function makeOptions(target: CompileOptions['target'], extra?: Record<string, st
 describe('buildBanner', () => {
   it('returns an HTML comment for html style', () => {
     const banner = buildBanner('html');
-    expect(banner).toMatch(/^<!--/);
-    expect(banner).toMatch(/-->$/);
+    expect(banner.startsWith('<!--')).toBe(true);
+    expect(banner.endsWith('-->')).toBe(true);
     expect(banner).toContain(COMPILE_BANNER_MARKER);
   });
 
