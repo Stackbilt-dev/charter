@@ -175,9 +175,10 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     ? projectModuleWarnings(aiDir, allModuleGroups)
     : scanModuleWarnings(aiDir, modulesModified);
 
-  // Collect per-item routing trace when --verbose (or always in JSON mode)
+  // Collect per-item routing trace when --verbose, in JSON mode, or in dry-run
+  // (dry-run always shows the plan so users can review before applying — #198)
   let itemRoutes: ItemRoute[] | undefined;
-  if (verbose || options.format === 'json') {
+  if (verbose || options.format === 'json' || dryRun) {
     itemRoutes = [];
     for (const [, sectionGroups] of Object.entries(allModuleGroups)) {
       for (const [, items] of Object.entries(sectionGroups)) {
@@ -310,8 +311,13 @@ function extractBeyondPointer(content: string, fileName: string): string {
 
     // Section detection
     if (trimmed.startsWith('## ')) {
-      // Environment and Module Index are charter-managed retained sections — not bloat (#71)
-      if (trimmed === '## Environment' || trimmed === '## Module Index') {
+      // Charter-managed and operational protocol sections retained in the vendor file (#198).
+      // Environment: WSL/OS runtime config.
+      // Module Index: charter-generated on-demand listing.
+      // Session Start / Session Protocol: operational wiring steps that belong in the
+      //   vendor file as environment context, not in a domain ADF module.
+      const retained = /^## (Environment|Module Index|Session Start|Session Protocol|Session Setup)$/.test(trimmed);
+      if (retained) {
         inEnvironmentSection = true;
         continue;
       } else {
@@ -424,11 +430,12 @@ function formatItemForAdf(item: MigrationItem): string {
   switch (el.type) {
     case 'rule':
       return el.content;
-    case 'code-block':
-      if (el.language === 'bash' || el.language === 'sh') {
-        return `[Build commands] ${el.content.split('\n').filter(l => l.trim()).slice(0, 3).join('; ')}${el.content.split('\n').filter(l => l.trim()).length > 3 ? ' (...)' : ''}`;
-      }
-      return `[${el.language || 'code'}] ${el.content.split('\n')[0]}`;
+    case 'code-block': {
+      // Preserve the full code block so nothing is lost on round-trip (#198).
+      // Wrap in a fenced block so the ADF formatter keeps it as a text body.
+      const lang = el.language || '';
+      return `\`\`\`${lang}\n${el.content}\n\`\`\``;
+    }
     case 'table-row':
       return el.content;
     case 'table-block':
@@ -640,6 +647,18 @@ function printTextResult(result: TidyResult): void {
       .map(([mod, count]) => `${mod} (${count})`)
       .join(', ');
     console.log(`    ${f.file}: ${f.itemsExtracted} items \u2192 ${routes}`);
+  }
+
+  // In dry-run mode always show per-item routing (not just with --verbose) so
+  // users can review the plan before applying (#198).
+  if (result.dryRun && result.itemRoutes && result.itemRoutes.length > 0) {
+    console.log('');
+    console.log('  Routing plan (run without --dry-run to apply, or adjust triggers first):');
+    for (const r of result.itemRoutes) {
+      const preview = r.item.length > 70 ? r.item.slice(0, 67) + '...' : r.item;
+      console.log(`    "${preview}"`);
+      console.log(`      \u2192 ${r.targetModule} / ${r.targetSection}`);
+    }
   }
 
   if (clean.length > 0) {

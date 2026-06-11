@@ -23,15 +23,83 @@ interface DoctorResult {
   }>;
 }
 
+// Known MCP client config file paths (relative to repo root) and the key they look up under.
+const MCP_CLIENT_CONFIGS: Array<{ label: string; configPath: string }> = [
+  { label: 'Claude Code', configPath: '.claude/settings.json' },
+  { label: 'Claude Code (local)', configPath: '.claude/settings.local.json' },
+  { label: 'Generic MCP (.mcp.json)', configPath: '.mcp.json' },
+  { label: 'Cursor', configPath: '.cursor/mcp.json' },
+];
+
+function checkMcpWiring(): DoctorResult['checks'][number] {
+  const wired: string[] = [];
+  const missing: string[] = [];
+
+  for (const { label, configPath } of MCP_CLIENT_CONFIGS) {
+    if (!fs.existsSync(configPath)) continue;
+    try {
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      const hasCharter = parsed?.mcpServers?.charter !== undefined;
+      if (hasCharter) {
+        wired.push(`${label} (${configPath})`);
+      } else {
+        missing.push(`${label} (${configPath}) — no mcpServers.charter entry`);
+      }
+    } catch {
+      missing.push(`${label} (${configPath}) — invalid JSON`);
+    }
+  }
+
+  if (wired.length === 0 && missing.length === 0) {
+    return {
+      name: 'mcp wiring',
+      status: 'WARN',
+      details: 'No MCP client config files found. Run: charter hook print --mcp-config --client claude',
+    };
+  }
+
+  if (wired.length > 0) {
+    const details = `charter serve wired in: ${wired.join('; ')}` +
+      (missing.length > 0 ? `\n    Not wired: ${missing.join('; ')}` : '');
+    return { name: 'mcp wiring', status: 'PASS', details };
+  }
+
+  return {
+    name: 'mcp wiring',
+    status: 'WARN',
+    details: `MCP config file(s) found but charter not wired: ${missing.join('; ')}\n    Run: charter hook print --mcp-config --client claude`,
+  };
+}
+
 export async function doctorCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const checks: DoctorResult['checks'] = [];
   const adfOnly = args.includes('--adf-only');
+  const mcpMode = args.includes('--mcp');
   const configFile = path.join(options.configPath, 'config.json');
   const inGitRepo = isGitRepo();
   const config = loadConfig(options.configPath);
   // Number of files with per-file LOC measurement declared in manifest METRICS;
   // set during manifest parse, used by the source LOC budget coverage check.
   let manifestLocMetricCount = 0;
+
+  // --mcp: focused MCP wiring check only
+  if (mcpMode) {
+    checks.push(checkMcpWiring());
+    const hasWarn = checks.some(c => c.status === 'WARN');
+    const result: DoctorResult = { status: hasWarn ? 'WARN' : 'PASS', checks };
+    if (options.format === 'json') {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`  Doctor status: ${result.status}`);
+      for (const check of result.checks) {
+        const icon = check.status === 'PASS' ? '[ok]' : check.status === 'INFO' ? '[info]' : '[warn]';
+        console.log(`  ${icon} ${check.name}: ${check.details}`);
+      }
+    }
+    if (options.ciMode && hasWarn) return EXIT_CODE.POLICY_VIOLATION;
+    return EXIT_CODE.SUCCESS;
+  }
 
   checks.push({
     name: 'git repository',
