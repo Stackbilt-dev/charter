@@ -225,6 +225,7 @@ charter adf bundle --task "..."          # Merge context for a task
 charter adf evidence --auto-measure      # Validate metric constraints
 charter adf migrate                      # Migrate existing configs
 charter adf compile --target all --write # Render .ai/ to CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
+charter adf patch <file> --ops <json>   # Apply structured patch operations to an ADF file
 charter adf sync --check                 # Verify files match lock
 charter adf fmt .ai/core.adf --write     # Reformat to canonical form
 charter adf metrics recalibrate          # Adjust ceilings to current state
@@ -266,12 +267,6 @@ Color scale: A = brightgreen, B = green, C = yellowgreen, D = yellow, F = red.
 - `1`: policy violation (CI mode)
 - `2`: runtime/usage error
 
-## Resume Guide
-
-Need to resume `context-refresh` roadmap work quickly next session?
-
-- See [docs/context-refresh-resume.md](./docs/context-refresh-resume.md) for current status, shipped commits, Phase 3 remaining scope, and exact validation commands.
-
 ## Modular packages
 
 Charter is built as a monorepo. Individual packages are published to npm and usable independently:
@@ -309,9 +304,3 @@ Apache-2.0. See [LICENSE](./LICENSE).
 ---
 
 Built by [Kurt Overmier](https://github.com/kurtovermier) / [Stackbilt](https://stackbilt.dev)
-
-<p>
-  <a href="https://www.buymeacoffee.com/kurto" target="_blank" rel="noopener noreferrer">
-    <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-5F7FFF?style=for-the-badge&logo=buymeacoffee&logoColor=FFDD00" alt="Buy me a coffee" />
-  </a>
-</p>
