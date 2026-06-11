@@ -17,7 +17,39 @@ import { hasCommits, isGitRepo, runGit } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
 
 type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
+type BadgeColor = 'brightgreen' | 'green' | 'yellowgreen' | 'yellow' | 'orange' | 'red';
 type CategoryStatus = 'strong' | 'partial' | 'weak';
+
+/** shields.io endpoint schema v1 payload. */
+export interface BadgePayload {
+  schemaVersion: 1;
+  label: string;
+  message: string;
+  color: BadgeColor;
+}
+
+/** Map a letter grade to a shields.io color. */
+export function gradeToColor(grade: Grade): BadgeColor {
+  switch (grade) {
+    case 'A': return 'brightgreen';
+    case 'B': return 'green';
+    case 'C': return 'yellowgreen';
+    case 'D': return 'yellow';
+    case 'F': return 'red';
+    // 'E' is not in the Grade union but guarded here for forward-compat
+    default: return 'orange';
+  }
+}
+
+/** Build the shields.io endpoint JSON for a given grade and numeric score. */
+export function buildBadgePayload(grade: Grade, total: number): BadgePayload {
+  return {
+    schemaVersion: 1,
+    label: 'agent context',
+    message: `${grade} (${total})`,
+    color: gradeToColor(grade),
+  };
+}
 
 interface ScoreCategory {
   id: 'agent-config' | 'grounding' | 'architecture' | 'testing' | 'governance' | 'freshness';
@@ -263,9 +295,38 @@ export async function scoreCommand(options: CLIOptions, args: string[] = []): Pr
     return EXIT_CODE.SUCCESS;
   }
 
+  const badgeMode = args.includes('--badge');
+  const writeMode = args.includes('--write');
+
   const aiDir = normalizeAiDirInput(getFlag(args, '--ai-dir') || '.ai');
   const inventory = collectRepoInventory();
   const report = buildScoreReport(inventory, aiDir);
+
+  if (badgeMode) {
+    const badge = buildBadgePayload(report.score.grade, report.score.total);
+    const badgeJson = JSON.stringify(badge, null, 2);
+
+    // Always print to stdout (serves as the shields.io endpoint response)
+    console.log(badgeJson);
+
+    if (writeMode) {
+      const charterDir = path.resolve('.charter');
+      try {
+        if (!fs.existsSync(charterDir)) {
+          fs.mkdirSync(charterDir, { recursive: true });
+        }
+        const outPath = path.join(charterDir, 'badge.json');
+        fs.writeFileSync(outPath, badgeJson + '\n', 'utf8');
+      } catch (err) {
+        process.stderr.write(
+          `charter score: failed to write .charter/badge.json: ${(err as Error).message}\n`
+        );
+        return EXIT_CODE.RUNTIME_ERROR;
+      }
+    }
+
+    return EXIT_CODE.SUCCESS;
+  }
 
   if (options.format === 'json') {
     console.log(JSON.stringify(report, null, 2));
@@ -1503,12 +1564,15 @@ function printHelp(): void {
   console.log('');
   console.log('  Usage:');
   console.log('    charter score [--ai-dir <dir>] [--format text|json] [--ci]');
+  console.log('    charter score --badge [--write]');
   console.log('');
   console.log('  Deterministic local AI-readiness audit for the current repo.');
   console.log('  Scores agent config, grounding, architecture, testing, governance, and freshness.');
   console.log('');
   console.log('  --ai-dir <dir>: Override the ADF directory (default: .ai)');
   console.log(`  --ci: exit 1 when score is below ${CI_MIN_SCORE}`);
+  console.log('  --badge: print shields.io endpoint JSON to stdout instead of the full report');
+  console.log('  --badge --write: also write the badge JSON to .charter/badge.json');
   console.log('');
 }
 
