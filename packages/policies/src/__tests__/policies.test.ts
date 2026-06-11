@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import { detectRepoConfig } from '../detect';
 import { patchFloatingActionPins } from '../patch';
 import { generateCallerWorkflow, generateCharterConfigPatch } from '../generate';
-import { applyPolicies } from '../index';
+import { applyPolicies, PolicyGovernanceGate } from '../index';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -227,7 +227,7 @@ describe('applyPolicies', () => {
     expect(result.alreadyCompliant).toBe(false);
   });
 
-  it('already-compliant: no changes, alreadyCompliant true', async () => {
+  it('already-compliant: no changes, alreadyCompliant true (#200 idempotency)', async () => {
     const dir = makeTempRepo({
       '.github/workflows/supply-chain.yml': 'name: SC',
       '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4\n`,
@@ -244,5 +244,103 @@ describe('applyPolicies', () => {
     expect(result.alreadyCompliant).toBe(true);
     expect(result.pinsPatched).toBe(0);
     expect(result.supplyChainWorkflowAdded).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PolicyGovernanceGate — authority-gated governance contract (#200)
+// ---------------------------------------------------------------------------
+
+describe('PolicyGovernanceGate', () => {
+  const GATE_OPTS = { fixPins: true, policyRepoRef: 'testref123' };
+
+  it('propose() returns a proposal without writing files', async () => {
+    const dir = makeTempRepo({
+      '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@v4\n`,
+    });
+    const gate = new PolicyGovernanceGate(GATE_OPTS);
+    const proposal = await gate.propose(dir);
+
+    expect(proposal.alreadyCompliant).toBe(false);
+    expect(proposal.delta.length).toBeGreaterThan(0);
+    expect(proposal.id).toMatch(/^[0-9a-f]{16}$/);
+    expect(proposal.repoPath).toBe(dir);
+    // Gate must not have written anything
+    expect(fs.existsSync(path.join(dir, '.github/workflows/supply-chain.yml'))).toBe(false);
+  });
+
+  it('propose() is idempotent — same repo state yields same proposal id', async () => {
+    const dir = makeTempRepo({
+      '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@v4\n`,
+    });
+    const gate = new PolicyGovernanceGate(GATE_OPTS);
+    const first = await gate.propose(dir);
+    const second = await gate.propose(dir);
+    expect(first.id).toBe(second.id);
+    expect(first.delta).toEqual(second.delta);
+  });
+
+  it('commit(approve) writes files and returns a receipt', async () => {
+    const dir = makeTempRepo({
+      '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@v4\n`,
+    });
+    const gate = new PolicyGovernanceGate(GATE_OPTS);
+    const proposal = await gate.propose(dir);
+    const receipt = await gate.commit(proposal, 'approve');
+
+    expect(receipt.proposalId).toBe(proposal.id);
+    expect(receipt.decision).toBe('approve');
+    expect(typeof receipt.committedAt).toBe('number');
+    expect(receipt.committedAt).toBeGreaterThan(0);
+    // Files must have been written
+    expect(fs.existsSync(path.join(dir, '.github/workflows/supply-chain.yml'))).toBe(true);
+  });
+
+  it('commit(dismiss) emits a receipt but does NOT write files', async () => {
+    const dir = makeTempRepo({
+      '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@v4\n`,
+    });
+    const gate = new PolicyGovernanceGate(GATE_OPTS);
+    const proposal = await gate.propose(dir);
+    const receipt = await gate.commit(proposal, 'dismiss');
+
+    expect(receipt.decision).toBe('dismiss');
+    expect(receipt.proposalId).toBe(proposal.id);
+    // Gate must have left state unchanged
+    expect(fs.existsSync(path.join(dir, '.github/workflows/supply-chain.yml'))).toBe(false);
+  });
+
+  it('commit(override) applies changes even when alreadyCompliant', async () => {
+    const dir = makeTempRepo({
+      '.github/workflows/supply-chain.yml': 'name: SC',
+      '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@${FAKE_SHA} # v4\n`,
+      '.charter/config.json': JSON.stringify({
+        drift: { enabled: true, include: ['.github/workflows/*.yml'] },
+      }),
+      '.charter/patterns/floating-action-pins.json': '{}',
+    });
+    const gate = new PolicyGovernanceGate(GATE_OPTS);
+    const proposal = await gate.propose(dir);
+    expect(proposal.alreadyCompliant).toBe(true);
+
+    // override should still emit a receipt without throwing
+    const receipt = await gate.commit(proposal, 'override');
+    expect(receipt.decision).toBe('override');
+    expect(receipt.proposalId).toBe(proposal.id);
+  });
+
+  it('alreadyCompliant proposal has an empty delta', async () => {
+    const dir = makeTempRepo({
+      '.github/workflows/supply-chain.yml': 'name: SC',
+      '.github/workflows/ci.yml': `steps:\n  - uses: actions/checkout@${FAKE_SHA} # v4\n`,
+      '.charter/config.json': JSON.stringify({
+        drift: { enabled: true, include: ['.github/workflows/*.yml'] },
+      }),
+      '.charter/patterns/floating-action-pins.json': '{}',
+    });
+    const gate = new PolicyGovernanceGate(GATE_OPTS);
+    const proposal = await gate.propose(dir);
+    expect(proposal.alreadyCompliant).toBe(true);
+    expect(proposal.delta).toHaveLength(0);
   });
 });

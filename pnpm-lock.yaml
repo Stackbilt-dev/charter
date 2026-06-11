@@ -104,7 +104,11 @@ importers:
         specifier: workspace:*
         version: link:../types
 
-  packages/policies: {}
+  packages/policies:
+    dependencies:
+      '@stackbilt/types':
+        specifier: workspace:*
+        version: link:../types
 
   packages/surface:
     dependencies:
