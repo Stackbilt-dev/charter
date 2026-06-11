@@ -13,6 +13,7 @@ import { parseAdf, parseManifest, stripCharterSentinels, evaluateLocBudgets, mat
 import type { LocBudgetRule } from '@stackbilt/adf';
 import { isGitRepo } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
+import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
 
 interface DoctorResult {
   status: 'PASS' | 'WARN';
@@ -293,6 +294,9 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       }
 
       for (const { file, content } of pointerFiles) {
+        // Compile-output files contain ADF content by design — skip bloat scan.
+        if (content.includes(COMPILE_BANNER_MARKER)) continue;
+
         // Strip charter-managed sentinel blocks before scanning for bloat/keywords.
         const strippedContent = stripCharterSentinels(content);
         const lines = strippedContent.split('\n');

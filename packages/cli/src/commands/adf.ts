@@ -11,6 +11,7 @@ import {
   formatAdf,
   applyPatches,
   CANONICAL_KEY_ORDER,
+  COMPILE_BANNER_MARKER,
 } from '@stackbilt/adf';
 import type { AdfDocument, PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -250,6 +251,7 @@ interface AdfInitResult {
 
 /** Strings that identify an agent config file as a thin pointer to .ai/. */
 export const POINTER_MARKERS = [
+  COMPILE_BANNER_MARKER,
   'Do not duplicate ADF rules here',
   'Do not duplicate rules from .ai/',
   'Do not add stack rules here',
