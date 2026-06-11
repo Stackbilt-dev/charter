@@ -8,6 +8,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Added
 
+- **`charter score --badge`** (`score.ts`): New output mode that prints a [shields.io endpoint-schema](https://shields.io/badges/endpoint-badge) JSON payload to stdout (`{"schemaVersion":1,"label":"agent context","message":"A (92)","color":"brightgreen"}`). Grade-to-color mapping: A=brightgreen, B=green, C=yellowgreen, D=yellow, F=red. Combine with `--badge --write` to persist the payload to `.charter/badge.json` so it can be served via `raw.githubusercontent.com` as a live shields.io endpoint badge. Additive only — no existing flag, output, or exit-code behavior is changed. Exports `buildBadgePayload`, `gradeToColor`, and the `BadgePayload` type for downstream use.
+
 ## [1.0.0] - 2026-05-23
 
 **Breaking:** `run`, `architect`, `scaffold`, and `login` commands removed from `@stackbilt/cli`. The `stackbilt` binary alias is also removed. These commands have moved to [`@stackbilt/build`](https://www.npmjs.com/package/@stackbilt/build) — install it with `npm install -g @stackbilt/build`. Migration tracked in [RFC #112](https://github.com/Stackbilt-dev/charter/issues/112).

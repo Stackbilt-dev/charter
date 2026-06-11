@@ -228,6 +228,32 @@ Deterministic codebase analysis — no LLM calls, zero runtime dependencies. `bl
 
 All commands support `--format json` with `nextActions` hints for agent workflows.
 
+### Score badge
+
+`charter score` can emit a [shields.io endpoint](https://shields.io/badges/endpoint-badge) JSON payload so you can display your repo's AI-readiness grade as a live badge in your README.
+
+```bash
+# Print shields.io endpoint JSON to stdout
+charter score --badge
+
+# Also write to .charter/badge.json for serving via raw.githubusercontent.com
+charter score --badge --write
+```
+
+Once `.charter/badge.json` is committed and pushed, add this to your README (replace `<org>`, `<repo>`, and `<branch>`):
+
+```markdown
+[![Agent context](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/<org>/<repo>/<branch>/.charter/badge.json)](https://github.com/Stackbilt-dev/charter)
+```
+
+Example output for a score of 92 (grade A):
+
+```json
+{"schemaVersion":1,"label":"agent context","message":"A (92)","color":"brightgreen"}
+```
+
+Color scale: A = brightgreen, B = green, C = yellowgreen, D = yellow, F = red.
+
 ### Exit codes
 
 - `0`: success

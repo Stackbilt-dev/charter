@@ -4,7 +4,8 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
 import { run } from '../index';
-import { scoreCommand } from '../commands/score';
+import { scoreCommand, buildBadgePayload, gradeToColor } from '../commands/score';
+import type { BadgePayload } from '../commands/score';
 
 const baseOptions: CLIOptions = {
   configPath: '.charter',
@@ -281,6 +282,118 @@ Hostname with port: localhost:3000
 
     const broken: string[] = report.signals.grounding.pathReferences.broken;
     expect(broken).toContain('docs/runbooks');
+  });
+});
+
+describe('badge helpers', () => {
+  it('gradeToColor maps every grade to the correct shields.io color', () => {
+    expect(gradeToColor('A')).toBe('brightgreen');
+    expect(gradeToColor('B')).toBe('green');
+    expect(gradeToColor('C')).toBe('yellowgreen');
+    expect(gradeToColor('D')).toBe('yellow');
+    expect(gradeToColor('F')).toBe('red');
+  });
+
+  it('buildBadgePayload produces valid shields.io endpoint JSON shape', () => {
+    const badge: BadgePayload = buildBadgePayload('A', 92);
+    expect(badge).toEqual({
+      schemaVersion: 1,
+      label: 'agent context',
+      message: 'A (92)',
+      color: 'brightgreen',
+    });
+  });
+
+  it('buildBadgePayload encodes all grades correctly', () => {
+    const cases: Array<[Parameters<typeof buildBadgePayload>[0], number, string, string]> = [
+      ['A', 95, 'A (95)', 'brightgreen'],
+      ['B', 82, 'B (82)', 'green'],
+      ['C', 73, 'C (73)', 'yellowgreen'],
+      ['D', 62, 'D (62)', 'yellow'],
+      ['F', 40, 'F (40)', 'red'],
+    ];
+    for (const [grade, score, message, color] of cases) {
+      const badge = buildBadgePayload(grade, score);
+      expect(badge.message).toBe(message);
+      expect(badge.color).toBe(color);
+    }
+  });
+});
+
+describe('scoreCommand --badge', () => {
+  it('prints shields.io JSON to stdout and returns 0', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'badge-test', version: '1.0.0' }, null, 2));
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg?: unknown) => { logs.push(String(msg ?? '')); });
+
+    const exitCode = await scoreCommand(baseOptions, ['--badge']);
+
+    expect(exitCode).toBe(0);
+    expect(logs.length).toBeGreaterThan(0);
+    const badge = JSON.parse(logs[0]) as BadgePayload;
+    expect(badge.schemaVersion).toBe(1);
+    expect(badge.label).toBe('agent context');
+    expect(typeof badge.message).toBe('string');
+    expect(['brightgreen', 'green', 'yellowgreen', 'yellow', 'orange', 'red']).toContain(badge.color);
+  });
+
+  it('--badge --write writes .charter/badge.json and prints to stdout', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'badge-write-test', version: '1.0.0' }, null, 2));
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg?: unknown) => { logs.push(String(msg ?? '')); });
+
+    const exitCode = await scoreCommand(baseOptions, ['--badge', '--write']);
+
+    expect(exitCode).toBe(0);
+
+    // stdout output
+    expect(logs.length).toBeGreaterThan(0);
+    const stdoutBadge = JSON.parse(logs[0]) as BadgePayload;
+    expect(stdoutBadge.schemaVersion).toBe(1);
+
+    // file written
+    const badgePath = path.join(tmp, '.charter', 'badge.json');
+    expect(fs.existsSync(badgePath)).toBe(true);
+    const fileBadge = JSON.parse(fs.readFileSync(badgePath, 'utf8')) as BadgePayload;
+    expect(fileBadge).toEqual(stdoutBadge);
+  });
+
+  it('--badge does not affect regular --format json or --ci behavior', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'no-badge', version: '1.0.0' }, null, 2));
+
+    // Without --badge, format json still outputs full report
+    const { exitCode, report } = await captureJson(() => scoreCommand(baseOptions, []));
+    expect(exitCode).toBe(0);
+    expect(report.score).toBeDefined();
+    expect(report.categories).toBeDefined();
+  });
+
+  it('--badge --write creates .charter/ directory if it does not exist', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'mkdir-test', version: '1.0.0' }, null, 2));
+
+    // Ensure .charter does not exist
+    const charterDir = path.join(tmp, '.charter');
+    expect(fs.existsSync(charterDir)).toBe(false);
+
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitCode = await scoreCommand(baseOptions, ['--badge', '--write']);
+
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(path.join(charterDir, 'badge.json'))).toBe(true);
   });
 });
 
