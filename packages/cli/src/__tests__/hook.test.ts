@@ -105,4 +105,66 @@ describe('hookCommand', () => {
   it('hook print without --claude throws', async () => {
     await expect(hookCommand(baseOptions, ['print'])).rejects.toThrow('hook print requires --claude');
   });
+
+  describe('hook print --mcp-config', () => {
+    it('returns 0 and emits mcpServers JSON to stdout', async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+        logs.push(args.map(String).join(' '));
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const exitCode = await hookCommand(baseOptions, ['print', '--mcp-config']);
+      expect(exitCode).toBe(0);
+
+      const parsed = JSON.parse(logs.join('\n')) as { mcpServers: { charter: { command: string; args: string[] } } };
+      expect(parsed.mcpServers.charter.command).toBe('charter');
+      expect(parsed.mcpServers.charter.args).toEqual(['serve']);
+    });
+
+    it('defaults to --client claude when --client is absent', async () => {
+      const errors: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(' '));
+      });
+
+      await hookCommand(baseOptions, ['print', '--mcp-config']);
+      expect(errors.join('\n')).toContain('.claude/settings.json');
+    });
+
+    it('--client cursor emits .mcp.json hint', async () => {
+      const errors: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(' '));
+      });
+
+      await hookCommand(baseOptions, ['print', '--mcp-config', '--client', 'cursor']);
+      expect(errors.join('\n')).toContain('.mcp.json');
+    });
+
+    it('--ai-dir adds --ai-dir to server args', async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+        logs.push(args.map(String).join(' '));
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await hookCommand(baseOptions, ['print', '--mcp-config', '--ai-dir', 'custom/ai']);
+      const parsed = JSON.parse(logs.join('\n')) as { mcpServers: { charter: { args: string[] } } };
+      expect(parsed.mcpServers.charter.args).toEqual(['serve', '--ai-dir', 'custom/ai']);
+    });
+
+    it('unknown --client value falls back to claude', async () => {
+      const errors: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(' '));
+      });
+
+      await hookCommand(baseOptions, ['print', '--mcp-config', '--client', 'vscode']);
+      expect(errors.join('\n')).toContain('.claude/settings.json');
+    });
+  });
 });

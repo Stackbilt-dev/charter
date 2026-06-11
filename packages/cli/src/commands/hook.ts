@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { runGit, isGitRepo, getGitErrorMessage } from '../git-helpers';
+import { getFlag } from '../flags';
 
 interface HookInstallResult {
   status: 'INSTALLED' | 'SKIPPED';
@@ -113,6 +114,24 @@ export function printClaudeHookConfig(): void {
   console.log(JSON.stringify(CLAUDE_SESSION_HOOK_CONFIG, null, 2));
 }
 
+// MCP server entry shapes for each supported client (#191)
+const MCP_CLIENTS = ['claude', 'codex', 'cursor'] as const;
+type McpClient = typeof MCP_CLIENTS[number];
+
+function printMcpConfig(client: McpClient, aiDir: string): void {
+  const serverEntry = {
+    command: 'charter',
+    args: aiDir !== '.ai' ? ['serve', '--ai-dir', aiDir] : ['serve'],
+  };
+  const snippet = { mcpServers: { charter: serverEntry } };
+  console.log(JSON.stringify(snippet, null, 2));
+  if (client === 'claude') {
+    console.error('  Paste the mcpServers entry into .claude/settings.json (or settings.local.json).');
+  } else {
+    console.error('  Paste the mcpServers entry into .mcp.json at the repo root.');
+  }
+}
+
 export async function hookCommand(options: CLIOptions, args: string[]): Promise<number> {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     printHelp();
@@ -121,8 +140,19 @@ export async function hookCommand(options: CLIOptions, args: string[]): Promise<
 
   if (args[0] === 'print') {
     const wantClaude = args.includes('--claude');
+    const wantMcpConfig = args.includes('--mcp-config');
+
+    if (wantMcpConfig) {
+      const clientIdx = args.indexOf('--client');
+      const clientFlag = clientIdx !== -1 ? args[clientIdx + 1] : undefined;
+      const client: McpClient = MCP_CLIENTS.includes(clientFlag as McpClient) ? clientFlag as McpClient : 'claude';
+      const aiDir = getFlag(args, '--ai-dir') || '.ai';
+      printMcpConfig(client, aiDir);
+      return EXIT_CODE.SUCCESS;
+    }
+
     if (!wantClaude) {
-      throw new CLIError('hook print requires --claude.');
+      throw new CLIError('hook print requires --claude or --mcp-config.');
     }
     printClaudeHookConfig();
     return EXIT_CODE.SUCCESS;
@@ -284,6 +314,7 @@ function printHelp(): void {
   console.log('    charter hook install --commit-msg [--force]');
   console.log('    charter hook install --pre-commit [--force]');
   console.log('    charter hook print --claude');
+  console.log('    charter hook print --mcp-config [--client claude|codex|cursor] [--ai-dir <dir>]');
   console.log('');
   console.log('  --commit-msg: Install a git commit-msg hook that normalizes Governed-By and');
   console.log('  Resolves-Request trailers using git interpret-trailers.');
@@ -296,5 +327,12 @@ function printHelp(): void {
   console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');
   console.log('  Paste into .claude/settings.json → hooks.UserPromptSubmit to auto-refresh');
   console.log('  context at session start so charter_context returns live state.');
+  console.log('');
+  console.log('  print --mcp-config: Print the MCP server JSON config snippet for wiring');
+  console.log('  charter serve into an AI client. Defaults to --client claude.');
+  console.log('  --client claude  → mcpServers entry for .claude/settings.json');
+  console.log('  --client codex   → mcpServers entry for .mcp.json');
+  console.log('  --client cursor  → mcpServers entry for .mcp.json');
+  console.log('  --ai-dir <dir>   → pass-through for non-default .ai dir locations.');
   console.log('');
 }
