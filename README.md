@@ -17,7 +17,7 @@ Detects your stack, scaffolds `.ai/`, migrates existing CLAUDE.md / `.cursorrule
 
 ### The spec has a neutral home
 
-ADF is an open specification at [adf-spec/adf](https://github.com/adf-spec/adf) (Apache-2.0), in a vendor-neutral org with a conformance suite. Charter is the reference implementation.
+ADF is an open specification at [adf-spec/adf](https://github.com/adf-spec/adf) (Apache-2.0), in a vendor-neutral org; a conformance suite is in progress there. Charter is the reference implementation.
 
 ### Compiles to every vendor format
 
