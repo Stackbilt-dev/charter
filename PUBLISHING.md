@@ -39,6 +39,8 @@ npm whoami
 ```bash
 pnpm install
 pnpm run clean
+pnpm run docs:check
+pnpm run docs:oss:check
 pnpm run typecheck
 pnpm run build
 pnpm run test

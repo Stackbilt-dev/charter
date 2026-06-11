@@ -4,6 +4,8 @@ import process from 'node:process';
 
 const CHECK_MODE = process.argv.includes('--check');
 const WRITE_MODE = process.argv.includes('--write');
+const ALLOW_MISSING_CONFIG = process.argv.includes('--allow-missing-config');
+const ALLOW_MISSING_TARGET_ROOT = process.argv.includes('--allow-missing-target-root');
 const CONFIG_FLAG_INDEX = process.argv.indexOf('--config');
 const CONFIG_ARG = CONFIG_FLAG_INDEX >= 0 ? process.argv[CONFIG_FLAG_INDEX + 1] : null;
 
@@ -13,12 +15,21 @@ if (CONFIG_FLAG_INDEX >= 0 && (!CONFIG_ARG || CONFIG_ARG.startsWith('--'))) {
 }
 
 if (!CHECK_MODE && !WRITE_MODE) {
-  console.error('Usage: node scripts/docs-sync.mjs --check|--write [--config <path>]');
+  console.error('Usage: node scripts/docs-sync.mjs --check|--write [--config <path>] [--allow-missing-config] [--allow-missing-target-root]');
   process.exit(2);
 }
 
 const cwd = process.cwd();
 const configPath = CONFIG_ARG ? path.resolve(cwd, CONFIG_ARG) : path.join(cwd, '.docsync.json');
+
+async function exists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function readJson(filePath) {
   const raw = await fs.readFile(filePath, 'utf8');
@@ -63,12 +74,22 @@ async function loadSnippet(source, snippetFile) {
 }
 
 async function main() {
+  if (ALLOW_MISSING_CONFIG && !(await exists(configPath))) {
+    console.log(`docs-sync: skipped; config not found at ${path.relative(cwd, configPath) || configPath}`);
+    return;
+  }
+
   const config = await readJson(configPath);
   const configDir = path.dirname(configPath);
   const sourceRoot = path.resolve(configDir, config.source.localRoot);
   const targetRoot = path.resolve(configDir, config.target?.root ?? '.');
   const failures = [];
   const updates = [];
+
+  if (ALLOW_MISSING_TARGET_ROOT && !(await exists(targetRoot))) {
+    console.log(`docs-sync: skipped; target root not found at ${path.relative(cwd, targetRoot) || targetRoot}`);
+    return;
+  }
 
   for (const mapping of config.mappings) {
     const targetPath = path.resolve(targetRoot, mapping.targetFile);
