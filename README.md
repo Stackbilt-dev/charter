@@ -292,7 +292,12 @@ Charter is built as a monorepo. Individual packages are published to npm and usa
 ## Development
 
 ```bash
-pnpm install && pnpm run build && pnpm run test
+pnpm install
+pnpm run docs:check
+pnpm run docs:oss:check
+pnpm run typecheck
+pnpm run build
+pnpm run test
 ```
 
 Full publish workflow: see [PUBLISHING.md](./PUBLISHING.md).

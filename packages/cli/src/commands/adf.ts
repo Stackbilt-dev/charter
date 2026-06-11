@@ -29,6 +29,7 @@ import {
   NAMED_MODULE_SCAFFOLDS,
   NAMED_MODULE_DEFAULT_TRIGGERS,
 } from './adf-named-scaffolds';
+import { PatchOperationArraySchema } from '../schemas/patch-ops';
 
 // Re-export named-scaffold registry for programmatic consumers and tests.
 export {
@@ -634,16 +635,23 @@ function adfPatch(options: CLIOptions, args: string[]): number {
 
   const rawOps = opsFile ? readFlagFile(opsFile, '--ops-file') : opsJson!;
 
-  let ops: PatchOperation[];
+  let parsed: unknown;
   try {
-    ops = JSON.parse(rawOps);
-    if (!Array.isArray(ops)) {
-      throw new Error('ops must be an array');
-    }
+    parsed = JSON.parse(rawOps);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new CLIError(`Invalid --ops JSON: ${msg}`);
   }
+
+  // Validate structure at the boundary so malformed ops surface as a clean
+  // error here rather than crashing the before-capture pass below.
+  const validation = PatchOperationArraySchema.safeParse(parsed);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    const where = issue?.path.length ? ` at ops[${issue.path.join('.')}]` : '';
+    throw new CLIError(`Invalid --ops operation${where}: ${issue?.message ?? 'does not match a known patch operation'}`);
+  }
+  const ops: PatchOperation[] = validation.data;
 
   const input = fs.readFileSync(filePath, 'utf-8');
   const doc = parseAdf(input);

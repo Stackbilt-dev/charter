@@ -62,7 +62,8 @@
     "@stackbilt/policies": "workspace:*",
     "@stackbilt/surface": "workspace:*",
     "@stackbilt/types": "workspace:*",
-    "@stackbilt/validate": "workspace:*"
+    "@stackbilt/validate": "workspace:*",
+    "zod": "^3.24.1"
   },
   "license": "Apache-2.0",
   "author": "Stackbilt LLC"

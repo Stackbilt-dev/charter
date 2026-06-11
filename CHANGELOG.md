@@ -18,6 +18,14 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
   - On-demand modules are listed in the output (path + triggers) but their bodies are NOT inlined — preserving progressive disclosure.
   - Pure compiler core in `@stackbilt/adf` (`compiler.ts`) following the Zod-core-out architecture; Zod validation at the CLI boundary in `adf-compile.ts`.
 
+### Changed
+
+- Docs sync validation now supports standalone OSS checkouts: `docs:check` skips an absent local `.docsync.json`, while `docs:oss:check` skips an absent sibling docs-site checkout instead of failing before source validation can run.
+
+### Fixed
+
+- `papers-lint` metadata for `AGENT_DX_FEEDBACK_008.md` now uses the required YAML-list shape for tracked issues.
+
 ## [1.0.0] - 2026-05-23
 
 **Breaking:** `run`, `architect`, `scaffold`, and `login` commands removed from `@stackbilt/cli`. The `stackbilt` binary alias is also removed. These commands have moved to [`@stackbilt/build`](https://www.npmjs.com/package/@stackbilt/build) — install it with `npm install -g @stackbilt/build`. Migration tracked in [RFC #112](https://github.com/Stackbilt-dev/charter/issues/112).

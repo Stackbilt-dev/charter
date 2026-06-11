@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
-import { runGit, isGitRepo } from '../git-helpers';
+import { runGit, isGitRepo, getGitErrorMessage } from '../git-helpers';
 
 interface HookInstallResult {
   status: 'INSTALLED' | 'SKIPPED';
@@ -183,12 +183,9 @@ function installCommitMsgHook(force: boolean): HookInstallResult {
         reason: 'existing commit-msg hook is not managed by Charter',
       };
     }
-  } else {
-    fs.mkdirSync(hooksDir, { recursive: true });
   }
 
-  fs.writeFileSync(hookPath, COMMIT_MSG_HOOK_CONTENT);
-  setExecutableBit(hookPath);
+  writeHookFile(hookPath, hooksDir, COMMIT_MSG_HOOK_CONTENT, exists);
 
   return {
     status: 'INSTALLED',
@@ -214,17 +211,32 @@ function installPreCommitHook(force: boolean): HookInstallResult {
         reason: 'existing pre-commit hook is not managed by Charter',
       };
     }
-  } else {
-    fs.mkdirSync(hooksDir, { recursive: true });
   }
 
-  fs.writeFileSync(hookPath, PRE_COMMIT_HOOK_CONTENT);
-  setExecutableBit(hookPath);
+  writeHookFile(hookPath, hooksDir, PRE_COMMIT_HOOK_CONTENT, exists);
 
   return {
     status: 'INSTALLED',
     hookPath: normalizedHookPath,
   };
+}
+
+/**
+ * Create the hooks dir (when new) and write the hook file. Any filesystem
+ * failure (missing/unwritable hooks dir, permissions) surfaces as a clean
+ * CLIError rather than a raw Error escaping to the top-level handler.
+ */
+function writeHookFile(hookPath: string, hooksDir: string, content: string, exists: boolean): void {
+  try {
+    if (!exists) {
+      fs.mkdirSync(hooksDir, { recursive: true });
+    }
+    fs.writeFileSync(hookPath, content);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new CLIError(`Could not write git hook to ${hookPath.replace(/\\/g, '/')}: ${msg}`);
+  }
+  setExecutableBit(hookPath);
 }
 
 function resolveHooksDir(): string {
@@ -233,7 +245,12 @@ function resolveHooksDir(): string {
     return path.resolve(configuredPath.trim());
   }
 
-  const gitDir = runGit(['rev-parse', '--git-dir']).trim();
+  let gitDir: string;
+  try {
+    gitDir = runGit(['rev-parse', '--git-dir']).trim();
+  } catch (err) {
+    throw new CLIError(`Could not resolve git hooks directory: ${getGitErrorMessage(err)}`);
+  }
   return path.resolve(gitDir, 'hooks');
 }
 

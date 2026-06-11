@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { CLIError } from '../index';
-import { loadCharterContextSnapshot } from '../commands/serve';
+import { loadCharterContextSnapshot, serveCommand } from '../commands/serve';
 
 const contextRefreshCommandMock = vi.hoisted(() => vi.fn());
 vi.mock('../commands/context-refresh', () => ({
@@ -100,5 +100,31 @@ describe('loadCharterContextSnapshot', () => {
     expect(fs.existsSync(path.join(aiDir, 'context.snapshot.json'))).toBe(true);
     expect(fs.existsSync(path.join(aiDir, 'context.adf'))).toBe(true);
     expect((result.snapshot as { version: number }).version).toBe(1);
+  });
+});
+
+describe('serveCommand startup guards', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('names the resolved --ai-dir path when the directory is missing', async () => {
+    const missing = path.join(makeTempDir(), 'does-not-exist');
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(serveCommand(baseOptions, ['--ai-dir', missing])).rejects.toMatchObject({
+      name: 'CLIError',
+      message: expect.stringContaining(path.resolve(missing)),
+    });
+  });
+
+  it('names the resolved manifest path when manifest.adf is missing', async () => {
+    const dir = makeTempDir(); // exists, but contains no manifest.adf
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(serveCommand(baseOptions, ['--ai-dir', dir])).rejects.toMatchObject({
+      name: 'CLIError',
+      message: expect.stringContaining(path.join(path.resolve(dir), 'manifest.adf')),
+    });
   });
 });
