@@ -1,12 +1,13 @@
 # Charter
 
+[![Charter score](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FStackbilt-dev%2Fcharter%2Fmain%2F.charter%2Fbadge.json&style=for-the-badge)](#the-repo-grades-itself)
 [![npm version](https://img.shields.io/npm/v/@stackbilt/cli?label=charter&color=5F7FFF&style=for-the-badge)](https://www.npmjs.com/package/@stackbilt/cli)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](./LICENSE)
 [![Discord](https://img.shields.io/discord/1485683351393407006?color=7289da&label=Discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/aJmE8wmQDS)
 
-## Local-first AI agent governance for your repo.
+## Modular, trigger-loaded context for AI coding agents.
 
-Tell your AI agents what they can and can't do. Charter gives you modular context loading (ADF), measurable ceilings on every module, commit-time validation, and pre-merge blast-radius analysis. Zero product dependencies. No network calls. No credentials stored.
+You write 10,000 tokens of flat rules into CLAUDE.md or AGENTS.md. Your agent loads all of it on every task, half gets ignored, and you don't know which half. Charter replaces the one giant file with **ADF (Attention-Directed Format)**: small modules in `.ai/`, loaded on demand by trigger keywords, so the agent gets exactly the rules each task needs. Local-first — zero product dependencies, no network calls, no credentials stored.
 
 ```bash
 npx @stackbilt/cli bootstrap --yes
@@ -14,9 +15,31 @@ npx @stackbilt/cli bootstrap --yes
 
 Detects your stack, scaffolds `.ai/`, migrates existing CLAUDE.md / `.cursorrules` / GEMINI.md into on-demand modules with trigger keywords.
 
+### The spec has a neutral home
+
+ADF is an open specification at [adf-spec/adf](https://github.com/adf-spec/adf) (Apache-2.0), in a vendor-neutral org; a conformance suite is in progress there. Charter is the reference implementation.
+
+### Compiles to every vendor format
+
+```bash
+charter adf compile --target claude        # render CLAUDE.md to stdout
+charter adf compile --target all --write   # write CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
+charter adf compile --target all --check   # CI drift gate: exit 1 if any vendor file is stale
+```
+
+ADF is the source; vendor files are build artifacts. Edit `.ai/` once, compile for Claude Code, Codex, Cursor, and Gemini. `--check` in CI catches hand-edits to generated files before they drift.
+
+### The repo grades itself
+
+```bash
+charter score                  # letter-grade AI-readiness audit: agent config, grounding, architecture, testing, governance, freshness
+charter score --badge --write  # shields.io endpoint payload -> .charter/badge.json
+```
+
+The badge at the top of this README is Charter scoring its own repo, served live from [`.charter/badge.json`](./.charter/badge.json) on `main`. The scoring is deterministic and unforgiving — broken path references and missing vendor files cost points, ours included.
+
 ## What you get
 
-- **Modular agent context (ADF)** — replace monolithic CLAUDE.md with trigger-driven on-demand module loading. Agents pull only the rules each task needs.
 - **Measurable constraints** — per-module metric ceilings (LOC, complexity, bloat) validated at commit time and in CI.
 - **Codebase analysis** — `charter blast` reverse-dependency graphs, `charter surface` route/schema fingerprints. Deterministic, zero runtime deps.
 - **Drift + audit** — anti-pattern scans, commit governance, CI-ready exit codes.
@@ -87,19 +110,9 @@ This is a conflict in your existing dependency tree that npm surfaces while re-r
 
 `pnpm` and `yarn` use a more permissive resolver and generally install without this flag.
 
-## AI agent governance with ADF
+## How ADF works
 
-Charter replaces monolithic agent config files (CLAUDE.md, .cursorrules, GEMINI.md) with **ADF (Attention-Directed Format)** -- a modular context system where agents load only the rules they need.
-
-**The problem:** You write 10,000 tokens of flat rules. Your agent loads all of it. Half gets ignored. You don't know which half.
-
-**The fix:** A manifest that declares modules, trigger keywords that load them on demand, token budgets, and weighted sections that tell the agent what matters.
-
-```bash
-charter bootstrap --yes   # detect stack, scaffold .ai/, migrate existing rules
-```
-
-### How it works
+A manifest declares modules, trigger keywords load them on demand, token budgets cap each one, and weighted sections tell the agent what matters.
 
 ```text
 .ai/
@@ -178,6 +191,8 @@ For live session continuity snapshots, use `charter context-refresh` to produce 
 | I want to compile task-specific agent context | `charter adf bundle --task "Fix the login flow"` |
 | I want to enforce metric/file-size ceilings | `charter adf evidence --auto-measure --ci` |
 | I want to migrate existing agent docs | `charter adf migrate --dry-run` |
+| I want to regenerate CLAUDE.md / AGENTS.md / .cursorrules / GEMINI.md from `.ai/` | `charter adf compile --target all --write` |
+| I want a letter-grade AI-readiness audit | `charter score` |
 | I want to validate governance in CI | `charter validate --ci --format json` |
 | I want to check pattern drift | `charter drift --ci --format json` |
 | I want to audit governance coverage | `charter audit --ci --format json` |
@@ -209,6 +224,7 @@ charter adf init                         # Scaffold .ai/ directory
 charter adf bundle --task "..."          # Merge context for a task
 charter adf evidence --auto-measure      # Validate metric constraints
 charter adf migrate                      # Migrate existing configs
+charter adf compile --target all --write # Render .ai/ to CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
 charter adf sync --check                 # Verify files match lock
 charter adf fmt .ai/core.adf --write     # Reformat to canonical form
 charter adf metrics recalibrate          # Adjust ceilings to current state
@@ -230,26 +246,16 @@ All commands support `--format json` with `nextActions` hints for agent workflow
 
 ### Score badge
 
-`charter score` can emit a [shields.io endpoint](https://shields.io/badges/endpoint-badge) JSON payload so you can display your repo's AI-readiness grade as a live badge in your README.
-
-```bash
-# Print shields.io endpoint JSON to stdout
-charter score --badge
-
-# Also write to .charter/badge.json for serving via raw.githubusercontent.com
-charter score --badge --write
-```
-
-Once `.charter/badge.json` is committed and pushed, add this to your README (replace `<org>`, `<repo>`, and `<branch>`):
-
-```markdown
-[![Agent context](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/<org>/<repo>/<branch>/.charter/badge.json)](https://github.com/Stackbilt-dev/charter)
-```
-
-Example output for a score of 92 (grade A):
+`charter score --badge --write` (see [The repo grades itself](#the-repo-grades-itself)) emits a [shields.io endpoint](https://shields.io/badges/endpoint-badge) JSON payload — for a score of 92 (grade A):
 
 ```json
 {"schemaVersion":1,"label":"agent context","message":"A (92)","color":"brightgreen"}
+```
+
+Once `.charter/badge.json` is committed and pushed, add this to your README (replace `<org>`, `<repo>`, and `<branch>`; keep the target URL percent-encoded):
+
+```markdown
+[![Agent context](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F<org>%2F<repo>%2F<branch>%2F.charter%2Fbadge.json)](https://github.com/Stackbilt-dev/charter)
 ```
 
 Color scale: A = brightgreen, B = green, C = yellowgreen, D = yellow, F = red.

@@ -7,7 +7,8 @@ severity: high
 bucket: reliability-trust
 status: new
 related: []
-tracked-issues: [157]
+tracked-issues:
+  - "#157 fix(cli): make charter serve fail fast on invalid startup paths"
 tracked-prs: []
 ---
 
