@@ -1,7 +1,7 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: v0.10.0 published to npm (2026-04-09) — all 11 `@stackbilt/*` packages live. Publish identity: stackbilt-kovermier. Added blast + surface subsystems (deterministic codebase analysis, zero-LLM). First cross-linked consumer is cc-taskrunner 1.5.0 via CC_BLAST_* env var gate.
-  NEXT: #94 (blast: exclude .claude/worktrees/ ghost paths — Claude Code consumers see inflated blast radius from ephemeral worktree clones). #90 (package ecosystem — configurable dependency orchestration via charter config). #69 (typed data access disambiguation policy).
-  BLOCKED_ON: Nothing critical. #94 is a quick win, #90 + #69 are larger design-first efforts.
-  COMPLETED: Phase 1-7, M0-M2, #50-53 (bootstrap UX, migrate parser, auto-loading, CLAUDE.md coexistence), blast + surface subsystems (new in 0.10.0), first npm publish of @stackbilt/blast + @stackbilt/surface, vendor fix for cli scaffold-response types (#93 — dropped file: dep on unpublished @stackbilt/contracts to unblock publish).
+  CURRENT: v0.10.0 on npm. ADF spec org live at github.com/adf-spec/adf (Apache-2.0) with 12 conformance fixtures (parser/resolver/compiler). Score badge + compile pipeline shipped (#202/#203/#205). MCP setup diagnostics live — charter hook print --mcp-config and charter doctor --mcp merged (#208). ADF tidy routing improvements merged (#198 closed). Repo score: B (89/100) as of 2026-06-11.
+  NEXT: #200 (authority-gated governance, P1 — propose→gate→commit contract). #90 (package ecosystem — configurable dependency orchestration). #201 (tiered execution contract, P2).
+  BLOCKED_ON: Nothing critical. #116 (charter_brief via gateway) deferred to commercial layer. #200 is design-first before implementation.
+  COMPLETED: Phase 1-7, M0-M2, blast + surface subsystems, compile pipeline (outbound ADF→vendor), conformance suite (adf-spec/adf), MCP setup diagnostics (#191), ADF tidy routing (#198), displayAiDir compiler fix (#207), docs-sync graceful flags (#195), README cleanup (#206).
