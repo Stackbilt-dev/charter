@@ -123,5 +123,7 @@ export function buildScaffold(
     governance,
     files: finalFiles,
     facts,
+    traits: classification.traits,
+    tier2Recommended: classification.confidence < 0.6,
   };
 }

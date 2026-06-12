@@ -37,7 +37,7 @@ function sourcePattern(result: LocalScaffoldResult): string {
 describe('scaffold domain fixtures — tenancy guardrail (#177)', () => {
   it('recognizes multi-tenant SaaS with org isolation as workers-saas pattern', () => {
     const result = classify('Multi-tenant SaaS API with organization-level data isolation');
-    // workers-saas maps to jwt-auth trait + rest route shape in the package
+    expect(result.pattern).toBe('workers-saas');
     expect(result.traits).toContain('jwt-auth');
   });
 
@@ -50,6 +50,7 @@ describe('scaffold domain fixtures — tenancy guardrail (#177)', () => {
 
   it('recognizes tenant isolation with row-level security as workers-saas', () => {
     const result = classify('Tenant isolation API with row-level security in D1');
+    expect(result.pattern).toBe('workers-saas');
     expect(result.traits).toContain('jwt-auth');
   });
 });
