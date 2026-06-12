@@ -178,6 +178,7 @@ jobs:
           pack_package packages/policies
           pack_package packages/ci
           pack_package packages/cli
+          pack_package packages/scaffold-core
 
           # publish_if_missing: skip packages already published at this version (idempotent re-runs)
           publish_if_missing() {
@@ -201,4 +202,5 @@ jobs:
           publish_if_missing "./release-tarballs/stackbilt-surface-${VERSION}.tgz"  "@stackbilt/surface"
           publish_if_missing "./release-tarballs/stackbilt-policies-${VERSION}.tgz" "@stackbilt/policies"
           publish_if_missing "./release-tarballs/stackbilt-ci-${VERSION}.tgz"       "@stackbilt/ci"
-          publish_if_missing "./release-tarballs/stackbilt-cli-${VERSION}.tgz"      "@stackbilt/cli"
+          publish_if_missing "./release-tarballs/stackbilt-cli-${VERSION}.tgz"          "@stackbilt/cli"
+          publish_if_missing "./release-tarballs/stackbilt-scaffold-core-${VERSION}.tgz" "@stackbilt/scaffold-core"

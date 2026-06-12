@@ -18,6 +18,7 @@ const packageGlobs = [
   "packages/surface",
   "packages/ci",
   "packages/cli",
+  "packages/scaffold-core",
 ];
 const dependencyFields = [
   "dependencies",
