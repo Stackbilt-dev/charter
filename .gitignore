@@ -10,7 +10,7 @@ coverage/
 .claude/settings.local.json
 .docsync.json
 plans/
-governance/
+/governance/
 
 # npm lockfile — this repo uses pnpm (pnpm-lock.yaml); ignore npm-generated lockfile
 package-lock.json

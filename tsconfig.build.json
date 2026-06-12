@@ -12,6 +12,7 @@
     { "path": "packages/surface" },
     { "path": "packages/policies" },
     { "path": "packages/ci" },
-    { "path": "packages/cli" }
+    { "path": "packages/cli" },
+    { "path": "packages/scaffold-core" }
   ]
 }

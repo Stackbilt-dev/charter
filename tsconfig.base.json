@@ -16,7 +16,8 @@
       "@stackbilt/blast": ["packages/blast"],
       "@stackbilt/surface": ["packages/surface"],
       "@stackbilt/cli": ["packages/cli"],
-      "@stackbilt/policies": ["packages/policies"]
+      "@stackbilt/policies": ["packages/policies"],
+      "@stackbilt/scaffold-core": ["packages/scaffold-core"]
     },
     "lib": ["ES2022"],
     "types": ["node"],
