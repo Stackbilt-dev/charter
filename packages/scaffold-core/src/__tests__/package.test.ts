@@ -12,8 +12,8 @@ describe('@stackbilt/scaffold-core package metadata', () => {
     expect(pkg.name).toBe('@stackbilt/scaffold-core');
   });
 
-  it('version is 1.0.0', () => {
-    expect(pkg.version).toBe('1.0.0');
+  it('version is 1.1.0', () => {
+    expect(pkg.version).toBe('1.1.0');
   });
 
   it('license is Apache-2.0', () => {
