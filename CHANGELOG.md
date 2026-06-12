@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [@stackbilt/scaffold-core@1.2.0] — 2026-06-12
+
+### Added
+- **`buildOracleContext(result: LocalScaffoldResult): OracleContext`** — derives a structured LLM polish context from an existing scaffold result with no additional network calls. Replaces the deleted `prompt_context` field that consumers were relying on for oracle/tier-2 enrichment paths. Exported from package root alongside `buildScaffold`.
+- **`OracleContext` interface** — typed context shape for oracle calls: `intention`, `pattern`, `meta` (confidence, tier2Recommended, testing/compliance/observability flags), `traits`, `runtime` (bindings, piiHandling), `governance` (threatModel, ADRs, testPlan), `knowledge` (adrContext, topThreats capped at 5), `files`.
+- **`oracle-context.test.ts`** — 4 tests covering field mapping, runtime bindings, topThreats cap, and `adr002` null handling.
+
+Resolves charter#224 (oracle regression after shim deletion in stackbilt-web)
+
 ## [@stackbilt/scaffold-core@1.1.0] — 2026-06-12
 
 ### Changed
