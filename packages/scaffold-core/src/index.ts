@@ -35,6 +35,7 @@ export type {
   // Top-level types
   LocalScaffoldResult,
   ScaffoldOptions,
+  OracleContext,
 } from './types';
 
 // ============================================================================
@@ -51,7 +52,7 @@ export { materializeScaffold } from './materializer/index';
 // Orchestrator
 // ============================================================================
 
-import type { LocalScaffoldResult, ScaffoldOptions } from './types';
+import type { LocalScaffoldResult, OracleContext, ScaffoldOptions } from './types';
 import { classify } from './classify/index';
 import { getKnowledge } from './knowledge/index';
 import { buildGovernance } from './governance/index';
@@ -125,5 +126,54 @@ export function buildScaffold(
     facts,
     traits: classification.traits,
     tier2Recommended: classification.confidence < 0.6,
+  };
+}
+
+/**
+ * Derive oracle context from a LocalScaffoldResult for use by an LLM polish pass.
+ *
+ * All fields are derived from the existing result — no additional inference or
+ * network calls required. Consumers pass this to the oracle instead of the
+ * old promptContext field that was stripped when migrating from the local shim.
+ *
+ * @see stackbilt-web oracle.ts
+ * @see charter#224
+ */
+export function buildOracleContext(result: LocalScaffoldResult): OracleContext {
+  const { classification, knowledge, governance, facts, files, tier2Recommended } = result;
+  return {
+    intention: facts.intention,
+    pattern: classification.pattern,
+    meta: {
+      confidence: classification.confidence,
+      tier2Recommended,
+      testingLevel: classification.qualityProfile.testingLevel,
+      complianceDomains: classification.qualityProfile.complianceDomains,
+      observability: classification.qualityProfile.observability,
+      authentication: classification.qualityProfile.authentication,
+      rateLimiting: classification.qualityProfile.rateLimiting,
+    },
+    traits: classification.traits,
+    runtime: {
+      bindings: facts.bindings.map(b => ({ type: b.type, name: b.name, binding: b.binding })),
+      piiHandling: classification.qualityProfile.piiHandling,
+    },
+    governance: {
+      threatModel: governance.threatModel,
+      adr001: governance.adr001,
+      adr002: governance.adr002 ?? null,
+      testPlan: governance.testPlan,
+    },
+    knowledge: {
+      adrContext: knowledge.adrContext,
+      adrDecision: knowledge.adrDecision,
+      topThreats: knowledge.threats.slice(0, 5).map(t => ({
+        id: t.id,
+        description: t.description,
+        mitigation: t.mitigation,
+        severity: t.severity,
+      })),
+    },
+    files: files.map(f => ({ path: f.path, content: f.content, role: f.role })),
   };
 }

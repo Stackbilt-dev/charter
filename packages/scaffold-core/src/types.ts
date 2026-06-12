@@ -143,3 +143,44 @@ export interface ScaffoldOptions {
   projectName?: string;
   oracle?: boolean;
 }
+
+// ============================================================================
+// Oracle context — structured input for LLM polish pass
+// ============================================================================
+
+/**
+ * Structured context derived from LocalScaffoldResult for use by an LLM
+ * oracle pass. All fields are derivable without a TarotScript round-trip.
+ *
+ * Build via: buildOracleContext(result: LocalScaffoldResult)
+ */
+export interface OracleContext {
+  intention: string;
+  pattern: string;
+  meta: {
+    confidence: number;
+    tier2Recommended: boolean;
+    testingLevel: string;
+    complianceDomains: string[];
+    observability: boolean;
+    authentication: boolean;
+    rateLimiting: boolean;
+  };
+  traits: string[];
+  runtime: {
+    bindings: Array<{ type: string; name: string; binding: string }>;
+    piiHandling: boolean;
+  };
+  governance: {
+    threatModel: string;
+    adr001: string;
+    adr002: string | null;
+    testPlan: string;
+  };
+  knowledge: {
+    adrContext: string;
+    adrDecision: string;
+    topThreats: Array<{ id: string; description: string; mitigation: string; severity: string }>;
+  };
+  files: Array<{ path: string; content: string; role: string }>;
+}
