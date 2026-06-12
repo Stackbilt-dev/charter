@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [@stackbilt/scaffold-core@1.1.0] — 2026-06-12
+
+### Changed
+- `PatternName` now includes `'workers-saas'` — multi-tenant SaaS intentions classify to this pattern (previously returned `'worker'`)
+- `LocalScaffoldResult` gains two new fields: `traits: string[]` (promoted from `classification.traits`) and `tier2Recommended: boolean` (true when confidence < 0.6)
+- `classify.test.ts` updated to assert `result.pattern === 'workers-saas'` for multi-tenant intentions
+
+Closes charter#221
+
 ### Added
 
 - **`charter score --badge`** (`score.ts`): New output mode that prints a [shields.io endpoint-schema](https://shields.io/badges/endpoint-badge) JSON payload to stdout (`{"schemaVersion":1,"label":"agent context","message":"A (92)","color":"brightgreen"}`). Grade-to-color mapping: A=brightgreen, B=green, C=yellowgreen, D=yellow, F=red. Combine with `--badge --write` to persist the payload to `.charter/badge.json` so it can be served via `raw.githubusercontent.com` as a live shields.io endpoint badge. Additive only — no existing flag, output, or exit-code behavior is changed. Exports `buildBadgePayload`, `gradeToColor`, and the `BadgePayload` type for downstream use.

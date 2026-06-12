@@ -73,6 +73,18 @@ describe('classify and buildScaffold are implemented', () => {
     expect(result.files).toBeDefined();
   });
 
+  it('buildScaffold promotes traits and tier2Recommended to top-level', () => {
+    const result = buildScaffold('multi-tenant SaaS API with JWT auth');
+    expect(Array.isArray(result.traits)).toBe(true);
+    expect(typeof result.tier2Recommended).toBe('boolean');
+    expect(result.traits).toEqual(result.classification.traits);
+  });
+
+  it('workers-saas pattern is assignable as PatternName', () => {
+    const p: PatternName = 'workers-saas';
+    expect(p).toBe('workers-saas');
+  });
+
   it('classify returns a ClassifyResult without throwing', () => {
     const result = classify('build a KV-backed worker');
     expect(result).toBeDefined();

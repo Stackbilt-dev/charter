@@ -11,6 +11,7 @@
 
 export type PatternName =
   | 'worker'
+  | 'workers-saas'
   | 'api'
   | 'fullstack'
   | 'scheduled'
@@ -132,6 +133,10 @@ export interface LocalScaffoldResult {
   governance: GovernanceDocs;
   files: ScaffoldFile[];
   facts: ScaffoldFacts;
+  /** Promoted from classification.traits for convenient top-level access */
+  traits: string[];
+  /** True when classifier confidence is below 0.6 — signals LLM tier-2 may improve results */
+  tier2Recommended: boolean;
 }
 
 export interface ScaffoldOptions {

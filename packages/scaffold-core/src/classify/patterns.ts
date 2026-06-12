@@ -121,7 +121,7 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
     },
   },
   {
-    name: 'worker' as PatternName,
+    name: 'workers-saas' as PatternName,
     status: 'ACTIVE',
     category: 'COMPUTE',
     keywords: ['saas', 'tenant', 'multi-tenant', 'org', 'workspace'],
