@@ -62,16 +62,22 @@ describe('scaffold-core function exports', () => {
 });
 
 // ============================================================================
-// Stub behaviour
+// Real implementations (classify and buildScaffold are now real)
 // ============================================================================
 
-describe('stub implementations throw as documented', () => {
-  it('buildScaffold throws Not implemented', () => {
-    expect(() => buildScaffold('build a KV-backed worker')).toThrow('Not implemented');
+describe('classify and buildScaffold are implemented', () => {
+  it('buildScaffold returns a LocalScaffoldResult without throwing', () => {
+    const result = buildScaffold('build a KV-backed worker');
+    expect(result).toBeDefined();
+    expect(result.classification).toBeDefined();
+    expect(result.files).toBeDefined();
   });
 
-  it('classify throws Not implemented', () => {
-    expect(() => classify('build a KV-backed worker')).toThrow('Not implemented');
+  it('classify returns a ClassifyResult without throwing', () => {
+    const result = classify('build a KV-backed worker');
+    expect(result).toBeDefined();
+    expect(result.pattern).toBeDefined();
+    expect(typeof result.confidence).toBe('number');
   });
 });
 

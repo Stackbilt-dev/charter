@@ -3,10 +3,6 @@
  *
  * Zero-dependency, zero-inference, zero-network scaffold engine core.
  *
- * This package houses the extracted scaffold engine from stackbilt-web.
- * For v0.1.0 (experimental), all sub-module implementations are stubs —
- * implementations land in child issues per module.
- *
  * Entrypoint: buildScaffold(intention, options?) → LocalScaffoldResult
  */
 
@@ -48,7 +44,7 @@ export type {
 export { classify } from './classify/index';
 export { getKnowledge } from './knowledge/index';
 export { buildGovernance } from './governance/index';
-export { generateFiles } from './codegen/index';
+export { generateFiles, addGovernanceFiles } from './codegen/index';
 export { materializeScaffold } from './materializer/index';
 
 // ============================================================================
@@ -59,17 +55,20 @@ import type { LocalScaffoldResult, ScaffoldOptions } from './types';
 import { classify } from './classify/index';
 import { getKnowledge } from './knowledge/index';
 import { buildGovernance } from './governance/index';
-import { generateFiles } from './codegen/index';
+import { generateFiles, addGovernanceFiles } from './codegen/index';
 import { materializeScaffold } from './materializer/index';
 import { inferBindings } from './classify/bindings';
 
 /**
  * Build a complete scaffold result from a plain-English intention string.
  *
- * Orchestrates: classify → knowledge → facts → governance → codegen → materialize.
- *
- * @stub Each sub-module throws until its implementation lands. This function
- * will propagate the first sub-module error encountered.
+ * Orchestration order:
+ *   1. classify(intention)        → ClassifyResult
+ *   2. getKnowledge(pattern, ...) → PatternKnowledge
+ *   3. buildGovernance(facts, ...) → GovernanceDocs
+ *   4. generateFiles(facts)       → ScaffoldFile[] (base + routes)
+ *   5. addGovernanceFiles(...)    → grafts .ai/*.md onto the file list
+ *   6. materializeScaffold(facts) → ADF + project files (grafted in)
  *
  * @param intention - Plain-English description of what to build
  * @param options   - Optional overrides (projectName, oracle mode)
@@ -80,27 +79,49 @@ export function buildScaffold(
   options: ScaffoldOptions = {}
 ): LocalScaffoldResult {
   const classification = classify(intention);
-  const knowledge = getKnowledge(classification.pattern);
+  const knowledge = getKnowledge(
+    classification.pattern,
+    classification.qualityProfile.complianceDomains
+  );
   const bindings = inferBindings(classification.pattern, classification.traits);
 
   const facts = {
     pattern: classification.pattern,
     projectName: options.projectName ?? 'my-worker',
-    intention,
+    intention: classification.enrichedIntention,
     bindings,
     traits: classification.traits,
     qualityProfile: classification.qualityProfile,
   };
 
   const governance = buildGovernance(facts, knowledge);
+
+  // Generate base + route files, then graft governance docs on top
   const codegenFiles = generateFiles(facts);
-  const { files: materializedFiles } = materializeScaffold(facts);
+  const filesWithGovernance = addGovernanceFiles(codegenFiles, governance);
+
+  // Materialize ADF + project files; graft only ADF/contract files not already present
+  let finalFiles = filesWithGovernance;
+  try {
+    const { files: materializedFiles } = materializeScaffold(facts);
+    const existingPaths = new Set(finalFiles.map((f) => f.path));
+    for (const mf of materializedFiles) {
+      const isAdf = mf.path.startsWith('.ai/') && mf.path.endsWith('.adf');
+      const isContract = mf.path.startsWith('src/contracts/');
+      const isSchema = mf.path === 'schema.sql';
+      if ((isAdf || isContract || isSchema) && !existingPaths.has(mf.path)) {
+        finalFiles = [...finalFiles, mf];
+      }
+    }
+  } catch {
+    // Materializer failure is non-fatal — codegen output is still complete
+  }
 
   return {
     classification,
     knowledge,
     governance,
-    files: [...codegenFiles, ...materializedFiles],
+    files: finalFiles,
     facts,
   };
 }
