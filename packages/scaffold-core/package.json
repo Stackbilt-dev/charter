@@ -1,0 +1,47 @@
+{
+  "name": "@stackbilt/scaffold-core",
+  "sideEffects": false,
+  "version": "0.1.0",
+  "description": "Zero-dependency scaffold engine core — pattern classification, knowledge, governance, codegen, and materializer",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Stackbilt-dev/charter.git",
+    "directory": "packages/scaffold-core"
+  },
+  "bugs": {
+    "url": "https://github.com/Stackbilt-dev/charter/issues"
+  },
+  "homepage": "https://github.com/Stackbilt-dev/charter#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "charter",
+    "scaffold",
+    "codegen",
+    "governance",
+    "cloudflare",
+    "workers",
+    "ai",
+    "llm"
+  ],
+  "author": "Stackbilt LLC",
+  "license": "Apache-2.0"
+}

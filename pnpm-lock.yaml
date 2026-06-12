@@ -110,6 +110,8 @@ importers:
         specifier: workspace:*
         version: link:../types
 
+  packages/scaffold-core: {}
+
   packages/surface:
     dependencies:
       zod:
