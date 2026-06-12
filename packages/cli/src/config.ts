@@ -111,6 +111,27 @@ export interface CharterConfig {
     /** Ordered budget rules; the first pattern that matches a file applies. */
     paths?: LocBudgetRule[];
   };
+
+  /**
+   * Ecosystem packages that participate in Charter's orchestration (#90).
+   *
+   * Keys are npm package names. Each entry opts the package in and carries
+   * its project-specific config (validated at runtime by the package's own
+   * CharterPackageDescriptor.configSchema — Charter does not know the shape).
+   *
+   * Example:
+   * ```json
+   * {
+   *   "packages": {
+   *     "@stackbilt/llm-providers": {
+   *       "enabled": true,
+   *       "config": { "primary": "cloudflare", "fallback": ["groq"] }
+   *     }
+   *   }
+   * }
+   * ```
+   */
+  packages?: Record<string, { enabled: boolean; config?: unknown }>;
 }
 
 const DEFAULT_CONFIG: CharterConfig = {
@@ -197,6 +218,7 @@ export function loadConfig(configPath: string): CharterConfig {
       },
       ontology: parsed.ontology,
       locBudgets: parsed.locBudgets,
+      packages: parsed.packages,
     };
   } catch (err) {
     console.warn(`Warning: Failed to parse ${configFile}, using defaults`);

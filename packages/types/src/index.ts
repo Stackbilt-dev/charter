@@ -571,3 +571,79 @@ export interface GovernanceGate<Context, P extends GovernanceProposal = Governan
    */
   commit(proposal: P, decision: GovernanceDecision): Promise<GovernanceReceipt>;
 }
+
+// ============================================================================
+// Package Ecosystem Contract (#90)
+//
+// Decentralized extension point: each ecosystem package that wants to
+// participate in charter init / scaffold / doctor / adf populate ships a
+// CharterPackageDescriptor in its own npm package. Charter loads descriptors
+// at runtime — it never hard-codes a registry of known packages here.
+// ============================================================================
+
+/**
+ * Minimal schema-validator shape that CharterPackageDescriptor.configSchema must
+ * satisfy. Structurally compatible with z.ZodType<T> (Zod) so callers can pass
+ * a Zod schema directly without importing Zod into @stackbilt/types.
+ */
+export interface SchemaValidator<T = unknown> {
+  parse(input: unknown): T;
+  safeParse(input: unknown): { success: true; data: T } | { success: false; error: unknown };
+}
+
+/**
+ * Doctor check registered by a package. Charter runs these during `charter doctor`
+ * for every enabled package.
+ */
+export interface PackageDoctorCheck {
+  /** Short display name shown in doctor output. */
+  name: string;
+  /**
+   * Returns null if the check passes, or a human-readable failure message.
+   * Receives the validated package-specific config object.
+   */
+  run(config: unknown, repoPath: string): Promise<string | null>;
+}
+
+/**
+ * Descriptor that an ecosystem package ships to participate in Charter's
+ * orchestration (init, scaffold, doctor, adf populate, serve).
+ *
+ * Descriptors are authored in the package repo — NOT in Charter. Charter
+ * loads them by resolving `require('<npmPackage>/charter-descriptor')` at
+ * runtime (when the package is installed in the target project).
+ *
+ * @typeParam C - Validated config shape. Must match `configSchema`.
+ */
+export interface CharterPackageDescriptor<C = unknown> {
+  /** Canonical npm package name. Used for installation guidance and deduplication. */
+  readonly name: string;
+  /** One-line description shown in `charter init` package selection UI. */
+  readonly description: string;
+  /** npm package name (may differ from `name` if scoped). */
+  readonly npmPackage: string;
+  /**
+   * Schema validator for the per-project config block stored in
+   * `.charter/config.json` under `packages[name].config`.
+   * Use a Zod schema (structurally satisfies SchemaValidator<C>).
+   */
+  readonly configSchema: SchemaValidator<C>;
+  /**
+   * Template file paths to generate during `charter scaffold`.
+   * Relative to the package's own directory — Charter resolves them at
+   * runtime via `require.resolve`.
+   */
+  readonly scaffoldTemplates?: readonly string[];
+  /**
+   * Path to an ADF module file within the package to inject during
+   * `charter adf populate`. Relative to the package root.
+   */
+  readonly adfModule?: string;
+  /** Doctor checks this package contributes. */
+  readonly doctorChecks?: readonly PackageDoctorCheck[];
+  /**
+   * wrangler.toml binding names this package requires (e.g. `["AI", "MY_KV"]`).
+   * Charter reports missing bindings during `charter doctor`.
+   */
+  readonly wranglerBindings?: readonly string[];
+}
