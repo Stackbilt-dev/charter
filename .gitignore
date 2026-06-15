@@ -22,6 +22,9 @@ package-lock.json
 # local charter runtime artifacts (generated brief + private data registry — never commit)
 .charter/context.md
 .charter/data-registry.yaml
+.agent-memory/
+.claude/worktrees/
+issue-corpus/
 
 # stray empty marker file
 .codex

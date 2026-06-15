@@ -22,6 +22,8 @@
     "docs:oss:auto": "node scripts/docs-oss-auto-sync.mjs --config .docsync.oss.json",
     "docs:oss:auto:dry-run": "node scripts/docs-oss-auto-sync.mjs --config .docsync.oss.json --dry-run --no-push",
     "publish:check": "node scripts/assert-packages-publishable.mjs",
+    "install:smoke": "node scripts/install-smoke.mjs",
+    "supply-chain:check": "pnpm audit --json",
     "verify:adf": "bash -lc \"node packages/cli/dist/bin.js doctor --adf-only --ci --format json && node packages/cli/dist/bin.js adf evidence --auto-measure --ci --format json\"",
     "charter:detect": "charter setup --detect-only --format json",
     "charter:setup": "charter setup --preset fullstack --ci github --yes",
@@ -41,8 +43,20 @@
     "@types/node": "^25.9.3",
     "tsx": "^4.22.4",
     "typescript": "~5.8.2",
+    "vite": "7.3.5",
     "vitest": "^4.1.9",
     "zod": "^3.24.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "@hono/node-server": "1.19.14",
+      "esbuild": "0.28.1",
+      "fast-uri": "4.0.0",
+      "hono": "4.12.25",
+      "ip-address": "10.1.1",
+      "qs": "6.15.2",
+      "vite": "7.3.5"
+    }
   },
   "version": "0.10.0",
   "license": "Apache-2.0",
