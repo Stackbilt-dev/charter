@@ -10,7 +10,7 @@ For any release tag `vX.Y.Z`:
 packages/*/package.json  →  "version": "X.Y.Z"
 ```
 
-All twelve packages ship together at the same version. There is no per-package version drift.
+All packages under `packages/*` ship together at the same version. There is no per-package version drift.
 
 ## Enforcement
 
