@@ -26,6 +26,11 @@
       "targetMode": "file",
       "snippetFile": "charter-ci-integration.md",
       "targetFile": "ci-integration.md"
+    },
+    {
+      "targetMode": "file",
+      "snippetFile": "charter-security.md",
+      "targetFile": "security.md"
     }
   ]
 }
