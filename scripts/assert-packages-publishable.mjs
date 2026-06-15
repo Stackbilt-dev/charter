@@ -26,6 +26,13 @@ const dependencyFields = [
   "peerDependencies",
   "devDependencies",
 ];
+const forbiddenTarballPathPatterns = [
+  /(^|\/)__tests__\//,
+  /(^|\/)__mocks__\//,
+  /(^|\/)__fixtures__\//,
+  /\.test\.(js|d\.ts|d\.ts\.map|js\.map)$/,
+  /\.spec\.(js|d\.ts|d\.ts\.map|js\.map)$/,
+];
 
 const tempDir = mkdtempSync(join(tmpdir(), "charter-publish-check-"));
 const failures = [];
@@ -54,6 +61,13 @@ function run(command, args, options) {
 
 function packedPackageJson(tarball) {
   return JSON.parse(run("tar", ["-xOf", tarball, "package/package.json"], { cwd: root }));
+}
+
+function packedFileList(tarball) {
+  return run("tar", ["-tf", tarball], { cwd: root })
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function workspaceDependencyEntries(manifest) {
@@ -104,9 +118,17 @@ try {
     const filename = packedFilename(packageDir, output, beforePack);
     const packedManifest = packedPackageJson(filename);
     const workspaceEntries = workspaceDependencyEntries(packedManifest);
+    const forbiddenFiles = packedFileList(filename).filter((file) =>
+      forbiddenTarballPathPatterns.some((pattern) => pattern.test(file)),
+    );
 
     if (workspaceEntries.length > 0) {
       failures.push(`${packedManifest.name}: ${workspaceEntries.join(", ")}`);
+    }
+    if (forbiddenFiles.length > 0) {
+      failures.push(
+        `${packedManifest.name}: packed test/build-only artifacts: ${forbiddenFiles.slice(0, 8).join(", ")}${forbiddenFiles.length > 8 ? `, ... +${forbiddenFiles.length - 8} more` : ""}`,
+      );
     }
   }
 } finally {
@@ -114,12 +136,12 @@ try {
 }
 
 if (failures.length > 0) {
-  console.error("Packed package manifests contain workspace protocol dependencies:");
+  console.error("Packed package artifacts are not publishable:");
   for (const failure of failures) {
     console.error(`- ${failure}`);
   }
-  console.error("Publish with pnpm from the workspace root so workspace:^ is rewritten.");
+  console.error("Run pnpm run clean && pnpm run build, then publish with pnpm from the workspace root.");
   process.exit(1);
 }
 
-console.log("All packed package manifests are publishable; no workspace: dependency specifiers found.");
+console.log("All packed package artifacts are publishable; no workspace: dependency specifiers or test artifacts found.");
