@@ -41,10 +41,12 @@ pnpm install
 pnpm run clean
 pnpm run docs:check
 pnpm run docs:oss:check
+pnpm run supply-chain:check
 pnpm run typecheck
 pnpm run build
 pnpm run test
 pnpm run publish:check
+pnpm run install:smoke
 ```
 
 ## Phase 2: Version Bump
@@ -71,7 +73,20 @@ done
 pnpm run publish:check
 ```
 
-2. Dry-run packed contents per package:
+2. Verify the dependency audit is clean:
+
+```bash
+pnpm run supply-chain:check
+```
+
+3. Verify packed package manifests and install behavior:
+
+```bash
+pnpm run publish:check
+pnpm run install:smoke
+```
+
+4. Dry-run packed contents per package:
 
 ```bash
 (cd packages/types && pnpm pack --dry-run)
@@ -87,7 +102,7 @@ pnpm run publish:check
 (cd packages/cli && pnpm pack --dry-run)
 ```
 
-3. Verify CLI behavior before publish:
+5. Verify CLI behavior before publish:
 
 ```bash
 node packages/cli/dist/bin.js --version

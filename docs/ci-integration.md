@@ -18,8 +18,19 @@ On every push and pull request, the CI workflow runs:
 2. `charter drift --ci` — scans for blessed-stack deviations
 3. `charter adf evidence --auto-measure --ci` — validates metric ceilings (when `.ai/manifest.adf` is present)
 4. `charter audit --format json` — captures governance posture snapshot
+5. `charter score --badge --write` — refreshes `.charter/badge.json` on pushes to the default branch
 
 If any step exits `1`, the check fails and the merge is blocked.
+
+## Score Badge Refresh
+
+The generated GitHub workflow refreshes `.charter/badge.json` on pushes to `main` or `master`, then commits the file only when the Shields payload changed. Shields renders from the committed JSON at the raw GitHub URL; the workflow is what keeps that JSON current after Charter, ADF, or governance changes land.
+
+Add the badge to your README after the first workflow run has committed `.charter/badge.json`:
+
+```markdown
+[![Agent context](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F<org>%2F<repo>%2F<branch>%2F.charter%2Fbadge.json)](https://github.com/Stackbilt-dev/charter)
+```
 
 ## Evidence Gating
 
