@@ -17,6 +17,7 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run supply-chain:check
       - run: pnpm run build
       - name: Measure brief token budget
         run: node scripts/measure-brief-size.mjs
