@@ -180,7 +180,7 @@ Release completion gates (required before declaring release complete):
    - release exists for the tag (for example `v0.16.0`)
    - `release.yml` run for the tag is `success`
 2. npm publication:
-   - all 12 workspace packages are resolvable at the target version
+   - all workspace packages are resolvable at the target version
 3. tracker hygiene:
    - release-scoped issues/PR follow-ups are closed or explicitly carried forward
 

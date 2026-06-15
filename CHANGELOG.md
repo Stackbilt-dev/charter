@@ -6,6 +6,22 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-15
+
+### Added
+- Generated `charter setup --ci github` workflows now refresh `.charter/badge.json` on default-branch pushes and manual dispatch, committing only changed Shields endpoint payloads.
+- Supply-chain hardening now includes pinned GitHub Actions, a stamped supply-chain workflow, a floating-action-pins drift pattern, and `pnpm run supply-chain:check`.
+- Release validation now includes packed-artifact test filtering and an npm/pnpm consumer install smoke.
+- Added AGENTS.md progressive-disclosure proposal drafts under `papers/`.
+
+### Changed
+- All publishable workspace packages are synchronized at `1.3.0` for the next unified release.
+- Package emit configs now exclude tests, specs, and fixtures from `dist` outputs.
+- Security and publishing docs now document dependency-audit, provenance, and install-smoke controls.
+
+### Fixed
+- Vite is pinned/overridden to `7.3.5` to clear current audit advisories.
+
 ## [@stackbilt/scaffold-core@1.2.0] — 2026-06-12
 
 ### Added
