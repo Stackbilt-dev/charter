@@ -120,4 +120,15 @@ describe('syncPackageManifest', () => {
     expect(workflow).toContain('ADF Evidence');
     expect(workflow).toContain('npx charter adf evidence --auto-measure --ci --format text');
   });
+
+  it('github workflow template refreshes the score badge on push', () => {
+    const workflow = getGithubWorkflow('pnpm');
+    expect(workflow).toContain('push:');
+    expect(workflow).toContain('contents: write');
+    expect(workflow).toContain('Refresh Score Badge');
+    expect(workflow).toContain('npx charter score --badge --write');
+    expect(workflow).toContain('Commit Score Badge');
+    expect(workflow).toContain('git status --porcelain -- .charter/badge.json');
+    expect(workflow).toContain('Governed-By: charter-score-badge');
+  });
 });

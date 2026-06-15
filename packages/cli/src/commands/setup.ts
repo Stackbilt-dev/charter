@@ -44,11 +44,14 @@ export function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
   return `name: Governance Check
 
 on:
+  push:
+    branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
@@ -80,6 +83,21 @@ ${installStep}
       - name: Audit Report
         run: npx charter audit --format json > /tmp/audit.json
         if: always()
+
+      - name: Refresh Score Badge
+        run: npx charter score --badge --write
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+      - name: Commit Score Badge
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -n "$(git status --porcelain -- .charter/badge.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .charter/badge.json
+            git commit -m "chore(charter): refresh score badge [skip ci]" -m "Governed-By: charter-score-badge"
+            git push
+          fi
 `;
 }
 
