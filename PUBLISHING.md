@@ -17,6 +17,7 @@ Publishable packages:
 - `@stackbilt/policies`
 - `@stackbilt/ci`
 - `@stackbilt/cli`
+- `@stackbilt/scaffold-core`
 
 Repository root package (`charter`) is private and must not be published.
 
@@ -42,8 +43,8 @@ pnpm run clean
 pnpm run docs:check
 pnpm run docs:oss:check
 pnpm run supply-chain:check
-pnpm run typecheck
 pnpm run build
+pnpm run typecheck
 pnpm run test
 pnpm run publish:check
 pnpm run install:smoke
@@ -98,8 +99,10 @@ pnpm run install:smoke
 (cd packages/drift && pnpm pack --dry-run)
 (cd packages/blast && pnpm pack --dry-run)
 (cd packages/surface && pnpm pack --dry-run)
+(cd packages/policies && pnpm pack --dry-run)
 (cd packages/ci && pnpm pack --dry-run)
 (cd packages/cli && pnpm pack --dry-run)
+(cd packages/scaffold-core && pnpm pack --dry-run)
 ```
 
 5. Verify CLI behavior before publish:
@@ -133,6 +136,7 @@ Publish in this order:
 1. `@stackbilt/types`
 2. `@stackbilt/core`, `@stackbilt/adf`, `@stackbilt/git`, `@stackbilt/classify`, `@stackbilt/validate`, `@stackbilt/drift`, `@stackbilt/blast`, `@stackbilt/surface`, `@stackbilt/policies`, `@stackbilt/ci`
 3. `@stackbilt/cli`
+4. `@stackbilt/scaffold-core`
 
 `@stackbilt/blast` and `@stackbilt/surface` are zero-dependency and can be published in any order relative to the other standalone analyzers. They are only required at publish time by `@stackbilt/cli`.
 
@@ -150,6 +154,7 @@ pnpm --filter @stackbilt/surface publish
 pnpm --filter @stackbilt/policies publish
 pnpm --filter @stackbilt/ci publish
 pnpm --filter @stackbilt/cli publish
+pnpm --filter @stackbilt/scaffold-core publish
 ```
 
 ## Phase 5: Post-Publish Verification
@@ -188,7 +193,7 @@ Example npm verification command for a target version:
 
 ```bash
 VERSION=0.16.0
-for p in types core adf git classify validate drift blast surface policies ci cli; do
+for p in types core adf git classify validate drift blast surface policies ci cli scaffold-core; do
   npm view "@stackbilt/${p}@${VERSION}" version
 done
 ```
