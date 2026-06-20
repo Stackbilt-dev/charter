@@ -1,7 +1,7 @@
 ADF: 0.1
 
 🧠 STATE:
-  CURRENT: v0.10.0 on npm. ADF spec org live at github.com/adf-spec/adf (Apache-2.0) with 12 conformance fixtures (parser/resolver/compiler). Score badge + compile pipeline shipped (#202/#203/#205). MCP setup diagnostics live — charter hook print --mcp-config and charter doctor --mcp merged (#208). ADF tidy routing improvements merged (#198 closed). Repo score: B (89/100) as of 2026-06-11.
-  NEXT: #200 (authority-gated governance, P1 — propose→gate→commit contract). #90 (package ecosystem — configurable dependency orchestration). #201 (tiered execution contract, P2).
+  CURRENT: v1.5.0 release prepared for npm. Rust/WASM first-class support merged (#230): rust-wasm preset/detection, scaffold-core codegen, score publish-boundary checks, and rust-wasm ADF module. Release hardening now validates policies and scaffold-core in publish checks and uses local tarball overrides for pnpm install smoke.
+  NEXT: Publish/tag v1.5.0. #200 (authority-gated governance, P1 — propose→gate→commit contract). #90 (package ecosystem — configurable dependency orchestration). #201 (tiered execution contract, P2).
   BLOCKED_ON: Nothing critical. #116 (charter_brief via gateway) deferred to commercial layer. #200 is design-first before implementation.
-  COMPLETED: Phase 1-7, M0-M2, blast + surface subsystems, compile pipeline (outbound ADF→vendor), conformance suite (adf-spec/adf), MCP setup diagnostics (#191), ADF tidy routing (#198), displayAiDir compiler fix (#207), docs-sync graceful flags (#195), README cleanup (#206).
+  COMPLETED: Phase 1-7, M0-M2, blast + surface subsystems, compile pipeline (outbound ADF→vendor), conformance suite (adf-spec/adf), MCP setup diagnostics (#191), ADF tidy routing (#198), displayAiDir compiler fix (#207), docs-sync graceful flags (#195), README cleanup (#206), Rust/WASM first-class support (#230).
