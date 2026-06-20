@@ -16,6 +16,7 @@ const packageGlobs = [
   "packages/drift",
   "packages/blast",
   "packages/surface",
+  "packages/policies",
   "packages/ci",
   "packages/cli",
   "packages/scaffold-core",

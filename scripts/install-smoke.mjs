@@ -47,21 +47,22 @@ function run(command, args, options) {
 
 function packPackage(packageDir) {
   const cwd = join(root, packageDir);
+  const manifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
   const output = run('pnpm', ['pack', '--json', '--pack-destination', tempDir], { cwd });
   const parsed = JSON.parse(output);
   if (typeof parsed.filename === 'string') {
-    return parsed.filename;
+    return { name: manifest.name, tarball: parsed.filename };
   }
   const tarballs = readdirSync(tempDir).filter((file) => file.endsWith('.tgz'));
-  const manifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
   const expectedPrefix = manifest.name.replace('@', '').replace('/', '-');
   const match = tarballs.find((file) => file.startsWith(expectedPrefix));
   if (!match) throw new Error(`Could not find packed tarball for ${manifest.name}`);
-  return join(tempDir, match);
+  return { name: manifest.name, tarball: join(tempDir, match) };
 }
 
 try {
-  const tarballs = packageDirs.map(packPackage);
+  const packages = packageDirs.map(packPackage);
+  const tarballs = packages.map((pkg) => pkg.tarball);
 
   const npmProject = join(tempDir, 'npm-project');
   mkdirSync(npmProject, { recursive: true });
@@ -71,7 +72,14 @@ try {
 
   const pnpmProject = join(tempDir, 'pnpm-project');
   mkdirSync(pnpmProject, { recursive: true });
-  writeFileSync(join(pnpmProject, 'package.json'), '{"name":"charter-install-smoke-pnpm","version":"1.0.0"}\n');
+  const pnpmOverrides = Object.fromEntries(
+    packages.map((pkg) => [pkg.name, `file:${pkg.tarball}`]),
+  );
+  writeFileSync(join(pnpmProject, 'package.json'), `${JSON.stringify({
+    name: 'charter-install-smoke-pnpm',
+    version: '1.0.0',
+    pnpm: { overrides: pnpmOverrides },
+  }, null, 2)}\n`);
   run('pnpm', ['add', '--ignore-scripts', ...tarballs], { cwd: pnpmProject });
 
   console.log('Install smoke passed for npm and pnpm consumers.');
