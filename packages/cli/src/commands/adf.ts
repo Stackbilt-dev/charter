@@ -175,6 +175,39 @@ export const MANIFEST_DOCS_SCAFFOLD = `ADF: 0.1
   - Never assume unseen modules were loaded.
 `;
 
+export const RUST_WASM_SCAFFOLD = `ADF: 0.1
+\u{1F4CB} CONTEXT:
+  - Rust/WASM library module scaffold
+  - Pure-function exports compiled with wasm-pack; no server runtime
+
+⚠️ CONSTRAINTS [load-bearing]:
+  - Exported functions must be pure; no I/O, no global mutable state
+  - crate-type must include cdylib (WASM) and rlib (native tests)
+  - Build gate: cargo test AND wasm-pack test --node must both pass before npm publish
+  - Never commit pkg/ directory; it is wasm-pack output and belongs in .gitignore
+
+\u{1F4CB} ADVISORY:
+  - The publishable npm artifact is pkg/package.json, not the root package.json
+  - Root package.json is a private task-runner shell (build/test scripts only)
+  - Score and publish-readiness checks must look inside pkg/ for metadata
+  - Use wasm-bindgen-test with run_in_node_experimental for Node CI coverage
+`;
+
+export const MANIFEST_RUST_WASM_SCAFFOLD = `ADF: 0.1
+\u{1F3AF} ROLE: Rust/WASM library context router
+
+\u{1F4E6} DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+\u{1F4C2} ON_DEMAND:
+  - rust-wasm.adf (Triggers on: Rust, Cargo, WASM, wasm-pack, wasm-bindgen, cdylib, wasm32)
+
+\u{1F4D0} RULES:
+  - Prefer smallest relevant module set.
+  - Never assume unseen modules were loaded.
+`;
+
 /** Return the correct manifest scaffold for a given preset. */
 export function manifestForPreset(preset?: string): string {
   switch (preset) {
@@ -185,6 +218,8 @@ export function manifestForPreset(preset?: string): string {
     case 'backend':
     case 'worker':
       return MANIFEST_BACKEND_SCAFFOLD;
+    case 'rust-wasm':
+      return MANIFEST_RUST_WASM_SCAFFOLD;
     default:
       return MANIFEST_SCAFFOLD;
   }

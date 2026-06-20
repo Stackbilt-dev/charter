@@ -139,3 +139,82 @@ describe('classification quality and confidence', () => {
     expect(result.enrichedIntention.length).toBeGreaterThanOrEqual(result.traits.length > 0 ? 10 : 0);
   });
 });
+
+// ─── Rust/WASM classification tests (charter#230) ────────────────────────────
+
+describe('Rust/WASM pattern classification', () => {
+  it('classifies a wasm-pack + wasm-bindgen intention as rust-wasm', () => {
+    const result = classify('Rust crate using wasm-pack and wasm-bindgen for Node/Workers');
+    expect(result.pattern).toBe('rust-wasm');
+  });
+
+  it('produces non-low confidence for rust-wasm classification', () => {
+    const result = classify('Rust crate using wasm-pack and wasm-bindgen for Node/Workers');
+    expect(result.confidence).toBeGreaterThan(0.3);
+  });
+
+  it('classifies cdylib / Cargo.toml description as rust-wasm', () => {
+    const result = classify('Rust library with cdylib and rlib crate-type compiled to wasm32');
+    expect(result.pattern).toBe('rust-wasm');
+  });
+
+  it('classifies WebAssembly keyword as rust-wasm', () => {
+    const result = classify('WebAssembly module written in Rust with wasm-bindgen exports');
+    expect(result.pattern).toBe('rust-wasm');
+  });
+
+  it('includes rust-wasm traits in the result', () => {
+    const result = classify('wasm-pack Rust library targeting Node.js and bundler');
+    expect(result.traits).toContain('rust');
+    expect(result.traits).toContain('no-server');
+  });
+
+  it('does not classifiy a plain REST API as rust-wasm', () => {
+    const result = classify('REST API with CRUD endpoints and JWT auth');
+    expect(result.pattern).not.toBe('rust-wasm');
+  });
+
+  it('does not classify a CF worker as rust-wasm when no Rust signals present', () => {
+    const result = classify('Cloudflare Worker webhook handler for Stripe payments');
+    expect(result.pattern).not.toBe('rust-wasm');
+  });
+
+  it('buildScaffold for rust-wasm does not emit wrangler.toml', () => {
+    const result = buildScaffold('Rust/WASM library using wasm-pack and wasm-bindgen', { projectName: 'test-lib' });
+    const paths = result.files.map((f: ScaffoldFile) => f.path);
+    expect(paths).not.toContain('wrangler.toml');
+    expect(paths).not.toContain('schema.sql');
+    expect(paths).not.toContain('src/index.ts');
+  });
+
+  it('buildScaffold for rust-wasm emits Cargo.toml and src/lib.rs', () => {
+    const result = buildScaffold('Rust/WASM library using wasm-pack and wasm-bindgen', { projectName: 'test-lib' });
+    const paths = result.files.map((f: ScaffoldFile) => f.path);
+    expect(paths).toContain('Cargo.toml');
+    expect(paths).toContain('src/lib.rs');
+  });
+
+  it('buildScaffold Cargo.toml contains cdylib and rlib crate types', () => {
+    const result = buildScaffold('Rust crate compiled with wasm-pack', { projectName: 'my-crate' });
+    const cargo = fileContent(result, 'Cargo.toml');
+    expect(cargo).toContain('cdylib');
+    expect(cargo).toContain('rlib');
+    expect(cargo).toContain('wasm-bindgen');
+  });
+
+  it('buildScaffold CI workflow contains wasm32 target and wasm-pack test --node', () => {
+    const result = buildScaffold('Rust WASM library for Node.js consumption', { projectName: 'wasm-lib' });
+    const ci = fileContent(result, '.github/workflows/ci.yml');
+    expect(ci).toContain('wasm32-unknown-unknown');
+    expect(ci).toContain('wasm-pack test --node');
+  });
+
+  it('buildScaffold rust-wasm package.json is private with build/test scripts', () => {
+    const result = buildScaffold('wasm-bindgen Rust module', { projectName: 'my-wasm' });
+    const pkgRaw = fileContent(result, 'package.json');
+    const pkg = JSON.parse(pkgRaw) as { private?: boolean; scripts?: Record<string, string> };
+    expect(pkg.private).toBe(true);
+    expect(pkg.scripts?.['build']).toContain('wasm-pack build');
+    expect(pkg.scripts?.['test']).toContain('wasm-pack test --node');
+  });
+});

@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/scaffold-core",
   "sideEffects": false,
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Zero-dependency scaffold engine core — pattern classification, knowledge, governance, codegen, and materializer",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

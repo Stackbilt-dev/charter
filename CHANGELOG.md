@@ -6,6 +6,26 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-20
+
+### Added
+
+- **Rust/WASM first-class support** (`charter#230`) — `charter bootstrap`, `charter setup`, `charter score`, and `@stackbilt/scaffold-core` all speak Rust/WASM natively:
+  - `PatternName` now includes `'rust-wasm'`; `PatternCategory` now includes `'LIBRARY'` — both are additive, no existing consumers break
+  - New `rust-wasm` scored pattern in `SCORED_PATTERNS` (priority 90, conjunctive Rust+WASM keyword scoring) — classifies intentions mentioning `cargo`, `wasm-pack`, `wasm-bindgen`, `cdylib`, `wasm32`, etc.
+  - `StackPreset` extended with `'rust-wasm'` — valid in `--preset` flag for `bootstrap`, `setup`, and `init`
+  - `baseFiles()` branches on `pattern === 'rust-wasm'`: generates `Cargo.toml` (cdylib + rlib), `src/lib.rs`, `tests/integration.rs`, private root `package.json` with wasm-pack scripts, `.gitignore` (excludes `pkg/`, `target/`), and `.github/workflows/ci.yml` with `wasm32-unknown-unknown` target + `wasm-pack test --node` + `wasm-pack build`. No `wrangler.toml`, `schema.sql`, or `src/index.ts` emitted.
+  - `inferBindings()` respects `no-server` trait — rust-wasm patterns receive no CF Worker bindings (no D1/KV defaults)
+  - `detectStack()` now performs a pre-flight Cargo.toml check when no `package.json` files are found. Pure Rust repos no longer fall to `confidence: 'LOW', suggestedPreset: 'fullstack'` — they return `confidence: 'HIGH'` with `suggestedPreset: 'rust-wasm'` (wasm signals present) or `'backend'` (plain Rust)
+  - `deriveTestCommands()` in `charter score` adds `wasm-pack test --node` and `wasm-pack build` when Cargo.toml contains wasm-bindgen/wasm-pack/wasm32 signals
+  - `charter score` probes `pkg/package.json` explicitly — wasm-pack output (gitignored) no longer causes false-zero on publish readiness scoring
+  - New `RUST_WASM_SCAFFOLD` and `MANIFEST_RUST_WASM_SCAFFOLD` ADF constants; `rust-wasm.adf` covers pure-export constraints, dual crate-type, wasm-pack gate, and `pkg/` publish boundary
+  - 17 new tests across classification, scaffold file assertions, and `detectStack` pure-Rust detection
+
+### Changed
+
+- `--preset` flag for `charter bootstrap`, `charter setup`, and `charter init` now accepts `rust-wasm` alongside `worker|frontend|backend|fullstack|docs`
+
 ## [1.3.0] - 2026-06-15
 
 ### Added

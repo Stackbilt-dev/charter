@@ -19,10 +19,11 @@ export type PatternName =
   | 'queue-consumer'
   | 'mcp-server'
   | 'email-worker'
-  | 'browser-automation';
+  | 'browser-automation'
+  | 'rust-wasm';
 
 export type PatternStatus = 'ACTIVE' | 'DEPRECATED' | 'EVALUATING';
-export type PatternCategory = 'COMPUTE' | 'DATA' | 'INTEGRATION' | 'SECURITY' | 'ASYNC';
+export type PatternCategory = 'COMPUTE' | 'DATA' | 'INTEGRATION' | 'SECURITY' | 'ASYNC' | 'LIBRARY';
 
 export interface PatternDef {
   name: PatternName;

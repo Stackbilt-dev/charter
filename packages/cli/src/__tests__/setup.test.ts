@@ -132,3 +132,72 @@ describe('syncPackageManifest', () => {
     expect(workflow).toContain('Governed-By: charter-score-badge');
   });
 });
+
+// ─── Pure Rust / rust-wasm detection (charter#230) ───────────────────────────
+
+describe('detectStack — pure Rust repo with no package.json', () => {
+  it('returns HIGH confidence and rust-wasm preset when Cargo.toml has wasm-bindgen', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-rust-wasm-'));
+    tempDirs.push(tmp);
+    process.chdir(tmp);
+
+    fs.writeFileSync(
+      'Cargo.toml',
+      `[package]
+name = "my-wasm-lib"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+`,
+    );
+
+    const contexts = loadPackageContexts();
+    expect(contexts).toHaveLength(0);
+
+    const result = detectStack(contexts);
+    expect(result.confidence).toBe('HIGH');
+    expect(result.suggestedPreset).toBe('rust-wasm');
+    expect(result.runtime).toContain('rust');
+    expect(result.sources).toContain('Cargo.toml');
+  });
+
+  it('returns HIGH confidence and backend preset for plain Rust (no wasm signals)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-rust-plain-'));
+    tempDirs.push(tmp);
+    process.chdir(tmp);
+
+    fs.writeFileSync(
+      'Cargo.toml',
+      `[package]
+name = "my-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = "4"
+`,
+    );
+
+    const contexts = loadPackageContexts();
+    const result = detectStack(contexts);
+    expect(result.confidence).toBe('HIGH');
+    expect(result.suggestedPreset).toBe('backend');
+    expect(result.runtime).toContain('rust');
+  });
+
+  it('still returns LOW confidence fullstack when no package.json and no Cargo.toml', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-empty-'));
+    tempDirs.push(tmp);
+    process.chdir(tmp);
+
+    const contexts = loadPackageContexts();
+    const result = detectStack(contexts);
+    expect(result.confidence).toBe('LOW');
+    expect(result.suggestedPreset).toBe('fullstack');
+  });
+});

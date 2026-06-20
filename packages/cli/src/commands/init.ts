@@ -12,7 +12,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { getDefaultConfigJSON } from '../config';
 
-export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack' | 'docs';
+export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack' | 'docs' | 'rust-wasm';
 
 const PATTERN_TEMPLATES: Record<StackPreset, unknown[]> = {
   worker: [
@@ -182,6 +182,40 @@ const PATTERN_TEMPLATES: Record<StackPreset, unknown[]> = {
       blessed_solution: 'PR-based review for documentation changes',
       rationale: 'Tracks authorship and enables async review',
       anti_patterns: 'Avoid direct pushes to main for substantive doc changes',
+      status: 'ACTIVE',
+    },
+  ],
+  'rust-wasm': [
+    {
+      name: 'Compilation Pipeline',
+      category: 'LIBRARY',
+      blessed_solution: 'wasm-pack build targeting bundler + node; dual cdylib/rlib crate-type',
+      rationale: 'Single source produces both WASM pkg and native test binary',
+      anti_patterns: 'Avoid running wasm-pack inside charter score; keep scoring deterministic',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Export Contract',
+      category: 'LIBRARY',
+      blessed_solution: 'Pure-function #[wasm_bindgen] exports; no I/O, no global state',
+      rationale: 'Enables use in both browser and Node contexts without runtime differences',
+      anti_patterns: 'Avoid side-effectful exports or host-environment assumptions in library code',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Test Strategy',
+      category: 'LIBRARY',
+      blessed_solution: 'wasm-bindgen-test (run_in_node_experimental) + cargo test for unit coverage',
+      rationale: 'Node runner validates the actual WASM binary; cargo test covers native fast-path',
+      anti_patterns: 'Avoid shipping without both cargo test and wasm-pack test --node in CI',
+      status: 'ACTIVE',
+    },
+    {
+      name: 'Publish Boundary',
+      category: 'LIBRARY',
+      blessed_solution: 'pkg/ directory (wasm-pack output) is the publishable npm artifact',
+      rationale: 'Root package.json is a private task-runner shell; pkg/package.json is the real manifest',
+      anti_patterns: 'Avoid publishing the root package; never commit pkg/ to source control',
       status: 'ACTIVE',
     },
   ],
@@ -420,7 +454,7 @@ function writeIfChanged(targetPath: string, content: string): boolean {
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
-  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs' || value === 'rust-wasm';
 }
 
 // ============================================================================

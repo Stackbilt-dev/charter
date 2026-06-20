@@ -430,6 +430,39 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
 
 export function detectStack(contexts: PackageContext[]): DetectionResult {
   if (contexts.length === 0) {
+    // Pure-native repo: no package.json found anywhere. Check for Cargo.toml
+    // before returning a blind fullstack guess — a Rust repo getting a React/CF
+    // stack suggestion is worse than wrong, it's actively misleading.
+    if (fs.existsSync(path.resolve('Cargo.toml'))) {
+      let cargoContent = '';
+      try { cargoContent = fs.readFileSync(path.resolve('Cargo.toml'), 'utf-8'); } catch { /* ignore */ }
+      const isWasm = /wasm-bindgen|wasm-pack|wasm32/.test(cargoContent);
+      const agentStandards = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']
+        .filter((f) => fs.existsSync(path.resolve(f)));
+      return {
+        runtime: ['rust'],
+        frameworks: [],
+        state: [],
+        sources: ['Cargo.toml'],
+        agentStandards,
+        monorepo: false,
+        signals: {
+          hasFrontend: false,
+          hasBackend: false,
+          hasWorker: false,
+          hasCloudflare: false,
+          hasHono: false,
+          hasReact: false,
+          hasVite: false,
+          hasPnpm: false,
+        },
+        mixedStack: false,
+        confidence: 'HIGH',
+        suggestedPreset: isWasm ? 'rust-wasm' : 'backend',
+        warnings: isWasm ? [] : ['Rust project detected; no wasm-bindgen/wasm-pack signals found — defaulting to backend preset'],
+      };
+    }
+
     return {
       runtime: [],
       frameworks: [],

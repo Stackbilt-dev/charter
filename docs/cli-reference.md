@@ -83,7 +83,7 @@ npx charter bootstrap --skip-install --skip-doctor            # minimal
 ```
 
 - `--ci github` — generate GitHub Actions governance workflow
-- `--preset <worker|frontend|backend|fullstack|docs>` — stack preset
+- `--preset <worker|frontend|backend|fullstack|docs|rust-wasm>` — stack preset
 - `--security-sensitive` — generate `SECURITY.md`, seed hard-fail drift denies in `.charter/patterns/security-deny.json`, and warn in `doctor` when no `security*` or `l4*` test file exists
 - `--skip-install` — skip dependency installation phase
 - `--skip-doctor` — skip health check phase
@@ -97,12 +97,13 @@ Bootstraps `.charter/` config and optionally writes CI workflow scaffolding. For
 npx charter setup --detect-only --format json
 npx charter setup --ci github --yes
 npx charter setup --preset fullstack --ci github --yes
+npx charter setup --preset rust-wasm --ci github --yes
 ```
 
 Setup-specific options:
 
 - `--ci github` — generate GitHub Actions governance workflow
-- `--preset <worker|frontend|backend|fullstack|docs>` — stack preset
+- `--preset <worker|frontend|backend|fullstack|docs|rust-wasm>` — stack preset
 - `--detect-only` — preview detection results without writing files
 - `--no-dependency-sync` — skip rewriting `@stackbilt/cli` devDependency
 
@@ -208,6 +209,17 @@ npx charter adf init --module testing         # add a single module to existing 
 | `state.adf` | Current session state |
 | `decisions.adf` | ADR and decision tracking (triggers: ADR, decision, rationale) |
 | `planning.adf` | Roadmap and milestone tracking (triggers: plan, milestone, phase, roadmap) |
+
+**Rust/WASM preset** (`--preset rust-wasm`):
+
+| File | Purpose |
+|------|---------|
+| `manifest.adf` | Rust/WASM-specific module routing (triggers: Cargo, WASM, wasm-pack, wasm-bindgen, cdylib, wasm32) |
+| `core.adf` | Universal constraints and metrics |
+| `state.adf` | Current session state |
+| `rust-wasm.adf` | Library constraints: pure exports, dual crate-type, wasm-pack build/test gates, pkg/ publish boundary |
+
+`charter bootstrap --preset rust-wasm` also scaffolds: `Cargo.toml` (cdylib + rlib), `src/lib.rs`, `tests/integration.rs`, root `package.json` (private, wasm-pack scripts), `.gitignore` (excludes `pkg/`, `target/`), and `.github/workflows/ci.yml` (Rust toolchain + wasm32 target + wasm-pack test + wasm-pack build steps).
 
 ### charter adf create
 
@@ -510,6 +522,7 @@ Seeds for hotspot analysis are chosen by resolved preset (from `.charter/config.
 | fullstack | worker + frontend seeds |
 | cli | `bin/` entries, `src/commands/*.ts` |
 | docs | `README.md`, `docs/*.md` |
+| rust-wasm | `src/lib.rs`, `src/**/*.rs`, `Cargo.toml` |
 | unknown | `src/index.*`, `src/main.*` |
 
 ### charter context-refresh

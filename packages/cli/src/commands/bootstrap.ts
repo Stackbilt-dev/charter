@@ -37,6 +37,7 @@ import {
   DECISIONS_SCAFFOLD,
   PLANNING_SCAFFOLD,
   CONTENT_SCAFFOLD,
+  RUST_WASM_SCAFFOLD,
   POINTER_CLAUDE_MD_HYBRID,
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
@@ -783,6 +784,8 @@ function getAdfScaffolds(preset?: StackPreset): Array<{ name: string; content: s
     scaffolds.push({ name: 'frontend.adf', content: FRONTEND_SCAFFOLD });
   } else if (preset === 'backend' || preset === 'worker') {
     scaffolds.push({ name: 'backend.adf', content: BACKEND_SCAFFOLD });
+  } else if (preset === 'rust-wasm') {
+    scaffolds.push({ name: 'rust-wasm.adf', content: RUST_WASM_SCAFFOLD });
   } else {
     scaffolds.push(
       { name: 'frontend.adf', content: FRONTEND_SCAFFOLD },
@@ -1285,7 +1288,7 @@ function runDoctorPhase(
 const DEFAULT_LOAD_MODULES = new Set(['core.adf', 'state.adf']);
 
 function isValidPreset(value: string | undefined): value is StackPreset {
-  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs' || value === 'rust-wasm';
 }
 
 function hashContent(content: string): string {

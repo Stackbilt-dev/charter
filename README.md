@@ -80,6 +80,26 @@ Add to your `package.json` scripts for convenience:
 }
 ```
 
+### Rust/WASM projects
+
+Charter has first-class support for Rust/WASM libraries built with `wasm-pack`. Running `charter bootstrap` in a repo with `Cargo.toml` and `wasm-bindgen` signals detects the project automatically and selects the `rust-wasm` preset — no `--preset` flag needed.
+
+What you get with `--preset rust-wasm`:
+
+- **No Cloudflare Worker artifacts** — `wrangler.toml`, `schema.sql`, and `src/worker.ts` are never generated
+- **Correct project skeleton** — `Cargo.toml` (cdylib + rlib), `src/lib.rs`, `tests/integration.rs`
+- **Aware CI workflow** — `dtolnay/rust-toolchain@stable` + `wasm32-unknown-unknown` target + `wasm-pack test --node` + `wasm-pack build --target bundler`
+- **Publish boundary awareness** — `charter score` looks inside `pkg/package.json` (wasm-pack output) for metadata, not the private root `package.json`
+- **`rust-wasm.adf`** — library-specific ADF module covering pure-export constraints, dual crate-type requirement, and the `pkg/` publish boundary
+
+```bash
+# In a fresh Rust/WASM crate
+charter bootstrap --preset rust-wasm --yes
+
+# Or let auto-detection pick it up (requires Cargo.toml with wasm-bindgen)
+charter bootstrap --yes
+```
+
 ### WSL / DrvFs installs
 
 Two distinct issues can appear when the repo lives on a Windows-mounted filesystem (`/mnt/c/...`, `/mnt/d/...`):

@@ -265,6 +265,30 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
       source_pattern: 'rest-api',
     },
   },
+  {
+    name: 'rust-wasm' as PatternName,
+    status: 'ACTIVE',
+    category: 'LIBRARY',
+    keywords: ['rust', 'wasm', 'wasm-pack', 'wasm-bindgen', 'cargo', 'cdylib', 'webassembly', 'crate', 'wasm32'],
+    traits: ['rust', 'wasm-bindgen', 'dual-target', 'npm-from-wasm-pack', 'no-server'],
+    signal: 'Rust/WASM Signal',
+    priority: 90,
+    score: (text: string) => {
+      const rustHits = keywordScore(text, ['rust', 'cargo', 'cargo.toml', 'crate', 'cdylib', 'rlib']);
+      const wasmHits = keywordScore(text, ['wasm', 'wasm-pack', 'wasm-bindgen', 'webassembly', 'wasm32']);
+      if (rustHits >= 1 || wasmHits >= 1) return rustHits + wasmHits;
+      return 0;
+    },
+    traitMap: {
+      source_pattern: 'rust-wasm',
+      build_tool: 'wasm-pack',
+      publish_target: 'npm-from-pkg',
+      test_runner: 'wasm-bindgen-test',
+      pattern_element: 'Library',
+      pattern_category: 'Library',
+      pattern_tier: 'approved',
+    },
+  },
 ];
 
 /**

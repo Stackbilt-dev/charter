@@ -45,8 +45,9 @@ export function inferBindings(intention: string, traits: string[] = []): Scaffol
     bindings.push({ type: 'AI', name: 'AI', binding: 'AI' });
   }
 
-  // Default: any worker needs at least D1 + KV
-  if (bindings.length === 0) {
+  // Library patterns (e.g. rust-wasm) have no CF Worker runtime and need no bindings.
+  // The 'no-server' trait is the canonical signal for this class of patterns.
+  if (bindings.length === 0 && !traitsStr.includes('no-server')) {
     bindings.push({ type: 'D1', name: 'DB', binding: 'DB' });
     bindings.push({ type: 'KV', name: 'CACHE', binding: 'CACHE' });
   }

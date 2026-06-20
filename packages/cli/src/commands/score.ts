@@ -769,7 +769,14 @@ function walkRepo(absoluteDir: string, relativeDir: string, files: string[]): vo
 function deriveTestCommands(inventory: RepoInventory, packageManager: 'npm' | 'pnpm'): string[] {
   const commands = new Set<string>();
 
-  for (const packageJsonPath of inventory.files.filter((file) => path.posix.basename(file) === 'package.json')) {
+  // Collect package.json paths, preferring pkg/package.json for wasm-pack projects
+  // (the publishable artifact) over the private root shell when scripts exist there.
+  const pkgJsonPaths = inventory.files.filter((file) => path.posix.basename(file) === 'package.json');
+  // Also probe pkg/package.json — wasm-pack output is gitignored and won't appear
+  // in the inventory, so we check for it explicitly as a filesystem probe.
+  const wasmPkgJson = 'pkg/package.json';
+  const wasmPkgJsonPaths: string[] = fs.existsSync(path.resolve(wasmPkgJson)) ? [wasmPkgJson] : [];
+  for (const packageJsonPath of [...pkgJsonPaths, ...wasmPkgJsonPaths]) {
     try {
       const raw = fs.readFileSync(path.resolve(packageJsonPath), 'utf-8');
       const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
@@ -791,6 +798,16 @@ function deriveTestCommands(inventory: RepoInventory, packageManager: 'npm' | 'p
   }
   if (inventory.fileSet.has('Cargo.toml')) {
     commands.add('cargo test');
+    // Detect wasm-pack projects via Cargo.toml content inspection.
+    // We read line-by-line rather than a full TOML parse to stay dependency-free;
+    // the signals we need (wasm-bindgen, wasm-pack, wasm32) appear as plain strings.
+    try {
+      const cargoContent = fs.readFileSync(path.resolve('Cargo.toml'), 'utf-8');
+      if (/wasm-bindgen|wasm-pack|wasm32/.test(cargoContent)) {
+        commands.add('wasm-pack test --node');
+        commands.add('wasm-pack build --target bundler --out-dir pkg');
+      }
+    } catch { /* ignore unreadable Cargo.toml */ }
   }
   if (inventory.fileSet.has('go.mod') || inventory.files.some((file) => file.endsWith('_test.go'))) {
     commands.add('go test ./...');
