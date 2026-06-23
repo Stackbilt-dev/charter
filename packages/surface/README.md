@@ -26,9 +26,12 @@ Via the Charter CLI:
 ```bash
 charter surface                                    # Text summary
 charter surface --format json                      # JSON for tooling
-charter surface --markdown                         # Markdown for .ai/surface.adf
+charter surface --format markdown                  # Markdown for .ai/surface.adf (--markdown/--md also accepted)
 charter surface --root ./packages/worker           # Scan a subdirectory
 charter surface --schema db/schema.sql             # Explicit schema path
+charter surface --exclude packages/scaffold-core   # Skip a path prefix
+charter surface --exclude "**/codegen/**"          # Skip any codegen/ directory (** glob)
+charter surface --exclude src/templates --exclude fixtures  # Multiple excludes
 ```
 
 ## Programmatic Usage
@@ -38,7 +41,10 @@ import { analyze, SurfaceInputSchema } from '@stackbilt/surface';
 
 // `analyze` is the Core-Out entry point — validates input via Zod,
 // composes extractSurface, returns a SurfaceOutput-shaped result.
-const input = SurfaceInputSchema.parse({ root: './packages/worker' });
+const input = SurfaceInputSchema.parse({
+  root: './packages/worker',
+  excludeGlobs: ['**/codegen/**'],   // optional: skip scaffold template directories
+});
 const result = analyze(input);
 
 console.log(result.summary);
@@ -68,7 +74,8 @@ Scans a project directory and returns its full API surface (routes + schemas).
 **Options:**
 - `root` — project root (default: `cwd`)
 - `extensions` — file extensions to scan for routes (default: `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`)
-- `ignoreDirs` — additional directories to skip
+- `ignoreDirs` — additional directory names to skip (basename match only)
+- `excludeGlobs` — path patterns relative to root to exclude; supports `*` (within-segment) and `**` (multi-segment) wildcards (e.g. `['**/codegen/**', 'packages/scaffold-core']`)
 - `schemaPaths` — explicit schema file paths (default: auto-detect `*schema*.sql` under root)
 
 **Returns:** `{ root, routes, schemas, summary }`

@@ -21,13 +21,23 @@ import { z } from 'zod';
 export async function surfaceCommand(options: CLIOptions, args: string[]): Promise<number> {
   const rootArg = getFlag(args, '--root') || '.';
   const schemaFlag = getFlag(args, '--schema');
-  const asMarkdown = args.includes('--markdown') || args.includes('--md');
+  const asMarkdown = args.includes('--markdown') || args.includes('--md') || options.format === 'markdown';
+
+  // Collect all --exclude values (flag may appear multiple times).
+  // Guard against adjacent flags being consumed as values (e.g. --root --exclude src).
+  const excludeGlobs: string[] = [];
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] === '--exclude' && !args[i + 1].startsWith('--')) {
+      excludeGlobs.push(args[i + 1]);
+    }
+  }
 
   let input;
   try {
     input = SurfaceInputSchema.parse({
       root: rootArg,
       schemaPaths: schemaFlag ? [path.resolve(schemaFlag)] : undefined,
+      excludeGlobs: excludeGlobs.length > 0 ? excludeGlobs : undefined,
     });
   } catch (err) {
     if (err instanceof z.ZodError) {

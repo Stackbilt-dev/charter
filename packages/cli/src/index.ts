@@ -71,8 +71,10 @@ Usage:
   charter score [--ai-dir <dir>] AI-readiness audit for the current repo
   charter blast <file> [<file> ...] [--root <dir>] [--depth <n>]
                                    Compute blast radius: which files transitively depend on the seeds
-  charter surface [--root <dir>] [--schema <path>]
+  charter surface [--root <dir>] [--schema <path>] [--format markdown] [--exclude <glob>]
                                    Extract API surface: routes (Hono/Express) + D1 schema tables
+                                   --format markdown: emit as markdown (--markdown/--md also accepted)
+                                   --exclude <glob>: skip paths matching glob (repeatable; supports ** and *)
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
@@ -81,7 +83,7 @@ Usage:
 
 Options:
   --config <path>    Path to .charter/ directory (default: .charter/)
-  --format <type>    Output format: text, json (default: text)
+  --format <type>    Output format: text, json, markdown (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
   --yes              Non-interactive bootstrap; accept default actions
   --force            Overwrite existing custom files during bootstrap (.ai/*.adf are backed up first)
@@ -109,7 +111,7 @@ export class CLIError extends Error {
 
 export interface CLIOptions {
   configPath: string;
-  format: 'text' | 'json';
+  format: 'text' | 'json' | 'markdown';
   ciMode: boolean;
   yes: boolean;
 }
@@ -145,8 +147,15 @@ export async function run(args: string[]): Promise<number> {
       return EXIT_CODE.SUCCESS;
     }
 
-    if (rawFormat !== 'text' && rawFormat !== 'json') {
-      throw new CLIError(`Invalid --format value: ${rawFormat}. Use text or json.`);
+    if (rawFormat !== 'text' && rawFormat !== 'json' && rawFormat !== 'markdown') {
+      throw new CLIError(`Invalid --format value: ${rawFormat}. Use text, json, or markdown.`);
+    }
+
+    if (rawFormat === 'markdown') {
+      const subcommand = args.length > 0 && !args[0].startsWith('-') ? args[0] : null;
+      if (subcommand !== 'surface') {
+        throw new CLIError(`--format markdown is only supported by 'charter surface'. Use text or json.`);
+      }
     }
 
     const options: CLIOptions = {
