@@ -152,8 +152,11 @@ jobs:
       - name: Verify packed manifests
         run: pnpm run publish:check
 
-      # Auth is OIDC via npm trusted publishers — no NPM_TOKEN needed.
-      # See: https://docs.npmjs.com/trusted-publishers
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish to npm
         shell: bash
         run: |
