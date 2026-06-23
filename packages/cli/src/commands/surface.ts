@@ -23,10 +23,13 @@ export async function surfaceCommand(options: CLIOptions, args: string[]): Promi
   const schemaFlag = getFlag(args, '--schema');
   const asMarkdown = args.includes('--markdown') || args.includes('--md') || options.format === 'markdown';
 
-  // Collect all --exclude values (flag may appear multiple times)
+  // Collect all --exclude values (flag may appear multiple times).
+  // Guard against adjacent flags being consumed as values (e.g. --root --exclude src).
   const excludeGlobs: string[] = [];
   for (let i = 0; i < args.length - 1; i++) {
-    if (args[i] === '--exclude') excludeGlobs.push(args[i + 1]);
+    if (args[i] === '--exclude' && !args[i + 1].startsWith('--')) {
+      excludeGlobs.push(args[i + 1]);
+    }
   }
 
   let input;

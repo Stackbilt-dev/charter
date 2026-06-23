@@ -149,6 +149,13 @@ export async function run(args: string[]): Promise<number> {
       throw new CLIError(`Invalid --format value: ${rawFormat}. Use text, json, or markdown.`);
     }
 
+    if (rawFormat === 'markdown') {
+      const subcommand = args.length > 0 && !args[0].startsWith('-') ? args[0] : null;
+      if (subcommand !== 'surface') {
+        throw new CLIError(`--format markdown is only supported by 'charter surface'. Use text or json.`);
+      }
+    }
+
     const options: CLIOptions = {
       configPath,
       format: rawFormat,

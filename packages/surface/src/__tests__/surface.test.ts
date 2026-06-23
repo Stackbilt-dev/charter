@@ -332,6 +332,17 @@ app.post('/api/users', createUser);
     expect(result.routes[0].path).toBe('/real');
   });
 
+  it('honors excludeGlobs — trailing ** excludes all files under a directory', () => {
+    write('src/app.ts', `import { Hono } from 'hono';\napp.get('/real', h);`);
+    write('packages/scaffold-core/src/routes.ts', `app.post('/template', h);`);
+    write('packages/scaffold-core/src/handler.ts', `app.get('/also-template', h);`);
+
+    const input = SurfaceInputSchema.parse({ root: tmpRoot, excludeGlobs: ['packages/**'] });
+    const result = analyze(input);
+    expect(result.summary.routeCount).toBe(1);
+    expect(result.routes[0].path).toBe('/real');
+  });
+
   it('honors an explicit schemaPaths list', () => {
     const schemaFile = write(
       'db/custom-name.sql',
