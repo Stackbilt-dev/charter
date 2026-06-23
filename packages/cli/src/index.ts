@@ -71,8 +71,10 @@ Usage:
   charter score [--ai-dir <dir>] AI-readiness audit for the current repo
   charter blast <file> [<file> ...] [--root <dir>] [--depth <n>]
                                    Compute blast radius: which files transitively depend on the seeds
-  charter surface [--root <dir>] [--schema <path>]
+  charter surface [--root <dir>] [--schema <path>] [--format markdown] [--exclude <glob>]
                                    Extract API surface: routes (Hono/Express) + D1 schema tables
+                                   --format markdown: emit as markdown (--markdown/--md also accepted)
+                                   --exclude <glob>: skip paths matching glob (repeatable; supports ** and *)
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
   charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)

@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-23
+
+### Added
+
+- **`charter surface --format markdown`** (`cli#236`) — `--format markdown` is now a valid format value for `charter surface`. Previously the flag was rejected with "Invalid --format value: markdown. Use text or json." Passing `--format markdown` now routes to the same `formatSurfaceMarkdown()` output as the existing `--markdown`/`--md` shorthand flags, producing a markdown table of routes and schema tables suitable for piping into documentation tools, vault sync scripts, or AI context files. `--format markdown` is gated to the `surface` subcommand — other subcommands continue to reject it with a descriptive error.
+- **`charter surface --exclude <glob>`** (`cli#237`) — New `--exclude <path>` flag filters paths from the surface scan. Accepts any number of `--exclude` invocations per command. Supports plain path prefixes (`packages/scaffold-core`), within-segment wildcards (`src/gen*`), and multi-segment `**` wildcards (`**/codegen/**`, `packages/**`). Fixes false-positive routes when running `charter surface` inside repos that contain scaffold template source files (template route strings match the route extraction regex). Implemented as `excludeGlobs` in `SurfaceInputSchema`, `ExtractOptions`, and `analyze()` — programmatic callers can pass the field directly without the CLI flag.
+
+### Changed
+
+- `CLIOptions.format` type extended from `'text' | 'json'` to `'text' | 'json' | 'markdown'` — consumers that switch exhaustively on this type should add a `'markdown'` branch.
+- `SurfaceInputSchema` gains `excludeGlobs: z.array(z.string()).default([])`. Additive only — existing calls without the field continue to work unchanged.
+- `extractSurface` / `ExtractOptions` gain `excludeGlobs?: string[]`. Additive only.
+- `walkFiles` internal signature updated to accept `root` and `excludeGlobs` parameters. Not a public export; callers using only `extractSurface` or `analyze` are unaffected.
+
 ## [1.5.0] - 2026-06-20
 
 ### Added

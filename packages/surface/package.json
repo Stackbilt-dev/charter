@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/surface",
   "sideEffects": false,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "API surface extraction: routes (Hono/Express) + D1 SQL schema",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -258,7 +258,8 @@ charter serve                            # MCP server for Claude Code, Codex, Cu
 charter blast src/foo.ts                 # Blast radius: files that transitively import the seed
 charter blast src/a.ts src/b.ts --depth 4  # Multi-seed, custom BFS depth
 charter surface                          # Extract routes (Hono/Express) + D1 schema
-charter surface --markdown               # Emit as markdown for .ai/surface.adf or AI context
+charter surface --format markdown        # Emit as markdown for .ai/surface.adf or AI context
+charter surface --exclude packages/scaffold-core  # Skip a directory (supports ** globs)
 ```
 
 Deterministic codebase analysis — no LLM calls, zero runtime dependencies. `blast` warns on large radiuses (≥20 files) as a CROSS_CUTTING signal; `surface` is a lightweight alternative to full AST walks for Cloudflare Worker projects.
