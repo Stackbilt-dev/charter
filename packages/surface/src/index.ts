@@ -111,16 +111,45 @@ export interface ExtractOptions {
   ignoreDirs?: string[];
   /** explicit schema file path(s); default: auto-detect schema.sql anywhere under root */
   schemaPaths?: string[];
+  /** path patterns (relative to root, supports * and **) to exclude from scanning */
+  excludeGlobs?: string[];
 }
 
 // ============================================================================
 // File walking
 // ============================================================================
 
+/**
+ * Match a relative path against a glob pattern.
+ * Supports `*` (within a path segment) and `**` (across segments).
+ * Plain strings without wildcards match if the relPath equals or is nested
+ * under the pattern (i.e., prefix + `/`).
+ */
+function matchGlob(pattern: string, relPath: string): boolean {
+  const p = relPath.replace(/\\/g, '/');
+  const pat = pattern.replace(/\\/g, '/').replace(/\/$/, '');
+
+  if (!pat.includes('*')) {
+    return p === pat || p.startsWith(pat + '/');
+  }
+
+  // Escape regex metacharacters except * which we handle specially.
+  const regexStr = pat
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\x00')       // placeholder for **
+    .replace(/\*/g, '[^/]*')        // * → within-segment wildcard
+    .replace(/\x00\//g, '(?:[^/]+/)*')  // **/ → zero-or-more path segments
+    .replace(/\x00/g, '.*');        // trailing ** → anything
+
+  return new RegExp(`^(?:${regexStr})(?:/.*)?$`).test(p);
+}
+
 function walkFiles(
   dir: string,
+  root: string,
   extensions: Set<string>,
   ignoreDirs: Set<string>,
+  excludeGlobs: string[],
   out: string[] = []
 ): string[] {
   let entries: fs.Dirent[];
@@ -132,8 +161,10 @@ function walkFiles(
   for (const entry of entries) {
     if (ignoreDirs.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
+    const rel = path.relative(root, full).replace(/\\/g, '/');
+    if (excludeGlobs.length > 0 && excludeGlobs.some((g) => matchGlob(g, rel))) continue;
     if (entry.isDirectory()) {
-      walkFiles(full, extensions, ignoreDirs, out);
+      walkFiles(full, root, extensions, ignoreDirs, excludeGlobs, out);
     } else if (entry.isFile()) {
       if (extensions.has(path.extname(entry.name))) out.push(full);
     }
@@ -474,9 +505,10 @@ export function extractSurface(options: ExtractOptions = {}): Surface {
     ...DEFAULT_SURFACE_IGNORE_DIRS,
     ...(options.ignoreDirs ?? []),
   ]);
+  const excludeGlobs = options.excludeGlobs ?? [];
 
   // Routes
-  const sourceFiles = walkFiles(root, extensions, ignoreDirs);
+  const sourceFiles = walkFiles(root, root, extensions, ignoreDirs, excludeGlobs);
   const routes: Route[] = [];
   for (const file of sourceFiles) {
     // Skip test/spec files — their route strings are fixtures, not real routes
@@ -498,7 +530,7 @@ export function extractSurface(options: ExtractOptions = {}): Surface {
   // Schemas
   const schemaFiles =
     options.schemaPaths ??
-    walkFiles(root, new Set(['.sql']), ignoreDirs).filter((f) =>
+    walkFiles(root, root, new Set(['.sql']), ignoreDirs, excludeGlobs).filter((f) =>
       path.basename(f).toLowerCase().includes('schema')
     );
   const schemas: SchemaTable[] = [];
@@ -609,6 +641,11 @@ export const SurfaceInputSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Explicit paths to SQL schema files. When omitted, schema files are auto-detected under the scan root.'),
+  excludeGlobs: z
+    .array(z.string())
+    .optional()
+    .default([])
+    .describe('Path patterns relative to root to exclude from scanning. Supports * (within-segment) and ** (multi-segment) wildcards.'),
 });
 
 export type SurfaceInput = z.infer<typeof SurfaceInputSchema>;
@@ -650,5 +687,6 @@ export function analyze(input: SurfaceInput): SurfaceOutput {
     extensions: input.extensions,
     ignoreDirs: input.ignoreDirs,
     schemaPaths: input.schemaPaths,
+    excludeGlobs: input.excludeGlobs,
   });
 }

@@ -81,7 +81,7 @@ Usage:
 
 Options:
   --config <path>    Path to .charter/ directory (default: .charter/)
-  --format <type>    Output format: text, json (default: text)
+  --format <type>    Output format: text, json, markdown (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
   --yes              Non-interactive bootstrap; accept default actions
   --force            Overwrite existing custom files during bootstrap (.ai/*.adf are backed up first)
@@ -109,7 +109,7 @@ export class CLIError extends Error {
 
 export interface CLIOptions {
   configPath: string;
-  format: 'text' | 'json';
+  format: 'text' | 'json' | 'markdown';
   ciMode: boolean;
   yes: boolean;
 }
@@ -145,8 +145,8 @@ export async function run(args: string[]): Promise<number> {
       return EXIT_CODE.SUCCESS;
     }
 
-    if (rawFormat !== 'text' && rawFormat !== 'json') {
-      throw new CLIError(`Invalid --format value: ${rawFormat}. Use text or json.`);
+    if (rawFormat !== 'text' && rawFormat !== 'json' && rawFormat !== 'markdown') {
+      throw new CLIError(`Invalid --format value: ${rawFormat}. Use text, json, or markdown.`);
     }
 
     const options: CLIOptions = {

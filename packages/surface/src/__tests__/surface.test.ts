@@ -237,6 +237,7 @@ describe('SurfaceInputSchema', () => {
     expect(parsed.root).toBe('.');
     expect(parsed.extensions).toEqual([...DEFAULT_SURFACE_EXTENSIONS]);
     expect(parsed.ignoreDirs).toEqual([]);
+    expect(parsed.excludeGlobs).toEqual([]);
     expect(parsed.schemaPaths).toBeUndefined();
   });
 
@@ -246,11 +247,13 @@ describe('SurfaceInputSchema', () => {
       extensions: ['.ts'],
       ignoreDirs: ['private'],
       schemaPaths: ['db/schema.sql'],
+      excludeGlobs: ['src/codegen'],
     });
     expect(parsed.root).toBe('./packages/worker');
     expect(parsed.extensions).toEqual(['.ts']);
     expect(parsed.ignoreDirs).toEqual(['private']);
     expect(parsed.schemaPaths).toEqual(['db/schema.sql']);
+    expect(parsed.excludeGlobs).toEqual(['src/codegen']);
   });
 
   it('rejects non-array extensions', () => {
@@ -306,6 +309,27 @@ app.post('/api/users', createUser);
     const result = analyze(input);
     expect(result.summary.routeCount).toBe(1);
     expect(result.routes[0].path).toBe('/kept');
+  });
+
+  it('honors excludeGlobs — plain path prefix', () => {
+    write('src/app.ts', `import { Hono } from 'hono';\napp.get('/real', h);`);
+    write('packages/codegen/routes.ts', `app.post('/template', h);`);
+
+    const input = SurfaceInputSchema.parse({ root: tmpRoot, excludeGlobs: ['packages/codegen'] });
+    const result = analyze(input);
+    expect(result.summary.routeCount).toBe(1);
+    expect(result.routes[0].path).toBe('/real');
+  });
+
+  it('honors excludeGlobs — ** wildcard pattern excludes nested directories', () => {
+    write('src/app.ts', `import { Hono } from 'hono';\napp.get('/real', h);`);
+    write('packages/scaffold-core/src/codegen/routes.ts', `app.post('/template', h);`);
+    write('other/codegen/more.ts', `app.delete('/also-template', h);`);
+
+    const input = SurfaceInputSchema.parse({ root: tmpRoot, excludeGlobs: ['**/codegen/**'] });
+    const result = analyze(input);
+    expect(result.summary.routeCount).toBe(1);
+    expect(result.routes[0].path).toBe('/real');
   });
 
   it('honors an explicit schemaPaths list', () => {
