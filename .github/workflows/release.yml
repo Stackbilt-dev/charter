@@ -152,11 +152,12 @@ jobs:
       - name: Verify packed manifests
         run: pnpm run publish:check
 
-      - name: Configure npm auth
-        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
+      # Auth is handled by npm trusted publishing via OIDC (id-token: write above).
+      # No NPM_TOKEN is needed: the OIDC token authenticates the publish and signs
+      # provenance. Each @stackbilt/* package must have a GitHub Actions trusted
+      # publisher configured on npm (repo + this workflow path). If publish fails
+      # with 401, verify the trusted publisher at:
+      # https://www.npmjs.com/package/@stackbilt/<pkg>/access (Trusted Publisher).
       - name: Publish to npm
         shell: bash
         run: |
