@@ -7,6 +7,8 @@
 export type { PatternKnowledge, ThreatEntry } from '../types';
 export { patternSpecificThreats, domainThreats } from './threats';
 export { adrContextByPattern, adrDecisionByPattern } from './decisions';
+export { rustWasmDecisions, rustWasmThreats } from './rust-wasm';
+export type { RustWasmDecision, RustWasmThreat } from './rust-wasm.contract';
 
 import type { PatternKnowledge } from '../types';
 import { patternSpecificThreats, domainThreats } from './threats';
