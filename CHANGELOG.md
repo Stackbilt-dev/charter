@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-24
+
+### Added
+
+- **`@stackbilt/scaffold-core` Rust/WASM governance knowledge** (`#230`) — New `rustWasmDecisions()` and `rustWasmThreats()` exports in the `knowledge` module. Covers 4 architectural decisions (linear-memory ownership across the JS/Rust boundary, `wasm32-unknown-unknown` vs `wasm32-wasi` target selection, `wasm-bindgen` vs hand-written WASM glue, binary-size optimization) and 4 security threats (integer overflow in unsafe blocks `MEDIUM`, unchecked JS/Rust boundary deserialization `HIGH`, large binary load-time degradation `LOW`, missing CORS for cross-origin WASM fetch `MEDIUM`). Zero runtime dependencies — types enforced by TypeScript interfaces, not a runtime Zod dep.
+
+### Fixed
+
+- **`charter setup --preset rust-wasm`** (`#232`) — The `setup` command now accepts `--preset rust-wasm`. `isValidPreset` in the setup command was missing `rust-wasm` despite `bootstrap` and `init` already accepting it. The help text ("Use worker|frontend|backend|fullstack|docs") is updated to include `rust-wasm`.
+
+### Changed
+
+- **npm trusted publishing** (`#231`) — `publish-npm` CI job removes the `_authToken` NPM_TOKEN fallback step. The job already had `id-token: write`, npm 11.5.1+, and `--provenance` on every publish call; OIDC now handles auth end-to-end.
+
 ## [1.6.0] - 2026-06-23
 
 ### Added
