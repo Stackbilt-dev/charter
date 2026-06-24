@@ -204,7 +204,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   }
 
   if (presetFlag && !isValidPreset(presetFlag)) {
-    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack|docs.`);
+    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack|docs|rust-wasm.`);
   }
 
   const contexts = loadPackageContexts();
@@ -1023,7 +1023,7 @@ export function applyManagedFile(targetPath: string, content: string, force: boo
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
-  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs';
+  return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs' || value === 'rust-wasm';
 }
 
 export function syncPackageManifest(

@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { detectStack, getGithubWorkflow, loadPackageContexts, syncPackageManifest } from '../commands/setup';
+import { StackPresetSchema, VALID_PRESETS } from '../commands/setup.contract';
 
 const originalCwd = process.cwd();
 const tempDirs: string[] = [];
@@ -199,5 +200,25 @@ clap = "4"
     const result = detectStack(contexts);
     expect(result.confidence).toBe('LOW');
     expect(result.suggestedPreset).toBe('fullstack');
+  });
+});
+
+describe('isValidPreset', () => {
+  it('accepts all standard presets', () => {
+    for (const preset of ['worker', 'frontend', 'backend', 'fullstack', 'docs', 'rust-wasm']) {
+      expect(StackPresetSchema.safeParse(preset).success).toBe(true);
+    }
+    expect(VALID_PRESETS).toContain('rust-wasm');
+  });
+
+  it('rejects unknown presets', () => {
+    expect(StackPresetSchema.safeParse('nope').success).toBe(false);
+  });
+
+  it('getGithubWorkflow contains badge refresh and push trigger', () => {
+    const wf = getGithubWorkflow('npm');
+    expect(wf).toContain('push:');
+    expect(wf).toContain('charter score --badge --write');
+    expect(wf).toContain('Governed-By: charter-score-badge');
   });
 });
