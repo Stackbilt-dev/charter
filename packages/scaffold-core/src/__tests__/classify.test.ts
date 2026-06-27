@@ -140,6 +140,40 @@ describe('classification quality and confidence', () => {
   });
 });
 
+// ─── Stripe keyword dominance regression (#424) ─────────────────────────────
+
+describe('scaffold_classify — Stripe keyword does not dominate SaaS intent (#424)', () => {
+  it('SaaS billing dashboard with Stripe integration classifies as workers-saas', () => {
+    const result = classify(
+      'Build me a SaaS billing dashboard with Stripe integration, user management, and usage analytics',
+    );
+    expect(result.pattern).toBe('workers-saas');
+    expect(result.traits).toContain('jwt-auth');
+    expect(result.traits).not.toContain('hmac-stripe');
+  });
+
+  it('explicit Stripe webhook still classifies as stripe-webhook pattern', () => {
+    const result = classify('Build a Stripe webhook handler with HMAC verification and event routing');
+    expect(result.traits).toContain('hmac-stripe');
+    expect(result.confidence).toBeGreaterThan(0.5);
+  });
+
+  it('billing alone without payment keywords does not fire Payment Signal', () => {
+    const result = classify('Build a billing management dashboard with invoices and PDF export');
+    expect(result.traits).not.toContain('hmac-stripe');
+  });
+
+  it('stripe + billing together still classifies as stripe-webhook', () => {
+    const result = classify('Stripe billing webhook for subscription lifecycle events');
+    expect(result.traits).toContain('hmac-stripe');
+  });
+
+  it('dashboard keyword contributes to SaaS Signal score', () => {
+    const result = classify('Admin dashboard with user management, roles, and audit logs');
+    expect(result.pattern).toBe('workers-saas');
+  });
+});
+
 // ─── Rust/WASM classification tests (charter#230) ────────────────────────────
 
 describe('Rust/WASM pattern classification', () => {

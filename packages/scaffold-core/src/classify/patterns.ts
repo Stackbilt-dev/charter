@@ -78,9 +78,12 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
     signal: 'Payment Signal',
     priority: 100,
     score: (text: string) => {
-      const stripeHits = keywordScore(text, ['stripe', 'billing', 'subscription', 'checkout', 'payment', 'payments']);
-      if (stripeHits === 0 && text.includes('webhook')) return 0;
-      return stripeHits + (text.includes('webhook') ? 1 : 0);
+      // "billing" is intentionally excluded here — it appears in architectural contexts
+      // ("billing dashboard", "billing management") that are not Stripe webhook handlers.
+      // Require at least one explicit payment-action keyword before scoring billing terms.
+      const stripeHits = keywordScore(text, ['stripe', 'subscription', 'checkout', 'payment', 'payments']);
+      if (stripeHits === 0) return 0;
+      return stripeHits + (text.includes('billing') ? 1 : 0) + (text.includes('webhook') ? 1 : 0);
     },
     traitMap: {
       route_shape: 'post-handler',
@@ -104,7 +107,9 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
     signal: 'Webhook Signal',
     priority: 95,
     score: (text: string) => {
-      if (keywordScore(text, ['stripe', 'billing', 'subscription', 'checkout', 'payment', 'payments']) >= 1) return 0;
+      // Exclude only if explicit payment-action keywords are present (not "billing" alone —
+      // see Payment Signal comment; "billing webhook" without Stripe is generic).
+      if (keywordScore(text, ['stripe', 'subscription', 'checkout', 'payment', 'payments']) >= 1) return 0;
       return keywordScore(text, ['webhook', 'signature verification', 'x-hub-signature', 'github webhook', 'slack webhook', 'twilio webhook']);
     },
     traitMap: {
@@ -124,11 +129,14 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
     name: 'workers-saas' as PatternName,
     status: 'ACTIVE',
     category: 'COMPUTE',
-    keywords: ['saas', 'tenant', 'multi-tenant', 'org', 'workspace'],
+    keywords: ['saas', 'tenant', 'multi-tenant', 'org', 'workspace', 'dashboard', 'analytics', 'user management'],
     traits: ['rest', 'jwt-auth', 'resource-router', 'fetch-trigger'],
     signal: 'SaaS Signal',
     priority: 90,
-    score: (text: string) => keywordScore(text, ['saas', 'tenant', 'multi-tenant', 'org', 'workspace']),
+    score: (text: string) => keywordScore(
+      text,
+      ['saas', 'tenant', 'multi-tenant', 'org', 'workspace', 'dashboard', 'analytics', 'user management'],
+    ),
     traitMap: {
       route_shape: 'rest',
       verification: 'jwt-auth',
