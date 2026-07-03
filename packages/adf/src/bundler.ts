@@ -17,7 +17,7 @@ import { parseManifest, resolveModules, buildTriggerReport } from './manifest';
 import { mergeDocuments, estimateTokens } from './merger';
 
 // Re-export for backward compatibility
-export { parseManifest, resolveModules } from './manifest';
+export { parseManifest, resolveModules, buildTriggerReport } from './manifest';
 
 // ============================================================================
 // Bundle Orchestration

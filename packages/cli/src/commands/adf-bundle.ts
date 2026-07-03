@@ -16,6 +16,7 @@ import {
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
+import { recordAdfResolutionEvent } from '../telemetry';
 
 export function adfBundle(options: CLIOptions, args: string[]): number {
   const task = getFlag(args, '--task');
@@ -62,6 +63,15 @@ export function adfBundle(options: CLIOptions, args: string[]): number {
 
   try {
     const result = bundleModules(aiDir, loadableModulePaths, readFile, keywords, manifest);
+
+    recordAdfResolutionEvent(options.configPath, {
+      source: 'bundle',
+      keywords,
+      candidateModules: manifest.onDemand.map(m => m.path),
+      resolvedModules: result.resolvedModules,
+      triggerMatches: result.triggerMatches,
+      tokenEstimate: result.tokenEstimate,
+    });
 
     if (options.format === 'json') {
       const jsonOut: Record<string, unknown> = {

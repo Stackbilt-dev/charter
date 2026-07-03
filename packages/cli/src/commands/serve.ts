@@ -13,6 +13,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -39,6 +40,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { detectTsconfigAliases } from './blast';
+import { recordAdfResolutionEvent } from '../telemetry';
 
 // ============================================================================
 // Constants
@@ -94,6 +96,7 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
   }
 
   const projectName = customName ?? inferProjectName(aiDir);
+  const sessionId = process.env.CHARTER_SESSION_ID ?? randomUUID();
 
   // Lazy-import both MCP SDK modules here — after all guards — so the SDK's
   // stdin handle is never acquired on the error paths above.
@@ -107,7 +110,7 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
     version: '1.0.0',
   });
 
-  registerTools(server, aiDir, options);
+  registerTools(server, aiDir, options, sessionId);
   registerResources(server, aiDir);
 
   if (options.format !== 'json') {
@@ -125,7 +128,7 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
 // Tool Registration
 // ============================================================================
 
-function registerTools(server: McpServer, aiDir: string, options: CLIOptions): void {
+function registerTools(server: McpServer, aiDir: string, options: CLIOptions, sessionId: string): void {
 
   (server.registerTool as Function)(
     'charter_context',
@@ -168,6 +171,15 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions): v
           keywords,
           manifest,
         );
+        recordAdfResolutionEvent(options.configPath, {
+          source: 'mcp.getProjectContext',
+          keywords,
+          candidateModules: manifest.onDemand.map(m => m.path),
+          resolvedModules: bundle.resolvedModules,
+          triggerMatches: bundle.triggerMatches,
+          tokenEstimate: bundle.tokenEstimate,
+          sessionId,
+        });
         return { content: [{ type: 'text' as const, text: formatAdf(bundle.mergedDocument) }] };
       } catch (err) {
         return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
