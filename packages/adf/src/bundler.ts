@@ -41,6 +41,7 @@ export function bundleModules(
   const triggerMatches = buildTriggerReport(manifest, modulePaths, taskKeywords);
 
   const documents: AdfDocument[] = [];
+  const documentsByPath: Record<string, AdfDocument> = {};
   const perModuleTokens: Record<string, number> = {};
   const advisoryOnlyModules: string[] = [];
   const defaultLoadSet = new Set(manifest.defaultLoad);
@@ -55,6 +56,7 @@ export function bundleModules(
     }
     const doc = parseAdf(content);
     documents.push(doc);
+    documentsByPath[modPath] = doc;
     perModuleTokens[modPath] = estimateTokens(doc);
 
     // Flag on-demand modules with no load-bearing sections
@@ -103,6 +105,7 @@ export function bundleModules(
     triggerMatches,
     unmatchedModules,
     advisoryOnlyModules,
+    documents: documentsByPath,
   };
 }
 

@@ -3,14 +3,20 @@
  *
  * Diagnostics over .charter/telemetry/events.ndjson: which ADF modules
  * never fire, which task keywords never match a trigger anywhere, and
- * which modules load yet a downstream command still fails.
+ * which modules load yet still get violated.
  *
- * By default this is entirely report-only. Attributing a *failure* to a
- * specific module's trigger list would require knowing which module's
- * constraint was violated, and nothing in current telemetry (validate/
- * drift/evidence check commit trailers, CLAUDE.md sync, and METRICS
- * ceilings respectively) records that — so no op is ever generated from
- * the failure-correlation signal alone.
+ * `loadedButViolated` now has two tiers of evidence:
+ *  - Exact: `charter adf evidence` records an `adf.constraint` event for
+ *    every failing METRICS ceiling, tagged with the specific module it
+ *    belongs to (see `validateConstraints`'s `module` param). Joining
+ *    resolution events against these by module + session/time gives a
+ *    real failure attribution, not a guess.
+ *  - Correlated (fallback): for constraint checks that don't emit
+ *    module-tagged evidence (commit-trailer validation, blessed-stack
+ *    drift scans — neither of which is module-shaped), or for telemetry
+ *    predating this event, we fall back to "some downstream command in
+ *    this session/window failed" — a much weaker signal, kept only so the
+ *    detector still says something in the absence of exact evidence.
  *
  * `--emit-ops` adds one narrower, self-contained mechanism on top: a
  * co-occurrence heuristic. If an unmatched keyword frequently appears
@@ -30,7 +36,7 @@ import type { PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import type { AdfResolutionEvent, CliTelemetryEvent } from '../telemetry';
+import type { AdfConstraintEvent, AdfResolutionEvent, CliTelemetryEvent } from '../telemetry';
 
 const DEFAULT_MIN_OCCURRENCES = 3;
 const DEFAULT_WINDOW_MINUTES = 60;
@@ -60,7 +66,10 @@ export interface NearMissKeywordFinding {
 export interface LoadedButViolatedFinding {
   module: string;
   occurrences: number;
+  /** Downstream command in the session/window failed — no confirmed link to this module's own constraints. */
   correlatedFailures: number;
+  /** This module's own METRICS ceiling was confirmed to fail (adf.constraint events), joined by session/window. */
+  exactFailures: number;
 }
 
 /**
@@ -105,8 +114,8 @@ export function adfSuggestCommand(options: CLIOptions, args: string[]): number {
   const emitOpsFile = getFlag(args, '--emit-ops');
 
   const telemetryFile = path.join(options.configPath, 'telemetry', 'events.ndjson');
-  const { resolutionEvents, commandEvents } = readEvents(telemetryFile);
-  const report = buildSuggestReport(resolutionEvents, commandEvents, minOccurrences, windowMinutes, telemetryFile);
+  const { resolutionEvents, commandEvents, constraintEvents } = readEvents(telemetryFile);
+  const report = buildSuggestReport(resolutionEvents, commandEvents, minOccurrences, windowMinutes, telemetryFile, constraintEvents);
   const emitResult = buildEmitOps(report.coOccurrenceCandidates, aiDir);
 
   if (emitOpsFile) {
@@ -220,15 +229,17 @@ function parsePositiveInt(raw: string | undefined): number | undefined {
 function readEvents(telemetryFile: string): {
   resolutionEvents: AdfResolutionEvent[];
   commandEvents: CliTelemetryEvent[];
+  constraintEvents: AdfConstraintEvent[];
 } {
   const resolutionEvents: AdfResolutionEvent[] = [];
   const commandEvents: CliTelemetryEvent[] = [];
+  const constraintEvents: AdfConstraintEvent[] = [];
 
   let raw: string;
   try {
     raw = fs.readFileSync(telemetryFile, 'utf-8');
   } catch {
-    return { resolutionEvents, commandEvents };
+    return { resolutionEvents, commandEvents, constraintEvents };
   }
 
   for (const line of raw.split(/\r?\n/)) {
@@ -243,11 +254,14 @@ function readEvents(telemetryFile: string): {
     }
     if (!parsed || typeof parsed !== 'object') continue;
 
-    const record = parsed as { eventType?: string; timestamp?: unknown; commandPath?: unknown; exitCode?: unknown };
+    const record = parsed as { eventType?: string; timestamp?: unknown; commandPath?: unknown; exitCode?: unknown; module?: unknown; status?: unknown };
     if (typeof record.timestamp !== 'string') continue;
 
     if (record.eventType === 'adf.resolution') {
       resolutionEvents.push(parsed as AdfResolutionEvent);
+    } else if (record.eventType === 'adf.constraint') {
+      if (typeof record.module !== 'string' || typeof record.status !== 'string') continue;
+      constraintEvents.push(parsed as AdfConstraintEvent);
     } else if (record.eventType === 'command' || record.eventType === undefined) {
       // Events written before eventType existed have no discriminator;
       // treat those as command events for backward compatibility. Require
@@ -259,24 +273,29 @@ function readEvents(telemetryFile: string): {
     }
   }
 
-  return { resolutionEvents, commandEvents };
+  return { resolutionEvents, commandEvents, constraintEvents };
+}
+
+interface Joinable {
+  sessionId?: string | null;
+  timestamp: string;
 }
 
 /**
- * Whether a command event falls within the join window of a resolution
- * event: same sessionId (high confidence) if both are stamped, else a
- * forward-only time-window fallback (heuristic).
+ * Whether two events fall within the join window of each other: same
+ * sessionId (high confidence) if both are stamped, else a forward-only
+ * time-window fallback (heuristic).
  */
-function isJoined(resolution: AdfResolutionEvent, command: CliTelemetryEvent, windowMinutes: number): boolean {
-  if (resolution.sessionId && command.sessionId) {
-    return resolution.sessionId === command.sessionId;
+function isJoined(a: Joinable, b: Joinable, windowMinutes: number): boolean {
+  if (a.sessionId && b.sessionId) {
+    return a.sessionId === b.sessionId;
   }
 
-  const resTime = Date.parse(resolution.timestamp);
-  const cmdTime = Date.parse(command.timestamp);
-  if (!Number.isFinite(resTime) || !Number.isFinite(cmdTime)) return false;
+  const aTime = Date.parse(a.timestamp);
+  const bTime = Date.parse(b.timestamp);
+  if (!Number.isFinite(aTime) || !Number.isFinite(bTime)) return false;
 
-  const deltaMs = cmdTime - resTime;
+  const deltaMs = bTime - aTime;
   return deltaMs >= 0 && deltaMs <= windowMinutes * 60_000;
 }
 
@@ -294,12 +313,14 @@ export function buildSuggestReport(
   minOccurrences: number,
   windowMinutes: number,
   sourceFile: string,
+  constraintEvents: AdfConstraintEvent[] = [],
 ): SuggestReport {
   const moduleOccurrences = new Map<string, number>();
   const moduleMatched = new Map<string, number>();
   const globallyMatchedKeywords = new Set<string>();
   const loadedOccurrences = new Map<string, number>();
   const loadedCorrelatedFailures = new Map<string, number>();
+  const loadedExactFailures = new Map<string, number>();
   const keywordOccurrences = new Map<string, number>();
   const keywordCorrelatedFailures = new Map<string, number>();
   // keyword -> module -> co-occurrence count (module genuinely ON_DEMAND-triggered
@@ -310,6 +331,16 @@ export function buildSuggestReport(
   // scanning just this (typically much smaller) subset per resolution event
   // avoids an O(resolutions x commands) scan over the full command history.
   const failedCommandEvents = commandEvents.filter((c) => c.success === false);
+
+  // Fail-status constraint events, grouped by the module they were checked
+  // against — the exact-attribution counterpart to failedCommandEvents.
+  const failedConstraintEventsByModule = new Map<string, AdfConstraintEvent[]>();
+  for (const ev of constraintEvents) {
+    if (ev.status !== 'fail') continue;
+    const list = failedConstraintEventsByModule.get(ev.module) ?? [];
+    list.push(ev);
+    failedConstraintEventsByModule.set(ev.module, list);
+  }
 
   for (const res of resolutionEvents) {
     // triggerMatches has one entry per (module, trigger) pair, so a module
@@ -386,6 +417,13 @@ export function buildSuggestReport(
         loadedCorrelatedFailures.set(mod, (loadedCorrelatedFailures.get(mod) ?? 0) + 1);
       }
     }
+
+    for (const mod of new Set(res.resolvedModules)) {
+      const failedEvents = failedConstraintEventsByModule.get(mod);
+      if (failedEvents && failedEvents.some((ev) => isJoined(res, ev, windowMinutes))) {
+        loadedExactFailures.set(mod, (loadedExactFailures.get(mod) ?? 0) + 1);
+      }
+    }
   }
 
   const deadModules: DeadModuleFinding[] = [...moduleOccurrences.entries()]
@@ -402,14 +440,15 @@ export function buildSuggestReport(
     }))
     .sort((a, b) => b.correlatedFailures - a.correlatedFailures || b.occurrences - a.occurrences);
 
-  const loadedButViolated: LoadedButViolatedFinding[] = [...loadedCorrelatedFailures.entries()]
-    .filter(([, correlatedFailures]) => correlatedFailures > 0)
-    .map(([module, correlatedFailures]) => ({
+  const violatedModules = new Set([...loadedCorrelatedFailures.keys(), ...loadedExactFailures.keys()]);
+  const loadedButViolated: LoadedButViolatedFinding[] = [...violatedModules]
+    .map((module) => ({
       module,
       occurrences: loadedOccurrences.get(module) ?? 0,
-      correlatedFailures,
+      correlatedFailures: loadedCorrelatedFailures.get(module) ?? 0,
+      exactFailures: loadedExactFailures.get(module) ?? 0,
     }))
-    .sort((a, b) => b.correlatedFailures - a.correlatedFailures);
+    .sort((a, b) => b.exactFailures - a.exactFailures || b.correlatedFailures - a.correlatedFailures);
 
   const nearMissKeywordSet = new Set(nearMissKeywords.map((f) => f.keyword));
   const coOccurrenceCandidates: CoOccurrenceCandidate[] = [];
@@ -490,7 +529,10 @@ function printReport(report: SuggestReport): void {
     console.log('    (none)');
   } else {
     for (const f of report.loadedButViolated) {
-      console.log(`    [!] ${f.module} — resolved ${f.occurrences}x, ${f.correlatedFailures} correlated with a downstream failure`);
+      const parts: string[] = [];
+      if (f.exactFailures > 0) parts.push(`${f.exactFailures} confirmed constraint failure${f.exactFailures === 1 ? '' : 's'}`);
+      if (f.correlatedFailures > 0) parts.push(`${f.correlatedFailures} correlated with a downstream failure`);
+      console.log(`    [!] ${f.module} — resolved ${f.occurrences}x, ${parts.join(', ')}`);
     }
     console.log('    Note: routing worked; rule content may be weak. Needs human/strong-model rewrite, not a trigger change.');
   }

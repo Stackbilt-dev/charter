@@ -23,10 +23,13 @@ import type {
  *
  * @param doc - Parsed ADF document
  * @param context - Optional external metric overrides (e.g., actual LOC counts)
+ * @param module - Path of the source module this document was loaded from, when known.
+ *   Stamped onto each ConstraintResult for failure attribution (e.g. `charter adf suggest`).
  */
 export function validateConstraints(
   doc: AdfDocument,
   context?: Record<string, number>,
+  module?: string,
 ): EvidenceResult {
   const constraints: ConstraintResult[] = [];
 
@@ -48,6 +51,7 @@ export function validateConstraints(
         status,
         message: `${entry.key}: ${value} / ${entry.ceiling} [${entry.unit}] -- ${statusLabel}`,
         source: hasContext ? 'context' : 'metric',
+        ...(module !== undefined ? { module } : {}),
       });
     }
   }

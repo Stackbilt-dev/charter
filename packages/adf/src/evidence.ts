@@ -10,9 +10,10 @@
 import type {
   AdfDocument,
   BundleResult,
+  ConstraintResult,
   EvidenceResult,
 } from './types';
-import { validateConstraints } from './validator';
+import { validateConstraints, computeWeightSummary } from './validator';
 
 // ============================================================================
 // Types
@@ -58,7 +59,17 @@ export function evaluateEvidence(
   context?: Record<string, number>,
   staleThreshold?: number,
 ): EvidenceReport {
-  const evidence = validateConstraints(bundle.mergedDocument, context);
+  // When per-module documents are available (the real bundleModules() path),
+  // validate each one separately so ConstraintResults are attributed back to
+  // their owning module. Falls back to the merged document (unattributed,
+  // matching pre-attribution behavior) for hand-built BundleResults that
+  // don't populate `documents`.
+  const constraints = bundle.documents
+    ? gatherPerModuleConstraints(bundle.documents, bundle.resolvedModules, context)
+    : validateConstraints(bundle.mergedDocument, context).constraints;
+  const failCount = constraints.filter((c) => c.status === 'fail').length;
+  const warnCount = constraints.filter((c) => c.status === 'warn').length;
+
   const staleBaselines = detectStaleBaselines(
     bundle.mergedDocument,
     context,
@@ -66,7 +77,11 @@ export function evaluateEvidence(
   );
 
   return {
-    ...evidence,
+    constraints,
+    weightSummary: computeWeightSummary(bundle.mergedDocument),
+    allPassing: failCount === 0,
+    failCount,
+    warnCount,
     tokenEstimate: bundle.tokenEstimate,
     tokenBudget: bundle.tokenBudget,
     tokenUtilization: bundle.tokenUtilization,
@@ -75,6 +90,25 @@ export function evaluateEvidence(
     advisoryOnlyModules: bundle.advisoryOnlyModules,
     staleBaselines,
   };
+}
+
+/**
+ * Validate each resolved module's document separately and tag results with
+ * their module path, instead of validating the merged document where module
+ * identity is already lost.
+ */
+function gatherPerModuleConstraints(
+  documents: Record<string, AdfDocument>,
+  resolvedModules: string[],
+  context?: Record<string, number>,
+): ConstraintResult[] {
+  const constraints: ConstraintResult[] = [];
+  for (const modPath of resolvedModules) {
+    const doc = documents[modPath];
+    if (!doc) continue;
+    constraints.push(...validateConstraints(doc, context, modPath).constraints);
+  }
+  return constraints;
 }
 
 // ============================================================================

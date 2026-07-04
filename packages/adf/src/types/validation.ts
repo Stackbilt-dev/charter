@@ -13,6 +13,8 @@ export interface ConstraintResult {
   status: ConstraintStatus;
   message: string;
   source: 'metric' | 'context';
+  /** Path of the `.ai/*.adf` module this constraint was checked against, when known. */
+  module?: string;
 }
 
 export interface WeightSummary {

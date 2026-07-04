@@ -210,4 +210,43 @@ describe('adf evidence CI contracts (integration)', () => {
     expect(output.staleBaselineCount).toBe(0);
     expect(output.staleBaselines).toBeUndefined(); // field omitted when empty
   });
+
+  // ── Module attribution: constraints know which module they came from ──
+  it('attributes each constraint to its owning module (core.adf)', () => {
+    const tmp = makeTempDir('module-attribution');
+    process.chdir(tmp);
+    writeEvidenceFixture(tmp, /* actual */ 79, /* baseline */ 80, /* ceiling */ 150);
+
+    const { output } = captureJson(adfEvidence, jsonOptions, ['--auto-measure']);
+    const constraints = output.constraints as Array<{ metric: string; module?: string }>;
+    expect(constraints[0].module).toBe('core.adf');
+  });
+
+  // ── Exact-attribution telemetry: adf.constraint fail events on disk ────
+  it('records an adf.constraint fail event for a breached ceiling', () => {
+    const tmp = makeTempDir('constraint-event');
+    process.chdir(tmp);
+    writeEvidenceFixture(tmp, /* actual */ 160, /* baseline */ 100, /* ceiling */ 150);
+
+    captureJson(adfEvidence, ciOptions, ['--auto-measure']);
+
+    const telemetryFile = path.join(tmp, '.charter', 'telemetry', 'events.ndjson');
+    const lines = fs.readFileSync(telemetryFile, 'utf-8').trim().split('\n');
+    const events = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    const constraintEvent = events.find((e) => e.eventType === 'adf.constraint');
+    expect(constraintEvent).toMatchObject({ module: 'core.adf', metric: 'app_loc', status: 'fail' });
+  });
+
+  it('does not record an adf.constraint event when all constraints pass', () => {
+    const tmp = makeTempDir('constraint-event-pass');
+    process.chdir(tmp);
+    writeEvidenceFixture(tmp, /* actual */ 79, /* baseline */ 80, /* ceiling */ 150);
+
+    captureJson(adfEvidence, ciOptions, ['--auto-measure']);
+
+    // A run with no failing constraints has nothing to attribute, so
+    // recordAdfConstraintEvents never even creates the telemetry file.
+    const telemetryFile = path.join(tmp, '.charter', 'telemetry', 'events.ndjson');
+    expect(fs.existsSync(telemetryFile)).toBe(false);
+  });
 });

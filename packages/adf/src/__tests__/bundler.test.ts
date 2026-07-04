@@ -236,6 +236,12 @@ describe('bundleModules', () => {
     }
   });
 
+  it('populates documents with each resolved module\'s parsed doc, keyed by path', () => {
+    const result = bundleModules('/ai', ['core.adf', 'state.adf'], readFile);
+    expect(Object.keys(result.documents ?? {})).toEqual(['core.adf', 'state.adf']);
+    expect(result.documents?.['core.adf'].sections.some(s => s.key === 'CONSTRAINTS')).toBe(true);
+  });
+
   it('returns token estimate > 0', () => {
     const result = bundleModules('/ai', ['core.adf'], readFile);
     expect(result.tokenEstimate).toBeGreaterThan(0);
