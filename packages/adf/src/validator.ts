@@ -31,6 +31,31 @@ export function validateConstraints(
   context?: Record<string, number>,
   module?: string,
 ): EvidenceResult {
+  const constraints = computeConstraints(doc, context, module);
+  const failCount = constraints.filter(c => c.status === 'fail').length;
+  const warnCount = constraints.filter(c => c.status === 'warn').length;
+
+  return {
+    constraints,
+    weightSummary: computeWeightSummary(doc),
+    allPassing: failCount === 0,
+    failCount,
+    warnCount,
+  };
+}
+
+/**
+ * Compute per-entry ConstraintResults for a single document's METRICS
+ * sections, without the aggregate weightSummary/failCount/warnCount wrapper.
+ * Shared by validateConstraints and evidence.ts's per-module attribution
+ * path, so validating N modules doesn't also compute (and discard) N
+ * redundant weight summaries and pass/fail counts.
+ */
+export function computeConstraints(
+  doc: AdfDocument,
+  context?: Record<string, number>,
+  module?: string,
+): ConstraintResult[] {
   const constraints: ConstraintResult[] = [];
 
   for (const section of doc.sections) {
@@ -56,16 +81,7 @@ export function validateConstraints(
     }
   }
 
-  const failCount = constraints.filter(c => c.status === 'fail').length;
-  const warnCount = constraints.filter(c => c.status === 'warn').length;
-
-  return {
-    constraints,
-    weightSummary: computeWeightSummary(doc),
-    allPassing: failCount === 0,
-    failCount,
-    warnCount,
-  };
+  return constraints;
 }
 
 /**

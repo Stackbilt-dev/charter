@@ -264,6 +264,25 @@ describe('buildSuggestReport', () => {
     expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 0, exactFailures: 1 }]);
   });
 
+  it('does not multiply exactFailures by the number of resolution events that share a session with one real failure', () => {
+    const resolutions = [1, 2, 3, 4, 5].map(() =>
+      resolutionEvent({ sessionId: 'sess-fanout', resolvedModules: ['governance.adf'], triggerMatches: [] }),
+    );
+    const constraints = [constraintEvent({ sessionId: 'sess-fanout', module: 'governance.adf', status: 'fail' })];
+    const report = buildSuggestReport(resolutions, [], 1, 60, 'events.ndjson', constraints);
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 5, correlatedFailures: 0, exactFailures: 1 }]);
+  });
+
+  it('counts exactFailures as the number of distinct fail events for a module, not the number of resolutions', () => {
+    const res = resolutionEvent({ sessionId: 'sess-multi', resolvedModules: ['governance.adf'], triggerMatches: [] });
+    const constraints = [
+      constraintEvent({ sessionId: 'sess-multi', module: 'governance.adf', status: 'fail' }),
+      constraintEvent({ sessionId: 'sess-multi', module: 'governance.adf', status: 'fail' }),
+    ];
+    const report = buildSuggestReport([res], [], 1, 60, 'events.ndjson', constraints);
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 0, exactFailures: 2 }]);
+  });
+
   it('does not attribute an adf.constraint fail event to a module that was not resolved in that session', () => {
     const res = resolutionEvent({ sessionId: 'sess-9', resolvedModules: ['frontend.adf'], triggerMatches: [] });
     const constraints = [constraintEvent({ sessionId: 'sess-9', module: 'governance.adf', status: 'fail' })];

@@ -173,16 +173,12 @@ function buildEmitOps(candidates: CoOccurrenceCandidate[], aiDir: string): EmitO
   // REPLACE_BULLET op with both keywords appended, not two ops at the same
   // index — applying them in sequence would make the second silently
   // clobber the first (adf patch applies against the evolving document).
-  const byModule = new Map<string, CoOccurrenceCandidate[]>();
   for (const candidate of candidates) {
     if (candidate.ambiguous) {
       skipped.push({ keyword: candidate.keyword, module: candidate.module, reason: 'ambiguous: tied with another module for top co-occurrence count' });
-      continue;
     }
-    const group = byModule.get(candidate.module) ?? [];
-    group.push(candidate);
-    byModule.set(candidate.module, group);
   }
+  const byModule = groupBy(candidates.filter((c) => !c.ambiguous), (c) => c.module);
 
   for (const [modulePath, groupCandidates] of byModule) {
     const modIndex = manifest.onDemand.findIndex((m) => m.path === modulePath);
@@ -307,6 +303,24 @@ function hasCorrelatedFailure(
   return failedCommandEvents.some((c) => isJoined(resolution, c, windowMinutes));
 }
 
+/** Group items by a derived key, preserving each group's insertion order. */
+function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFn(item);
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  return groups;
+}
+
+interface LoadedModuleStats {
+  occurrences: number;
+  correlatedFailures: number;
+  exactFailures: number;
+}
+
 export function buildSuggestReport(
   resolutionEvents: AdfResolutionEvent[],
   commandEvents: CliTelemetryEvent[],
@@ -318,14 +332,21 @@ export function buildSuggestReport(
   const moduleOccurrences = new Map<string, number>();
   const moduleMatched = new Map<string, number>();
   const globallyMatchedKeywords = new Set<string>();
-  const loadedOccurrences = new Map<string, number>();
-  const loadedCorrelatedFailures = new Map<string, number>();
-  const loadedExactFailures = new Map<string, number>();
+  const loadedModuleStats = new Map<string, LoadedModuleStats>();
   const keywordOccurrences = new Map<string, number>();
   const keywordCorrelatedFailures = new Map<string, number>();
   // keyword -> module -> co-occurrence count (module genuinely ON_DEMAND-triggered
   // in the same event, not just default-loaded).
   const keywordModuleCoOccurrence = new Map<string, Map<string, number>>();
+
+  function getLoadedStats(module: string): LoadedModuleStats {
+    let stats = loadedModuleStats.get(module);
+    if (!stats) {
+      stats = { occurrences: 0, correlatedFailures: 0, exactFailures: 0 };
+      loadedModuleStats.set(module, stats);
+    }
+    return stats;
+  }
 
   // Only failed commands can ever satisfy hasCorrelatedFailure/isJoined, so
   // scanning just this (typically much smaller) subset per resolution event
@@ -334,13 +355,10 @@ export function buildSuggestReport(
 
   // Fail-status constraint events, grouped by the module they were checked
   // against — the exact-attribution counterpart to failedCommandEvents.
-  const failedConstraintEventsByModule = new Map<string, AdfConstraintEvent[]>();
-  for (const ev of constraintEvents) {
-    if (ev.status !== 'fail') continue;
-    const list = failedConstraintEventsByModule.get(ev.module) ?? [];
-    list.push(ev);
-    failedConstraintEventsByModule.set(ev.module, list);
-  }
+  const failedConstraintEventsByModule = groupBy(
+    constraintEvents.filter((ev) => ev.status === 'fail'),
+    (ev) => ev.module,
+  );
 
   for (const res of resolutionEvents) {
     // triggerMatches has one entry per (module, trigger) pair, so a module
@@ -364,7 +382,7 @@ export function buildSuggestReport(
       moduleMatched.set(mod, (moduleMatched.get(mod) ?? 0) + 1);
     }
     for (const mod of res.resolvedModules) {
-      loadedOccurrences.set(mod, (loadedOccurrences.get(mod) ?? 0) + 1);
+      getLoadedStats(mod).occurrences += 1;
     }
   }
 
@@ -414,15 +432,23 @@ export function buildSuggestReport(
 
     if (failed) {
       for (const mod of res.resolvedModules) {
-        loadedCorrelatedFailures.set(mod, (loadedCorrelatedFailures.get(mod) ?? 0) + 1);
+        getLoadedStats(mod).correlatedFailures += 1;
       }
     }
+  }
 
-    for (const mod of new Set(res.resolvedModules)) {
-      const failedEvents = failedConstraintEventsByModule.get(mod);
-      if (failedEvents && failedEvents.some((ev) => isJoined(res, ev, windowMinutes))) {
-        loadedExactFailures.set(mod, (loadedExactFailures.get(mod) ?? 0) + 1);
-      }
+  // Exact attribution: each confirmed constraint failure counts once,
+  // regardless of how many resolution events happened to load that module
+  // (a module resolved 5x with 1 real failure must report exactFailures: 1,
+  // not 5 — joining per resolution event, as correlatedFailures does, would
+  // multiply a single failure by however many times the module was loaded).
+  // Only attributed to modules that appear as "loaded" at all: an
+  // adf.constraint event for a module never resolved via adf bundle/context/
+  // serve can't be reported as loaded-but-violated by definition.
+  for (const [module, events] of failedConstraintEventsByModule) {
+    const stats = loadedModuleStats.get(module);
+    if (stats) {
+      stats.exactFailures = events.length;
     }
   }
 
@@ -440,13 +466,13 @@ export function buildSuggestReport(
     }))
     .sort((a, b) => b.correlatedFailures - a.correlatedFailures || b.occurrences - a.occurrences);
 
-  const violatedModules = new Set([...loadedCorrelatedFailures.keys(), ...loadedExactFailures.keys()]);
-  const loadedButViolated: LoadedButViolatedFinding[] = [...violatedModules]
-    .map((module) => ({
+  const loadedButViolated: LoadedButViolatedFinding[] = [...loadedModuleStats.entries()]
+    .filter(([, stats]) => stats.correlatedFailures > 0 || stats.exactFailures > 0)
+    .map(([module, stats]) => ({
       module,
-      occurrences: loadedOccurrences.get(module) ?? 0,
-      correlatedFailures: loadedCorrelatedFailures.get(module) ?? 0,
-      exactFailures: loadedExactFailures.get(module) ?? 0,
+      occurrences: stats.occurrences,
+      correlatedFailures: stats.correlatedFailures,
+      exactFailures: stats.exactFailures,
     }))
     .sort((a, b) => b.exactFailures - a.exactFailures || b.correlatedFailures - a.correlatedFailures);
 
