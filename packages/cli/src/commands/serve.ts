@@ -40,7 +40,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { detectTsconfigAliases } from './blast';
-import { recordAdfResolutionEvent } from '../telemetry';
+import { getSessionId, recordAdfResolutionEvent } from '../telemetry';
 
 // ============================================================================
 // Constants
@@ -96,7 +96,7 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
   }
 
   const projectName = customName ?? inferProjectName(aiDir);
-  const sessionId = process.env.CHARTER_SESSION_ID ?? randomUUID();
+  const sessionId = getSessionId() ?? randomUUID();
 
   // Lazy-import both MCP SDK modules here — after all guards — so the SDK's
   // stdin handle is never acquired on the error paths above.
@@ -162,7 +162,7 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions, se
     async ({ task }: { task?: string }) => {
       try {
         const manifest = loadManifest(aiDir);
-        const keywords = task ? task.toLowerCase().split(/\s+/) : [];
+        const keywords = task ? [...new Set(task.toLowerCase().split(/\s+/))] : [];
         const modulePaths = resolveModules(manifest, keywords);
         const bundle = bundleModules(
           aiDir,

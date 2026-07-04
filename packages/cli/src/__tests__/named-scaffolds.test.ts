@@ -26,9 +26,18 @@ describe('NAMED_MODULE_SCAFFOLDS registry', () => {
     expect(scaffold).toContain('secrets');
   });
 
-  it('typed-data-access scaffold references the canonical registry path', () => {
+  it('typed-data-access scaffold references a canonical data registry, generically', () => {
     const scaffold = NAMED_MODULE_SCAFFOLDS['typed-data-access'];
-    expect(scaffold).toContain('stackbilt_llc/policies/data-registry.yaml');
+    expect(scaffold).toContain('canonical data registry');
+  });
+
+  it('typed-data-access scaffold contains no product-specific internal references', () => {
+    const scaffold = NAMED_MODULE_SCAFFOLDS['typed-data-access'];
+    expect(scaffold).not.toMatch(/stackbilt/i);
+    expect(scaffold).not.toMatch(/aegis/i);
+    expect(scaffold).not.toMatch(/codebeast/i);
+    expect(scaffold).not.toMatch(/\bD1\b/);
+    expect(scaffold).not.toContain('DATA_AUTHORITY');
   });
 
   it('typed-data-access scaffold includes load-bearing disambiguation constraint', () => {
@@ -55,7 +64,6 @@ describe('NAMED_MODULE_DEFAULT_TRIGGERS registry', () => {
   it('typed-data-access triggers include sensitivity and policy keywords', () => {
     const triggers = NAMED_MODULE_DEFAULT_TRIGGERS['typed-data-access'];
     expect(triggers).toContain('sensitivity');
-    expect(triggers).toContain('DATA_AUTHORITY');
     expect(triggers).toContain('disambiguation');
   });
 

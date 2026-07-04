@@ -57,7 +57,14 @@ export interface RecordAdfResolutionInput {
   sessionId?: string | null;
 }
 
-function getSessionId(): string | undefined {
+/**
+ * Read the ambient session id from the environment, treating an empty
+ * string the same as unset — a wrapper script that exports
+ * CHARTER_SESSION_ID="" should not produce a literal empty-string session
+ * id. Exported so long-lived processes (e.g. `charter serve`) that mint
+ * their own session id can share this same empty-string handling.
+ */
+export function getSessionId(): string | undefined {
   return process.env.CHARTER_SESSION_ID || undefined;
 }
 

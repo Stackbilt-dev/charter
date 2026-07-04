@@ -25,8 +25,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseAdf, parseManifest } from '@stackbilt/adf';
-import type { PatchOperation, ManifestModule } from '@stackbilt/adf';
+import { parseAdf, parseManifest, formatTriggerEntry } from '@stackbilt/adf';
+import type { PatchOperation } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -197,7 +197,7 @@ function buildEmitOps(candidates: CoOccurrenceCandidate[], aiDir: string): EmitO
     if (newKeywords.length === 0) continue;
 
     const before = rawItems[modIndex];
-    const after = buildUpdatedOnDemandBullet(mod, newKeywords);
+    const after = formatTriggerEntry({ ...mod, triggers: [...mod.triggers, ...newKeywords] });
 
     ops.push({ op: 'REPLACE_BULLET', section: 'ON_DEMAND', index: modIndex, value: after });
     for (const c of groupCandidates) {
@@ -209,12 +209,6 @@ function buildEmitOps(candidates: CoOccurrenceCandidate[], aiDir: string): EmitO
   }
 
   return { ops, diffLines, skipped };
-}
-
-function buildUpdatedOnDemandBullet(mod: ManifestModule, newKeywords: string[]): string {
-  const triggers = [...mod.triggers, ...newKeywords].join(', ');
-  const budgetSuffix = mod.tokenBudget !== undefined ? ` [budget: ${mod.tokenBudget}]` : '';
-  return `${mod.path} (Triggers on: ${triggers})${budgetSuffix}`;
 }
 
 function parsePositiveInt(raw: string | undefined): number | undefined {
@@ -249,14 +243,18 @@ function readEvents(telemetryFile: string): {
     }
     if (!parsed || typeof parsed !== 'object') continue;
 
-    const record = parsed as { eventType?: string; timestamp?: unknown };
+    const record = parsed as { eventType?: string; timestamp?: unknown; commandPath?: unknown; exitCode?: unknown };
     if (typeof record.timestamp !== 'string') continue;
 
     if (record.eventType === 'adf.resolution') {
       resolutionEvents.push(parsed as AdfResolutionEvent);
     } else if (record.eventType === 'command' || record.eventType === undefined) {
       // Events written before eventType existed have no discriminator;
-      // treat those as command events for backward compatibility.
+      // treat those as command events for backward compatibility. Require
+      // the fields a real command event always has, matching the
+      // validation in telemetry.ts's own readEvents, so a malformed or
+      // truncated line isn't silently counted as a valid command outcome.
+      if (typeof record.commandPath !== 'string' || typeof record.exitCode !== 'number') continue;
       commandEvents.push(parsed as CliTelemetryEvent);
     }
   }
@@ -284,10 +282,10 @@ function isJoined(resolution: AdfResolutionEvent, command: CliTelemetryEvent, wi
 
 function hasCorrelatedFailure(
   resolution: AdfResolutionEvent,
-  commandEvents: CliTelemetryEvent[],
+  failedCommandEvents: CliTelemetryEvent[],
   windowMinutes: number,
 ): boolean {
-  return commandEvents.some((c) => c.success === false && isJoined(resolution, c, windowMinutes));
+  return failedCommandEvents.some((c) => isJoined(resolution, c, windowMinutes));
 }
 
 export function buildSuggestReport(
@@ -308,15 +306,31 @@ export function buildSuggestReport(
   // in the same event, not just default-loaded).
   const keywordModuleCoOccurrence = new Map<string, Map<string, number>>();
 
+  // Only failed commands can ever satisfy hasCorrelatedFailure/isJoined, so
+  // scanning just this (typically much smaller) subset per resolution event
+  // avoids an O(resolutions x commands) scan over the full command history.
+  const failedCommandEvents = commandEvents.filter((c) => c.success === false);
+
   for (const res of resolutionEvents) {
+    // triggerMatches has one entry per (module, trigger) pair, so a module
+    // declared with multiple triggers must be deduped per event here —
+    // otherwise it would count as multiple "candidate resolutions" from a
+    // single real invocation, reaching --min-occurrences too early relative
+    // to modules with fewer declared triggers.
+    const modulesSeenThisEvent = new Set<string>();
+    const modulesMatchedThisEvent = new Set<string>();
     for (const tm of res.triggerMatches) {
-      moduleOccurrences.set(tm.module, (moduleOccurrences.get(tm.module) ?? 0) + 1);
-      if (tm.matched) {
-        moduleMatched.set(tm.module, (moduleMatched.get(tm.module) ?? 0) + 1);
-      }
+      modulesSeenThisEvent.add(tm.module);
+      if (tm.matched) modulesMatchedThisEvent.add(tm.module);
       for (const kw of tm.matchedKeywords) {
         globallyMatchedKeywords.add(kw);
       }
+    }
+    for (const mod of modulesSeenThisEvent) {
+      moduleOccurrences.set(mod, (moduleOccurrences.get(mod) ?? 0) + 1);
+    }
+    for (const mod of modulesMatchedThisEvent) {
+      moduleMatched.set(mod, (moduleMatched.get(mod) ?? 0) + 1);
     }
     for (const mod of res.resolvedModules) {
       loadedOccurrences.set(mod, (loadedOccurrences.get(mod) ?? 0) + 1);
@@ -325,7 +339,7 @@ export function buildSuggestReport(
 
   // Second pass: needs globallyMatchedKeywords fully populated first.
   for (const res of resolutionEvents) {
-    const failed = hasCorrelatedFailure(res, commandEvents, windowMinutes);
+    const failed = hasCorrelatedFailure(res, failedCommandEvents, windowMinutes);
 
     // Modules genuinely triggered on-demand in this event (excludes
     // default-load modules, which "resolve" regardless of keywords and so
@@ -334,12 +348,18 @@ export function buildSuggestReport(
       res.triggerMatches.filter((tm) => tm.matched && tm.loadReason === 'trigger').map((tm) => tm.module),
     );
 
+    // A single task can repeat a word (or an upstream producer can hand back
+    // a non-deduplicated keyword array) — dedupe per event so one invocation
+    // with a repeated word can't alone cross --min-occurrences.
+    const seenKeywordsThisEvent = new Set<string>();
     const unmatchedKeywordsThisEvent: string[] = [];
     for (const rawKw of res.keywords) {
       // matchedKeywords (buildTriggerReport) are always lowercased; normalize
       // here too so "Audit" and "audit" aren't treated as different keywords
       // and a capitalized keyword that DID match isn't falsely reported as a miss.
       const kw = rawKw.toLowerCase();
+      if (seenKeywordsThisEvent.has(kw)) continue;
+      seenKeywordsThisEvent.add(kw);
       if (globallyMatchedKeywords.has(kw) || STOPWORDS.has(kw)) continue;
       keywordOccurrences.set(kw, (keywordOccurrences.get(kw) ?? 0) + 1);
       unmatchedKeywordsThisEvent.push(kw);
