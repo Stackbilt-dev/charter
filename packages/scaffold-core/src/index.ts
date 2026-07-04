@@ -149,15 +149,21 @@ export function buildScaffold(
       }
     }
 
-    // Contract stubs import zod directly (no @stackbilt/contracts wrapper — it isn't
-    // published yet); make sure package.json actually declares that dependency so
-    // `npm install` doesn't leave the contract file with a dangling import.
+    // Contract stubs import `zod` and `@stackbilt/contracts` directly, but the base
+    // package.json from codegen/files.ts (generated before the contract file exists)
+    // only declares `hono` — so a downloaded scaffold survives `npm install` and then
+    // fails typecheck/build with missing modules. Backfill both dependencies whenever
+    // a contract file is grafted in.
     if (finalFiles.some((f) => f.path.startsWith('src/contracts/'))) {
       finalFiles = finalFiles.map((f) => {
         if (f.path !== 'package.json') return f;
         try {
           const pkg = JSON.parse(f.content) as { dependencies?: Record<string, string> };
-          pkg.dependencies = { ...pkg.dependencies, zod: '^4.3.6' };
+          pkg.dependencies = {
+            ...pkg.dependencies,
+            zod: '^4.3.6',
+            '@stackbilt/contracts': '^0.8.0',
+          };
           return { ...f, content: JSON.stringify(pkg, null, 2) };
         } catch {
           return f;

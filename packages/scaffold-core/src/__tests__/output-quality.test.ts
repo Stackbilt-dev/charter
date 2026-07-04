@@ -10,8 +10,13 @@
  *   3. Project name is derived from the intention and consistent across wrangler.toml,
  *      package.json, and the contract filename — no 'my-worker' / 'stackbilder-generated'
  *      / 'stackbilder-scaffold' placeholder remnants.
- *   4. Generated contract stubs never import '@stackbilt/contracts' (not published —
- *      that import broke `npm install` for every downloaded scaffold).
+ *   4. Every module imported by a generated file is declared in the generated
+ *      package.json. `@stackbilt/contracts` IS published (0.8.0) — the original
+ *      "unpublished package" premise from tarotscript#427 was stale — so the fix is
+ *      NOT to drop the import. The real defect: the contract stub imports `zod` and
+ *      `@stackbilt/contracts`, but the base package.json (generated before the
+ *      contract file exists) only declared `hono`, so a downloaded scaffold survived
+ *      `npm install` and then failed typecheck/build with missing modules.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -131,31 +136,91 @@ describe('scaffold-core output quality — consistent project naming', () => {
   });
 });
 
-describe('scaffold-core output quality — no unpublished @stackbilt/contracts import', () => {
-  it.each(REPRESENTATIVE_INTENTIONS)('never imports @stackbilt/contracts for: %s', (intention) => {
+// Extracts the bare package name(s) referenced by import/export-from/require
+// specifiers in a source file, excluding relative paths and node: builtins.
+// Scoped packages (@scope/name) are returned as the full "@scope/name" —
+// everything after that is a subpath import of the same package.
+function importedPackageNames(content: string): string[] {
+  const specifiers = new Set<string>();
+  const fromRe = /(?:import|export)\s+(?:[^'";]*?\sfrom\s+)?['"]([^'"]+)['"]/g;
+  const requireRe = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
+  for (const re of [fromRe, requireRe]) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content))) specifiers.add(m[1]!);
+  }
+
+  const packages: string[] = [];
+  for (const spec of specifiers) {
+    if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('node:')) continue;
+    const parts = spec.split('/');
+    packages.push(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!);
+  }
+  return packages;
+}
+
+describe('scaffold-core output quality — every generated import is a declared dependency', () => {
+  // Class-invariant check: whatever a generated .ts file imports, the generated
+  // package.json must declare (deps or devDeps) — otherwise the scaffold survives
+  // `npm install` and only fails later at typecheck/build. Covers the whole defect
+  // family (today's zod/@stackbilt/contracts gap, and any future one), not just the
+  // specific package that was missing when this test was written.
+  const PATTERN_SWEEP = [
+    ...REPRESENTATIVE_INTENTIONS,
+    'MCP tool server exposing agent tools via SSE',
+    'Real-time collaborative editor using durable objects and websockets',
+    'Chatbot API using LLM streaming responses',
+    'Multi-tenant SaaS API with organization-level data isolation',
+    'GitHub webhook handler with x-hub-signature verification',
+  ];
+
+  it.each(PATTERN_SWEEP)('has no undeclared imports for: %s', (intention) => {
     const result = buildScaffold(intention);
+    const pkgFile = result.files.find((f: ScaffoldFile) => f.path === 'package.json');
+    expect(pkgFile).toBeDefined();
+    const pkg = JSON.parse(pkgFile!.content) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const declared = new Set([
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.devDependencies ?? {}),
+    ]);
+
+    const undeclared: string[] = [];
     for (const f of result.files) {
-      // A comment noting the future package (once published) is fine and expected —
-      // what must never appear is an actual import/require of the unpublished package.
-      expect(f.content).not.toMatch(/(?:import|require)\s*\(?[^\n]*['"]@stackbilt\/contracts['"]/);
+      if (!f.path.endsWith('.ts')) continue;
+      for (const pkgName of importedPackageNames(f.content)) {
+        if (!declared.has(pkgName)) undeclared.push(`${f.path} -> ${pkgName}`);
+      }
     }
+    expect(undeclared).toEqual([]);
   });
 
-  it('declares zod as a dependency whenever a contract stub is emitted', () => {
+  it('contract stub imports @stackbilt/contracts (published — do not strip this)', () => {
+    const result = buildScaffold('SaaS billing dashboard with Stripe integration, user management, usage analytics');
+    const contract = result.files.find((f: ScaffoldFile) => f.path.startsWith('src/contracts/'));
+    expect(contract).toBeDefined();
+    expect(contract!.content).toContain("import { z } from 'zod';");
+    expect(contract!.content).toContain("import { defineContract } from '@stackbilt/contracts';");
+  });
+
+  it('declares both zod and @stackbilt/contracts whenever a contract stub is emitted', () => {
     const result = buildScaffold('SaaS billing dashboard with Stripe integration, user management, usage analytics');
     const hasContract = result.files.some((f: ScaffoldFile) => f.path.startsWith('src/contracts/'));
     expect(hasContract).toBe(true);
     const pkg = JSON.parse(fileContent(result, 'package.json')) as { dependencies?: Record<string, string> };
     expect(pkg.dependencies?.zod).toBeDefined();
+    expect(pkg.dependencies?.['@stackbilt/contracts']).toBeDefined();
   });
 
-  it('contract stub is plain-object Zod, not a defineContract() call', () => {
-    const result = buildScaffold('SaaS billing dashboard with Stripe integration, user management, usage analytics');
-    const contract = result.files.find((f: ScaffoldFile) => f.path.startsWith('src/contracts/'));
-    expect(contract).toBeDefined();
-    expect(contract!.content).toContain("import { z } from 'zod';");
-    // "defineContract" may appear in an explanatory TODO comment (future package),
-    // but must never be invoked as a function call.
-    expect(contract!.content).not.toMatch(/defineContract\(/);
+  it('never injects the unpublished @stackbilt/worker-observability package', () => {
+    // Regression guard for the disabled FIRST_PARTY_DEPS entry in materializer/project.ts —
+    // that package 404s on the npm registry (same defect class as the tarotscript twin).
+    for (const intention of PATTERN_SWEEP) {
+      const result = buildScaffold(intention);
+      for (const f of result.files) {
+        expect(f.content).not.toContain('@stackbilt/worker-observability');
+      }
+    }
   });
 });

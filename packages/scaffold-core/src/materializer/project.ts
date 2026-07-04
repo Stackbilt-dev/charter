@@ -364,41 +364,37 @@ function renderContractTs(facts: Facts, projectName: string, prd: PrdSections): 
       },
     },` : '';
 
-  const surfaces = (apiRoutes || dbSurface)
-    ? `\n\n  surfaces: {${apiRoutes}${dbSurface}\n  },`
-    : '';
+  // @stackbilt/contracts' ContractDefinition.surfaces is a required field (its two
+  // sub-fields, api/db, are each optional) — always emit it, even empty, or
+  // defineContract()'s generated call fails to typecheck against the real package.
+  const surfaces = `\n\n  surfaces: {${apiRoutes}${dbSurface}\n  },`;
 
   const description = str(facts, 'requirement_name') || projectName;
 
-  // @stackbilt/contracts is not published yet, so this stub is a plain Zod object
-  // instead of a `defineContract(...)` call — importing that package here would
-  // break `npm install` for anyone who downloads this scaffold. Swap in
-  // `defineContract` once the package ships; the shape below matches its API.
   return `import { z } from 'zod';
+import { defineContract } from '@stackbilt/contracts';
 
 // TODO: rename fields and operations to match your domain.
-// @stackbilt/contracts is not published yet — this is a plain Zod-typed stub.
-// Once it ships, replace this with that package's defineContract helper.
+// Run: npx @stackbilt/contracts generate
 
-export const ${pascal}Schema = z.object({
-  id: z.string().uuid(),
-  // TODO: add your domain-specific fields here
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-
-export const ${pascal}Contract = {
+export const ${pascal}Contract = defineContract({
   name: '${pascal}',
   version: '1.0.0',
   description: '${description}',
 
-  schema: ${pascal}Schema,
+  schema: z.object({
+    id: z.string().uuid(),
+    // TODO: add your domain-specific fields here
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  }),
 
   operations: {
     create: {
       input: z.object({
         // TODO: add creation input fields
       }),
+      output: 'self' as const,
       emits: ['${slug}.created'],
     },
     update: {
@@ -406,10 +402,12 @@ export const ${pascal}Contract = {
         id: z.string().uuid(),
         // TODO: add update fields
       }),
+      output: 'self' as const,
       emits: ['${slug}.updated'],
     },
     delete: {
       input: z.object({ id: z.string().uuid() }),
+      output: 'self' as const,
       emits: ['${slug}.deleted'],
     },
   },${surfaces}
@@ -419,7 +417,7 @@ export const ${pascal}Contract = {
     update: { requires: 'authenticated' },
     delete: { requires: 'role', roles: ['admin'] },
   },
-} as const;
+});
 `;
 }
 
@@ -433,7 +431,7 @@ const FIRST_PARTY_DEPS: FirstPartyDep[] = [
   },
   {
     pkg: '@stackbilt/contracts',
-    version: '^0.2.1',
+    version: '^0.8.0',
     depType: 'devDep',
     deps: { zod: '^4.3.6' },
     trigger: () => true,
@@ -444,14 +442,13 @@ const FIRST_PARTY_DEPS: FirstPartyDep[] = [
     }],
   },
   {
-    // Observability: always inject for Workers
+    // Observability: disabled — @stackbilt/worker-observability 404s on the npm
+    // registry (unpublished, same defect class as the tarotscript twin). Re-enable
+    // the trigger below once the package ships.
     pkg: '@stackbilt/worker-observability',
     version: '^0.3.0',
     depType: 'dep',
-    trigger: (facts, intention) =>
-      traitsInclude(facts, 'edge', 'v8-isolate', 'serverless', 'isolat') ||
-      str(facts, 'runtime_name').toLowerCase().includes('worker') ||
-      /\b(worker|workers|cloudflare|wrangler)\b/i.test(intention),
+    trigger: () => false,
   },
   {
     // Audit chain: tamper-evident audit trail
