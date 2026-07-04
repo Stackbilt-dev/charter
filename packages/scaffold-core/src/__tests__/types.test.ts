@@ -178,6 +178,8 @@ describe('types compile', () => {
   it('MaterializerResult satisfies shape', () => {
     const facts: ScaffoldFacts = {
       pattern: 'worker',
+      sourcePattern: 'rest-api',
+      traitMap: {},
       projectName: 'test',
       intention: 'build a worker',
       bindings: [],

@@ -5,13 +5,14 @@
 import type { ScaffoldFacts, PatternKnowledge } from '../types';
 
 export function buildAdr001(facts: ScaffoldFacts, knowledge: PatternKnowledge): string {
+  const sourcePattern = facts.sourcePattern ?? facts.pattern;
   const context = knowledge.adrContext || `Building ${facts.intention} on Cloudflare Workers.`;
   const decision =
     knowledge.adrDecision ||
-    `Use the \`${facts.pattern}\` scaffold pattern as the implementation baseline.`;
+    `Use the \`${sourcePattern}\` scaffold pattern as the implementation baseline.`;
 
   const consequences: string[] = [
-    `- Inherits standard ${facts.pattern} file layout and binding conventions`,
+    `- Inherits standard ${sourcePattern} file layout and binding conventions`,
     facts.qualityProfile.authentication ? '- Authentication layer is required on all protected routes' : '',
     facts.qualityProfile.rateLimiting ? '- Rate limiting must be applied at the edge' : '',
     facts.qualityProfile.observability ? '- Structured logging and trace IDs are required' : '',

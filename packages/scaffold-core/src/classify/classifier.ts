@@ -41,6 +41,7 @@ export function choosePattern(intention: string): ClassifyResult {
     pattern: winner.name as PatternName,
     confidence: confidenceNum,
     traits: winner.traits,
+    traitMap: winner.traitMap,
     qualityProfile: {
       testingLevel: 'standard',
       observability: false,

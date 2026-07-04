@@ -43,6 +43,14 @@ export interface ClassifyResult {
   traits: string[];
   qualityProfile: QualityProfile;
   enrichedIntention: string;
+  /**
+   * Key/value trait map from the matched ScoredPatternDef (route_shape, verification,
+   * dispatch, trigger, framework, default_routes, source_pattern, pattern_element,
+   * pattern_category, pattern_tier). `source_pattern` is the fine-grained pattern key
+   * (e.g. 'stripe-webhook') that codegen/governance/knowledge lookups key off of —
+   * distinct from the coarse `pattern` (PatternName) field above.
+   */
+  traitMap: Record<string, string>;
 }
 
 export interface QualityProfile {
@@ -117,6 +125,10 @@ export interface ScaffoldFacts {
   bindings: ScaffoldBinding[];
   traits: string[];
   qualityProfile: QualityProfile;
+  /** Fine-grained source pattern key (e.g. 'stripe-webhook') — see ClassifyResult.traitMap. */
+  sourcePattern: string;
+  /** Raw trait map carried from classification — used by codegen for default_routes lookup. */
+  traitMap: Record<string, string>;
 }
 
 export interface MaterializerResult {

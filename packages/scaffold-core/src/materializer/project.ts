@@ -370,30 +370,35 @@ function renderContractTs(facts: Facts, projectName: string, prd: PrdSections): 
 
   const description = str(facts, 'requirement_name') || projectName;
 
+  // @stackbilt/contracts is not published yet, so this stub is a plain Zod object
+  // instead of a `defineContract(...)` call — importing that package here would
+  // break `npm install` for anyone who downloads this scaffold. Swap in
+  // `defineContract` once the package ships; the shape below matches its API.
   return `import { z } from 'zod';
-import { defineContract } from '@stackbilt/contracts';
 
 // TODO: rename fields and operations to match your domain.
-// Run: npx @stackbilt/contracts generate
+// @stackbilt/contracts is not published yet — this is a plain Zod-typed stub.
+// Once it ships, replace this with that package's defineContract helper.
 
-export const ${pascal}Contract = defineContract({
+export const ${pascal}Schema = z.object({
+  id: z.string().uuid(),
+  // TODO: add your domain-specific fields here
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export const ${pascal}Contract = {
   name: '${pascal}',
   version: '1.0.0',
   description: '${description}',
 
-  schema: z.object({
-    id: z.string().uuid(),
-    // TODO: add your domain-specific fields here
-    createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime(),
-  }),
+  schema: ${pascal}Schema,
 
   operations: {
     create: {
       input: z.object({
         // TODO: add creation input fields
       }),
-      output: 'self' as const,
       emits: ['${slug}.created'],
     },
     update: {
@@ -401,12 +406,10 @@ export const ${pascal}Contract = defineContract({
         id: z.string().uuid(),
         // TODO: add update fields
       }),
-      output: 'self' as const,
       emits: ['${slug}.updated'],
     },
     delete: {
       input: z.object({ id: z.string().uuid() }),
-      output: 'self' as const,
       emits: ['${slug}.deleted'],
     },
   },${surfaces}
@@ -416,7 +419,7 @@ export const ${pascal}Contract = defineContract({
     update: { requires: 'authenticated' },
     delete: { requires: 'role', roles: ['admin'] },
   },
-});
+} as const;
 `;
 }
 
