@@ -62,6 +62,12 @@ import { inferBindings } from './classify/bindings';
 
 const MAX_SLUG_LENGTH = 40;
 const FALLBACK_SLUG = 'scaffold-app';
+// Bound the raw input before any regex runs on it — the intention string is public
+// hero-demo input, and CodeQL flags the trim regexes below as worst-case-quadratic
+// on unbounded input. Slugs are capped at MAX_SLUG_LENGTH anyway, so nothing past a
+// generous prefix can ever affect the result; truncating first makes every regex
+// below run over a small, fixed-size string regardless of what's typed.
+const MAX_RAW_INPUT_LENGTH = 500;
 
 /**
  * Derive a kebab-case project slug from a free-form intention string.
@@ -70,7 +76,8 @@ const FALLBACK_SLUG = 'scaffold-app';
  * headers consistent instead of falling back to a generic placeholder.
  */
 export function deriveProjectSlug(intention: string): string {
-  const slug = intention
+  const bounded = intention.slice(0, MAX_RAW_INPUT_LENGTH);
+  const slug = bounded
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
