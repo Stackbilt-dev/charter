@@ -41,6 +41,14 @@ export interface ScoredPatternDef extends PatternDef {
   traitMap: Record<string, string>;
 }
 
+// Payment-action keywords that independently trigger Payment Signal (and are
+// excluded from Webhook Signal so an explicit payment context always wins).
+// "billing" and "webhook" are deliberately NOT here: they only add to the
+// Payment Signal score as a bonus once one of these has already matched (see
+// Payment Signal's score() below) — listing them here would let bare
+// "billing" or "webhook" fire this pattern on their own again.
+const PAYMENT_ACTION_KEYWORDS = ['stripe', 'subscription', 'checkout', 'payment', 'payments'];
+
 export const SCORED_PATTERNS: ScoredPatternDef[] = [
   {
     name: 'worker' as PatternName,
@@ -73,15 +81,16 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
     name: 'worker' as PatternName,
     status: 'ACTIVE',
     category: 'INTEGRATION',
-    keywords: ['stripe', 'billing', 'subscription', 'checkout', 'payment', 'payments', 'webhook'],
+    keywords: [...PAYMENT_ACTION_KEYWORDS, 'billing', 'webhook'],
     traits: ['post-handler', 'hmac-stripe', 'event-router', 'fetch-trigger'],
     signal: 'Payment Signal',
     priority: 100,
     score: (text: string) => {
-      // "billing" is intentionally excluded here — it appears in architectural contexts
-      // ("billing dashboard", "billing management") that are not Stripe webhook handlers.
-      // Require at least one explicit payment-action keyword before scoring billing terms.
-      const stripeHits = keywordScore(text, ['stripe', 'subscription', 'checkout', 'payment', 'payments']);
+      // "billing" is intentionally excluded from PAYMENT_ACTION_KEYWORDS — it appears in
+      // architectural contexts ("billing dashboard", "billing management") that are not
+      // Stripe webhook handlers. Require at least one explicit payment-action keyword
+      // before scoring billing terms.
+      const stripeHits = keywordScore(text, PAYMENT_ACTION_KEYWORDS);
       if (stripeHits === 0) return 0;
       return stripeHits + (text.includes('billing') ? 1 : 0) + (text.includes('webhook') ? 1 : 0);
     },
@@ -109,7 +118,7 @@ export const SCORED_PATTERNS: ScoredPatternDef[] = [
     score: (text: string) => {
       // Exclude only if explicit payment-action keywords are present (not "billing" alone —
       // see Payment Signal comment; "billing webhook" without Stripe is generic).
-      if (keywordScore(text, ['stripe', 'subscription', 'checkout', 'payment', 'payments']) >= 1) return 0;
+      if (keywordScore(text, PAYMENT_ACTION_KEYWORDS) >= 1) return 0;
       return keywordScore(text, ['webhook', 'signature verification', 'x-hub-signature', 'github webhook', 'slack webhook', 'twilio webhook']);
     },
     traitMap: {
