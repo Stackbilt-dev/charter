@@ -27,4 +27,11 @@ export interface BundleResult {
   }>;
   unmatchedModules: string[];
   advisoryOnlyModules: string[];
+  /**
+   * Parsed document for each resolved module, keyed by module path. Populated
+   * by `bundleModules()` (absent on hand-built BundleResults, e.g. in tests)
+   * so `evaluateEvidence` can validate per-module and attribute constraint
+   * results back to their owning module instead of only the merged document.
+   */
+  documents?: Record<string, AdfDocument>;
 }

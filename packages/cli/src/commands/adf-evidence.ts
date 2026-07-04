@@ -18,6 +18,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, readFlagFile, tokenizeTask } from '../flags';
 import { hashContent, loadLockFile } from './adf-sync';
+import { recordAdfConstraintEvents } from '../telemetry';
 
 interface AutoMeasurement {
   metric: string;
@@ -94,6 +95,7 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   try {
     const bundle = bundleModules(aiDir, modulePaths, readFile, keywords, manifest);
     const report: EvidenceReport = evaluateEvidence(bundle, context, staleThreshold);
+    recordAdfConstraintEvents(options.configPath, { results: report.constraints });
 
     // Check sync status
     const lockFile = path.join(aiDir, '.adf.lock');

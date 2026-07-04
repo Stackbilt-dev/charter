@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
 import { adfSuggestCommand, buildSuggestReport } from '../commands/adf-suggest';
-import type { AdfResolutionEvent, CliTelemetryEvent } from '../telemetry';
+import type { AdfConstraintEvent, AdfResolutionEvent, CliTelemetryEvent } from '../telemetry';
 
 const originalCwd = process.cwd();
 const tempDirs: string[] = [];
@@ -52,6 +52,19 @@ function commandEvent(overrides: Partial<CliTelemetryEvent> = {}): CliTelemetryE
     durationMs: 10,
     exitCode: 0,
     success: true,
+    ...overrides,
+  };
+}
+
+function constraintEvent(overrides: Partial<AdfConstraintEvent> = {}): AdfConstraintEvent {
+  return {
+    version: 1,
+    eventType: 'adf.constraint',
+    timestamp: new Date().toISOString(),
+    sessionId: null,
+    module: 'governance.adf',
+    metric: 'entry_loc',
+    status: 'fail',
     ...overrides,
   };
 }
@@ -234,13 +247,53 @@ describe('buildSuggestReport', () => {
     });
     const cmds = [commandEvent({ sessionId: 'sess-2', success: false, exitCode: 1, timestamp: new Date(now.getTime() + 1000).toISOString() })];
     const report = buildSuggestReport([res], cmds, 1, 60, 'events.ndjson');
-    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 1 }]);
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 1, exactFailures: 0 }]);
   });
 
   it('does not report loaded-but-violated when nothing downstream failed', () => {
     const res = resolutionEvent({ resolvedModules: ['governance.adf'], triggerMatches: [] });
     const cmds = [commandEvent({ success: true, exitCode: 0 })];
     const report = buildSuggestReport([res], cmds, 1, 60, 'events.ndjson');
+    expect(report.loadedButViolated).toHaveLength(0);
+  });
+
+  it('reports exact loaded-but-violated attribution from adf.constraint fail events, joined by sessionId', () => {
+    const res = resolutionEvent({ sessionId: 'sess-9', resolvedModules: ['governance.adf'], triggerMatches: [] });
+    const constraints = [constraintEvent({ sessionId: 'sess-9', module: 'governance.adf', status: 'fail' })];
+    const report = buildSuggestReport([res], [], 1, 60, 'events.ndjson', constraints);
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 0, exactFailures: 1 }]);
+  });
+
+  it('does not multiply exactFailures by the number of resolution events that share a session with one real failure', () => {
+    const resolutions = [1, 2, 3, 4, 5].map(() =>
+      resolutionEvent({ sessionId: 'sess-fanout', resolvedModules: ['governance.adf'], triggerMatches: [] }),
+    );
+    const constraints = [constraintEvent({ sessionId: 'sess-fanout', module: 'governance.adf', status: 'fail' })];
+    const report = buildSuggestReport(resolutions, [], 1, 60, 'events.ndjson', constraints);
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 5, correlatedFailures: 0, exactFailures: 1 }]);
+  });
+
+  it('counts exactFailures as the number of distinct fail events for a module, not the number of resolutions', () => {
+    const res = resolutionEvent({ sessionId: 'sess-multi', resolvedModules: ['governance.adf'], triggerMatches: [] });
+    const constraints = [
+      constraintEvent({ sessionId: 'sess-multi', module: 'governance.adf', status: 'fail' }),
+      constraintEvent({ sessionId: 'sess-multi', module: 'governance.adf', status: 'fail' }),
+    ];
+    const report = buildSuggestReport([res], [], 1, 60, 'events.ndjson', constraints);
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 0, exactFailures: 2 }]);
+  });
+
+  it('does not attribute an adf.constraint fail event to a module that was not resolved in that session', () => {
+    const res = resolutionEvent({ sessionId: 'sess-9', resolvedModules: ['frontend.adf'], triggerMatches: [] });
+    const constraints = [constraintEvent({ sessionId: 'sess-9', module: 'governance.adf', status: 'fail' })];
+    const report = buildSuggestReport([res], [], 1, 60, 'events.ndjson', constraints);
+    expect(report.loadedButViolated).toHaveLength(0);
+  });
+
+  it('ignores adf.constraint events with a pass/warn status', () => {
+    const res = resolutionEvent({ sessionId: 'sess-9', resolvedModules: ['governance.adf'], triggerMatches: [] });
+    const constraints = [constraintEvent({ sessionId: 'sess-9', module: 'governance.adf', status: 'pass' })];
+    const report = buildSuggestReport([res], [], 1, 60, 'events.ndjson', constraints);
     expect(report.loadedButViolated).toHaveLength(0);
   });
 
@@ -424,6 +477,25 @@ describe('adfSuggestCommand', () => {
     const report = JSON.parse(logs[0]) as { resolutionEvents: number; commandEvents: number };
     expect(report.resolutionEvents).toBe(0);
     expect(report.commandEvents).toBe(0);
+  });
+
+  it('reads adf.constraint fail events from events.ndjson and surfaces exact loaded-but-violated attribution', () => {
+    const tmp = tmpDir();
+    process.chdir(tmp);
+    const telemetryDir = path.join(tmp, '.charter', 'telemetry');
+    fs.mkdirSync(telemetryDir, { recursive: true });
+
+    const res = resolutionEvent({ sessionId: 'sess-e2e', resolvedModules: ['governance.adf'], triggerMatches: [] });
+    const constraint = constraintEvent({ sessionId: 'sess-e2e', module: 'governance.adf', metric: 'entry_loc', status: 'fail' });
+    fs.writeFileSync(path.join(telemetryDir, 'events.ndjson'), [res, constraint].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => logs.push(msg));
+
+    const exitCode = adfSuggestCommand(baseOptions, []);
+    expect(exitCode).toBe(0);
+    const report = JSON.parse(logs[0]) as { loadedButViolated: Array<{ module: string; exactFailures: number; correlatedFailures: number }> };
+    expect(report.loadedButViolated).toEqual([{ module: 'governance.adf', occurrences: 1, correlatedFailures: 0, exactFailures: 1 }]);
   });
 
   it('prints a human-readable report in text format', () => {

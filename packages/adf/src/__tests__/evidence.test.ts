@@ -188,4 +188,88 @@ describe('evaluateEvidence', () => {
     const report = evaluateEvidence(makeBundleResult());
     expect(report.staleBaselines).toEqual([]);
   });
+
+  it('attributes constraints to their owning module when bundle.documents is present', () => {
+    const bundle = makeBundleResult({
+      resolvedModules: ['frontend.adf', 'backend.adf'],
+      documents: {
+        'frontend.adf': {
+          version: '0.1',
+          sections: [
+            {
+              key: 'METRICS',
+              decoration: null,
+              content: { type: 'metric', entries: [{ key: 'entry_loc', value: 300, ceiling: 200, unit: 'lines' }] },
+            },
+          ],
+        },
+        'backend.adf': {
+          version: '0.1',
+          sections: [
+            {
+              key: 'METRICS',
+              decoration: null,
+              content: { type: 'metric', entries: [{ key: 'handler_loc', value: 50, ceiling: 200, unit: 'lines' }] },
+            },
+          ],
+        },
+      },
+    });
+    const report = evaluateEvidence(bundle);
+    expect(report.constraints).toHaveLength(2);
+    const failing = report.constraints.find((c) => c.metric === 'entry_loc');
+    expect(failing?.module).toBe('frontend.adf');
+    expect(failing?.status).toBe('fail');
+    const passing = report.constraints.find((c) => c.metric === 'handler_loc');
+    expect(passing?.module).toBe('backend.adf');
+    expect(passing?.status).toBe('pass');
+    expect(report.failCount).toBe(1);
+    expect(report.allPassing).toBe(false);
+  });
+
+  it('falls back to unattributed merged-document validation when bundle.documents is absent', () => {
+    const report = evaluateEvidence(
+      makeBundleResult({
+        mergedDocument: {
+          version: '0.1',
+          sections: [
+            {
+              key: 'METRICS',
+              decoration: null,
+              content: { type: 'metric', entries: [{ key: 'loc', value: 100, ceiling: 200, unit: 'lines' }] },
+            },
+          ],
+        },
+      }),
+    );
+    expect(report.constraints).toHaveLength(1);
+    expect(report.constraints[0].module).toBeUndefined();
+  });
+
+  it('falls back to merged-document validation when documents is present but missing an entry for a resolved module', () => {
+    // `documents: {}` is truthy but incomplete -- must not be treated the
+    // same as "per-module data available," or a resolved module with no
+    // matching document would silently produce zero constraints instead of
+    // falling back.
+    const report = evaluateEvidence(
+      makeBundleResult({
+        resolvedModules: ['core.adf'],
+        documents: {},
+        mergedDocument: {
+          version: '0.1',
+          sections: [
+            {
+              key: 'METRICS',
+              decoration: null,
+              content: { type: 'metric', entries: [{ key: 'loc', value: 250, ceiling: 200, unit: 'lines' }] },
+            },
+          ],
+        },
+      }),
+    );
+    expect(report.constraints).toHaveLength(1);
+    expect(report.constraints[0].status).toBe('fail');
+    expect(report.constraints[0].module).toBeUndefined();
+    expect(report.allPassing).toBe(false);
+  });
 });

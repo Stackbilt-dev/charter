@@ -23,11 +23,39 @@ import type {
  *
  * @param doc - Parsed ADF document
  * @param context - Optional external metric overrides (e.g., actual LOC counts)
+ * @param module - Path of the source module this document was loaded from, when known.
+ *   Stamped onto each ConstraintResult for failure attribution (e.g. `charter adf suggest`).
  */
 export function validateConstraints(
   doc: AdfDocument,
   context?: Record<string, number>,
+  module?: string,
 ): EvidenceResult {
+  const constraints = computeConstraints(doc, context, module);
+  const failCount = constraints.filter(c => c.status === 'fail').length;
+  const warnCount = constraints.filter(c => c.status === 'warn').length;
+
+  return {
+    constraints,
+    weightSummary: computeWeightSummary(doc),
+    allPassing: failCount === 0,
+    failCount,
+    warnCount,
+  };
+}
+
+/**
+ * Compute per-entry ConstraintResults for a single document's METRICS
+ * sections, without the aggregate weightSummary/failCount/warnCount wrapper.
+ * Shared by validateConstraints and evidence.ts's per-module attribution
+ * path, so validating N modules doesn't also compute (and discard) N
+ * redundant weight summaries and pass/fail counts.
+ */
+export function computeConstraints(
+  doc: AdfDocument,
+  context?: Record<string, number>,
+  module?: string,
+): ConstraintResult[] {
   const constraints: ConstraintResult[] = [];
 
   for (const section of doc.sections) {
@@ -48,20 +76,12 @@ export function validateConstraints(
         status,
         message: `${entry.key}: ${value} / ${entry.ceiling} [${entry.unit}] -- ${statusLabel}`,
         source: hasContext ? 'context' : 'metric',
+        ...(module !== undefined ? { module } : {}),
       });
     }
   }
 
-  const failCount = constraints.filter(c => c.status === 'fail').length;
-  const warnCount = constraints.filter(c => c.status === 'warn').length;
-
-  return {
-    constraints,
-    weightSummary: computeWeightSummary(doc),
-    allPassing: failCount === 0,
-    failCount,
-    warnCount,
-  };
+  return constraints;
 }
 
 /**

@@ -8,7 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { BundleResult } from '@stackbilt/adf';
+import type { BundleResult, ConstraintStatus } from '@stackbilt/adf';
 
 export interface CliTelemetryEvent {
   version: 1;
@@ -44,6 +44,72 @@ export interface AdfResolutionEvent {
   resolvedModules: string[];
   triggerMatches: BundleResult['triggerMatches'];
   tokenEstimate?: number;
+}
+
+/**
+ * Sibling event recording a single failed METRICS constraint, attributed to
+ * the specific `.ai/*.adf` module it was checked against (see
+ * `validateConstraints`'s `module` parameter). Unlike AdfResolutionEvent's
+ * command-success correlation, this is exact evidence: `charter adf
+ * suggest`'s `loadedButViolated` detector can join this directly on module
+ * (plus sessionId/time-window) instead of guessing from a downstream
+ * command's exit code.
+ */
+export interface AdfConstraintEvent {
+  version: 1;
+  eventType: 'adf.constraint';
+  timestamp: string;
+  sessionId: string | null;
+  module: string;
+  metric: string;
+  status: ConstraintStatus;
+}
+
+export interface RecordAdfConstraintInput {
+  results: Array<{ module?: string; metric: string; status: ConstraintStatus }>;
+  /** Override the CHARTER_SESSION_ID env lookup, same as RecordAdfResolutionInput. */
+  sessionId?: string | null;
+}
+
+/**
+ * Persist one event per failing, module-attributed constraint (best-effort,
+ * never throws). Passing/warning constraints aren't recorded — only `fail`
+ * is a "violation" in the sense `loadedButViolated` cares about — and
+ * results with no `module` are skipped since there's nothing to attribute.
+ */
+export function recordAdfConstraintEvents(configPath: string, input: RecordAdfConstraintInput): void {
+  try {
+    const violated = input.results.filter(
+      (r): r is { module: string; metric: string; status: ConstraintStatus } =>
+        r.module !== undefined && r.status === 'fail',
+    );
+    if (violated.length === 0) return;
+
+    const telemetryDir = path.join(configPath, 'telemetry');
+    const telemetryFile = path.join(telemetryDir, 'events.ndjson');
+    fs.mkdirSync(telemetryDir, { recursive: true });
+
+    const timestamp = new Date().toISOString();
+    const sessionId = input.sessionId ?? getSessionId() ?? null;
+    const lines = violated
+      .map((r) => {
+        const event: AdfConstraintEvent = {
+          version: 1,
+          eventType: 'adf.constraint',
+          timestamp,
+          sessionId,
+          module: r.module,
+          metric: r.metric,
+          status: r.status,
+        };
+        return JSON.stringify(event);
+      })
+      .join('\n');
+
+    fs.appendFileSync(telemetryFile, `${lines}\n`);
+  } catch {
+    // Telemetry is best-effort and must never block command execution.
+  }
 }
 
 export interface RecordAdfResolutionInput {

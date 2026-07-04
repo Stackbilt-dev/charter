@@ -40,7 +40,7 @@ export function bundleModules(
   const manifest = preloadedManifest ?? loadAndParseManifest(basePath, readFile);
   const triggerMatches = buildTriggerReport(manifest, modulePaths, taskKeywords);
 
-  const documents: AdfDocument[] = [];
+  const documentsByPath: Record<string, AdfDocument> = {};
   const perModuleTokens: Record<string, number> = {};
   const advisoryOnlyModules: string[] = [];
   const defaultLoadSet = new Set(manifest.defaultLoad);
@@ -54,7 +54,7 @@ export function bundleModules(
       throw new AdfBundleError(`Module not found: ${modPath}`, modPath);
     }
     const doc = parseAdf(content);
-    documents.push(doc);
+    documentsByPath[modPath] = doc;
     perModuleTokens[modPath] = estimateTokens(doc);
 
     // Flag on-demand modules with no load-bearing sections
@@ -66,7 +66,10 @@ export function bundleModules(
     }
   }
 
-  const merged = mergeDocuments(documents);
+  // Module paths are never integer-index-like strings, so Object.values
+  // preserves insertion order — safe to derive the merge input from
+  // documentsByPath instead of maintaining a second parallel array.
+  const merged = mergeDocuments(Object.values(documentsByPath));
   const tokenEstimate = estimateTokens(merged);
   const tokenBudget = manifest.tokenBudget ?? null;
   const tokenUtilization = tokenBudget !== null ? tokenEstimate / tokenBudget : null;
@@ -103,6 +106,7 @@ export function bundleModules(
     triggerMatches,
     unmatchedModules,
     advisoryOnlyModules,
+    documents: documentsByPath,
   };
 }
 
