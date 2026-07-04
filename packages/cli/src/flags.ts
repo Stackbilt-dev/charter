@@ -32,10 +32,14 @@ export function readFlagFile(filePath: string, flagName: string): string {
 
 /**
  * Tokenize a task prompt into keywords for ADF module resolution.
+ * Deduplicated — a repeated word in the prompt (or a caller passing the
+ * same task twice) shouldn't count as multiple independent keyword
+ * occurrences downstream (e.g. in adf suggest's telemetry analysis).
  */
 export function tokenizeTask(task: string): string[] {
-  return task
+  const tokens = task
     .split(/[\s,;:()[\]{}]+/)
     .filter(w => w.length > 1)
     .map(w => w.replace(/[^a-zA-Z0-9]/g, ''));
+  return [...new Set(tokens)];
 }

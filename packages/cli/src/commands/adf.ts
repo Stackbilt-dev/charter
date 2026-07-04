@@ -26,6 +26,7 @@ import { adfTidyCommand } from './adf-tidy';
 import { adfPopulateCommand } from './adf-populate';
 import { adfContextCommand } from './adf-context';
 import { adfCompileCommand } from './adf-compile';
+import { adfSuggestCommand } from './adf-suggest';
 import {
   NAMED_MODULE_SCAFFOLDS,
   NAMED_MODULE_DEFAULT_TRIGGERS,
@@ -265,8 +266,10 @@ export async function adfCommand(options: CLIOptions, args: string[]): Promise<n
       return adfContextCommand(options, restArgs);
     case 'compile':
       return adfCompileCommand(options, restArgs);
+    case 'suggest':
+      return adfSuggestCommand(options, restArgs);
     default:
-      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics, context, compile`);
+      throw new CLIError(`Unknown adf subcommand: ${subcommand}. Supported: init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy, metrics, context, compile, suggest`);
   }
 }
 
@@ -936,6 +939,20 @@ function printHelp(): void {
   console.log('      --check: diff compiled output against files on disk; exit 1 if stale (CI drift gate)');
   console.log('      --force: with --write, overwrite even files that lack the compile banner');
   console.log('      Default (no --write/--check): print to stdout (single target only)');
+  console.log('');
+  console.log('    charter adf suggest [--min-occurrences <n>] [--window-minutes <n>] [--ai-dir <dir>]');
+  console.log('                        [--emit-ops <file>]');
+  console.log('      Diagnostics over .charter/telemetry/events.ndjson: dead modules,');
+  console.log('      recurring unmatched keywords, and modules that load yet a downstream');
+  console.log('      command still fails — all report-only, no module attribution guessed.');
+  console.log('      Also reports co-occurrence trigger candidates (a weaker, non-failure-');
+  console.log('      backed heuristic: keyword X often appears alongside a keyword that');
+  console.log('      already triggers module M). --emit-ops writes non-ambiguous candidates');
+  console.log('      as REPLACE_BULLET ops to <file>, for review then `charter adf patch');
+  console.log('      --ops-file <file>` — nothing is ever applied automatically.');
+  console.log('      --min-occurrences: threshold before a signal is reported (default: 3)');
+  console.log('      --window-minutes: time-window fallback for joining a resolution to a');
+  console.log('                        later command outcome when no sessionId is set (default: 60)');
   console.log('');
 }
 

@@ -143,6 +143,20 @@ function parseTriggerEntry(entry: string): ManifestModule {
   return mod;
 }
 
+/**
+ * Format a ManifestModule back into an ON_DEMAND bullet string — the
+ * inverse of parseTriggerEntry. Single source of truth for the bullet
+ * format so writers (e.g. `adf suggest --emit-ops`) can't drift from what
+ * parseTriggerEntry actually accepts.
+ */
+export function formatTriggerEntry(mod: ManifestModule): string {
+  const budgetSuffix = mod.tokenBudget !== undefined ? ` [budget: ${mod.tokenBudget}]` : '';
+  if (mod.triggers.length === 0) {
+    return `${mod.path}${budgetSuffix}`;
+  }
+  return `${mod.path} (Triggers on: ${mod.triggers.join(', ')})${budgetSuffix}`;
+}
+
 // ============================================================================
 // Module Resolution
 // ============================================================================

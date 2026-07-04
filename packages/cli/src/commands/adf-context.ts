@@ -12,11 +12,13 @@ import {
   parseManifest,
   resolveModules,
   bundleModules,
+  buildTriggerReport,
   formatAdf,
 } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
+import { recordAdfResolutionEvent } from '../telemetry';
 
 /**
  * Extract keywords from file paths using extension and directory signals.
@@ -80,6 +82,7 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   const manifest = parseManifest(manifestDoc);
 
   const resolvedModules = resolveModules(manifest, dedupKeywords);
+  const candidateModules = manifest.onDemand.map(m => m.path);
 
   if (bundle) {
     // Full bundle output
@@ -89,6 +92,15 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
     };
 
     const result = bundleModules(aiDir, resolvedModules, readFile, dedupKeywords, manifest);
+
+    recordAdfResolutionEvent(options.configPath, {
+      source: 'context',
+      keywords: dedupKeywords,
+      candidateModules,
+      resolvedModules: result.resolvedModules,
+      triggerMatches: result.triggerMatches,
+      tokenEstimate: result.tokenEstimate,
+    });
 
     if (options.format === 'json') {
       console.log(JSON.stringify({
@@ -103,6 +115,14 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
     }
   } else {
     // Module list only
+    recordAdfResolutionEvent(options.configPath, {
+      source: 'context',
+      keywords: dedupKeywords,
+      candidateModules,
+      resolvedModules,
+      triggerMatches: buildTriggerReport(manifest, resolvedModules, dedupKeywords),
+    });
+
     if (options.format === 'json') {
       console.log(JSON.stringify({
         keywords: dedupKeywords,

@@ -19,62 +19,52 @@
  */
 
 /**
- * Typed data access and ontology enforcement policy (Stackbilt-dev/charter#69).
+ * Typed data access and ontology enforcement policy.
  *
- * Codifies the cross-repo policy for how services reference business concepts
- * (tenant, user, subscription, quota, etc.) — derived from the canonical data
- * registry at Stackbilt-dev/stackbilt_llc/policies/data-registry.yaml.
+ * Codifies a generic cross-service policy for how services reference
+ * business concepts (tenant, user, subscription, quota, etc.) — derived
+ * from a canonical data registry that is the single source of truth for
+ * ownership, sensitivity, and access shape.
  *
- * Declares six sensitivity tiers, the disambiguation protocol, and RPC
- * boundary rules. Consumed by charter validate / codebeast DATA_AUTHORITY /
- * AEGIS disambiguation firewall as the single source of truth for data
- * access policy across the ecosystem.
+ * Declares six sensitivity tiers, a disambiguation step, and cross-service
+ * access-boundary rules. Framework-generic content only — keep this in
+ * sync with the repo-local `.ai/typed-data-access.adf` policy module.
  */
 export const TYPED_DATA_ACCESS_SCAFFOLD = `ADF: 0.1
 
 \u{1F3AF} TASK: Typed data access and ontology enforcement policy
 
 \u{1F4CB} CONTEXT:
-  - Business concepts (tenant, user, subscription, quota, credit, mrr, etc.) are defined in a canonical data registry — the single source of truth for ownership, sensitivity, and access shape across the ecosystem
-  - Reference registry location: Stackbilt-dev/stackbilt_llc/policies/data-registry.yaml (22+ concepts, 6 sensitivity tiers)
-  - Each concept declares: owner service, D1 table, sensitivity tier, definition, aliases, rpc_method, mcp_tool
-  - Consumer services derive their KNOWN_CONCEPTS and alias maps from the registry at build time (compiled-const snapshot)
-  - Disambiguation protocol halts on undefined concepts rather than guessing
-  - CodeBeast DATA_AUTHORITY sensitivity class escalates raw D1 access to owned tables
+  - Business concepts (tenant, user, subscription, quota, credit, etc.) are defined in a canonical data registry \u2014 the single source of truth for ownership, sensitivity, and access shape across services
+  - Each concept declares: owner service, storage table, sensitivity tier, definition, aliases, and the accessor (RPC method, tool, or API) non-owning services must use
+  - Consumer services derive their known-concepts and alias maps from the registry at build time (a compiled-const snapshot pattern, not a runtime fetch)
+  - A disambiguation step halts on undefined concepts rather than guessing shape, ownership, or sensitivity
 
 \u{1F510} SENSITIVITY TIERS [load-bearing]:
   - public            \u2014 readable from any service, no auth required (e.g., blog_post)
-  - service_internal  \u2014 readable/writable only by the owning service, raw D1 access is fine within the owner
-  - cross_service_rpc \u2014 accessible via declared rpc_method or Service Binding, never raw D1 from a non-owning service
-  - pii_scoped        \u2014 accessible only via owning service + audit_log entry required at the call site
-  - billing_critical  \u2014 writable only by the owning service plus the Stripe webhook handler; never leaves the owning service boundary even via RPC
+  - service_internal  \u2014 readable/writable only by the owning service, raw storage access is fine within the owner
+  - cross_service_rpc \u2014 accessible via a declared RPC method or service binding, never raw storage access from a non-owning service
+  - pii_scoped        \u2014 accessible only via the owning service + an audit-log entry required at the call site
+  - billing_critical  \u2014 writable only by the owning service plus its designated payment-webhook handler; never leaves the owning service boundary even via RPC
   - secrets           \u2014 never leaves the owning service boundary under any circumstance
 
 \u26A0\uFE0F CONSTRAINTS [load-bearing]:
   - New code referencing a business concept MUST check the canonical registry first; terms not in the registry or its aliases MUST be added before the code lands
-  - Non-owning services reading or writing cross_service_rpc concepts MUST use the declared rpc_method or mcp_tool \u2014 raw D1 access to another service's table is a DATA_AUTHORITY violation
-  - pii_scoped access requires an audit_log entry at the call site \u2014 no silent reads
+  - Non-owning services reading or writing cross_service_rpc concepts MUST use the declared accessor \u2014 raw storage access to another service's table is a violation
+  - pii_scoped access requires an audit-log entry at the call site \u2014 no silent reads
   - billing_critical and secrets tiers NEVER cross the owning service boundary, even via RPC
   - When encountering an undefined data concept in requirements, tasks, or user prompts, HALT and ask for clarification rather than guessing shape, ownership, or sensitivity
   - Registry updates MUST come before consumer code updates \u2014 the source of truth leads, consumers follow
-  - When promoting a concept to a higher sensitivity tier, all existing consumers of raw D1 access must migrate to RPC in the same change set
+  - When promoting a concept to a higher sensitivity tier, all existing consumers of raw storage access must migrate to the declared accessor in the same change set
 
 \u{1F4D6} ADVISORY:
   - Check the registry before reaching for a new type definition \u2014 the concept may already exist with a canonical shape
-  - Use charter surface --format json to discover what D1 tables a service currently exposes; cross-reference against registry ownership
+  - Use charter surface --format json to discover what tables/resources a service currently exposes; cross-reference against registry ownership
   - Aliases (e.g., "credits" for "quota") are semantically equivalent; prefer the canonical form in new code, accept aliases in user-facing copy
-  - The disambiguation protocol is load-bearing for autonomous agents \u2014 these systems cannot safely guess business term semantics
+  - The disambiguation step is load-bearing for autonomous agents \u2014 these systems cannot safely guess business-term semantics
 
 \u{1F4CA} METRICS:
-  REGISTRY_PATH: stackbilt_llc/policies/data-registry.yaml
-  REGISTRY_REPO: Stackbilt-dev/stackbilt_llc
   SENSITIVITY_TIERS: 6
-  DOCUMENTED_CONCEPTS: 22
-
-\u{1F517} REFERENCES:
-  - Stackbilt-dev/charter#69 \u2014 typed data access policy umbrella issue
-  - codebeast#9 \u2014 DATA_AUTHORITY sensitivity class (enforcement side)
-  - Stackbilt-dev/aegis#344 \u2014 disambiguation firewall (runtime halt mechanism)
 `;
 
 /**
@@ -98,14 +88,12 @@ export const NAMED_MODULE_DEFAULT_TRIGGERS: Record<string, string[]> = {
     'subscription',
     'quota',
     'credit',
-    'mrr',
     'pii',
     'sensitivity',
     'data registry',
     'ontology',
     'disambiguation',
-    'DATA_AUTHORITY',
-    'raw D1',
+    'raw storage access',
     'service boundary',
     'auth_scoped',
     'billing_critical',
