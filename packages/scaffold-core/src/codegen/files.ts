@@ -420,7 +420,11 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
             target: 'ES2022',
             module: 'ESNext',
             moduleResolution: 'Bundler',
+            // Without an explicit lib, tsc injects lib.dom, which conflicts
+            // with @cloudflare/workers-types globals (Response, caches, ...).
+            lib: ['ES2022'],
             strict: true,
+            skipLibCheck: true,
             types: ['@cloudflare/workers-types', 'vitest/globals'],
           },
           include: ['src', 'tests'],
@@ -505,10 +509,12 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
       path: 'src/lib/http-error.ts',
       role: 'entry',
       content: [
-        'export class HttpError extends Error {',
-        '  status: number;',
+        'import type { ContentfulStatusCode } from "hono/utils/http-status";',
         '',
-        '  constructor(status: number, message: string) {',
+        'export class HttpError extends Error {',
+        '  status: ContentfulStatusCode;',
+        '',
+        '  constructor(status: ContentfulStatusCode, message: string) {',
         '    super(message);',
         '    this.status = status;',
         '  }',
