@@ -224,3 +224,29 @@ describe('scaffold-core output quality — every generated import is a declared 
     }
   });
 });
+
+describe('scaffold-core output quality — generated project typechecks clean', () => {
+  it.each(REPRESENTATIVE_INTENTIONS)('tsconfig pins lib to ES2022 (no lib.dom clash with workers-types) for: %s', (intention) => {
+    const result = buildScaffold(intention);
+    const tsconfig = JSON.parse(fileContent(result, 'tsconfig.json'));
+    expect(tsconfig.compilerOptions.lib).toEqual(['ES2022']);
+    expect(tsconfig.compilerOptions.skipLibCheck).toBe(true);
+  });
+
+  it.each(REPRESENTATIVE_INTENTIONS)('HttpError.status is a ContentfulStatusCode so onError c.json(err.status) typechecks for: %s', (intention) => {
+    const result = buildScaffold(intention);
+    const httpError = fileContent(result, 'src/lib/http-error.ts');
+    if (!httpError) return; // pattern without the http-error helper
+    expect(httpError).toContain('ContentfulStatusCode');
+    expect(httpError).not.toMatch(/status: number/);
+  });
+
+  it.each(REPRESENTATIVE_INTENTIONS)('json body catch fallbacks are typed to the request shape for: %s', (intention) => {
+    const result = buildScaffold(intention);
+    for (const f of result.files) {
+      // Bare `.catch(() => ({}))` widens the body union to {} and breaks
+      // property access under strict mode in the downloaded project.
+      expect(f.content).not.toContain('.catch(() => ({}))');
+    }
+  });
+});
