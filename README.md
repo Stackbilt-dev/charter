@@ -134,6 +134,8 @@ This is a conflict in your existing dependency tree that npm surfaces while re-r
 
 A manifest declares modules, trigger keywords load them on demand, token budgets cap each one, and weighted sections tell the agent what matters.
 
+ADF operationalizes the Context Engineering principles documented in Stackbilt's [ai-playbook](https://github.com/Stackbilt-dev/ai-playbook).
+
 ```text
 .ai/
   manifest.adf    # Module registry: default vs on-demand with trigger keywords
