@@ -4,7 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
-## [Unreleased]
+## [1.9.0] - 2026-07-05
+
+> Unified workspace release. `@stackbilt/adf`/`@stackbilt/cli` were already bumped to 1.9.0 in-repo by `#246`; the release gate enforces one version across all workspace packages, so every package (including `@stackbilt/scaffold-core`, previously staged as 1.8.0) publishes as 1.9.0. No 1.8.0 was ever published to npm.
+
+### Added
+
+- **`charter adf suggest` real module-attribution for METRICS constraint failures** (`#246`) — replaces the session/time-window correlation heuristic in the `loadedButViolated` detector with exact evidence for METRICS ceiling failures from `adf-evidence.ts`.
 
 ### Fixed
 
