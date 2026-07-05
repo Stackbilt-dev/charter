@@ -395,25 +395,16 @@ export function routeContent(
  * Build the list of route ScaffoldFiles for the given facts.
  */
 export function buildRoutes(facts: ScaffoldFacts): ScaffoldFile[] {
-  const pattern = facts.pattern as string;
+  // Fine-grained source pattern (e.g. 'stripe-webhook') — distinct from the coarse
+  // `pattern` (PatternName), which several source patterns share.
+  const sourcePattern = facts.sourcePattern ?? (facts.pattern as string);
   const qp = facts.qualityProfile;
   const profile = {
-    needsPayments: qp.authentication && (pattern === 'stripe-webhook' || pattern === 'generic-webhook'),
+    needsPayments: qp.authentication && (sourcePattern === 'stripe-webhook' || sourcePattern === 'generic-webhook'),
     needsStreaming: qp.observability,
   };
 
-  // Extract default_routes from traits
-  const traitsMap: Record<string, string> = {};
-  for (const t of facts.traits) {
-    const idx = t.indexOf(':');
-    if (idx > 0) {
-      const k = t.slice(0, idx).trim();
-      const v = t.slice(idx + 1).trim();
-      traitsMap[k] = v;
-    }
-  }
-
-  const defaultRoutes = (traitsMap['default_routes'] ?? '')
+  const defaultRoutes = (facts.traitMap?.['default_routes'] ?? '')
     .split(',')
     .map((r) => r.trim())
     .filter(Boolean);
@@ -422,7 +413,7 @@ export function buildRoutes(facts: ScaffoldFacts): ScaffoldFile[] {
 
   return defaultRoutes.map((route) => ({
     path: routeToFile(route),
-    content: routeContent(route, pattern, profile),
+    content: routeContent(route, sourcePattern, profile),
     role: 'entry' as const,
   }));
 }

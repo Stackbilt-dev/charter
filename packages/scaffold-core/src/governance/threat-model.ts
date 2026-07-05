@@ -36,7 +36,7 @@ export function buildThreatModel(facts: ScaffoldFacts, knowledge: PatternKnowled
     '',
     '## Overview',
     '',
-    `**Pattern**: \`${facts.pattern}\`  `,
+    `**Pattern**: \`${facts.sourcePattern ?? facts.pattern}\`  `,
     `**Intent**: ${facts.intention}  `,
     complianceDomains.length > 0
       ? `**Compliance domains**: ${complianceDomains.join(', ')}`

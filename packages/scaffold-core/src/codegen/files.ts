@@ -126,7 +126,7 @@ const SCHEMA_BY_PATTERN: Record<string, string> = {
 
 // ─── Index file generator ─────────────────────────────────────────────────────
 
-function generateIndexFile(routes: string[], pattern: string): string {
+function generateIndexFile(routes: string[], pattern: string, projectName: string): string {
   const routeImports = routes
     .map((route) => {
       const moduleName = routeToFile(route).replace('src/', './').replace(/\.ts$/, '');
@@ -143,6 +143,10 @@ function generateIndexFile(routes: string[], pattern: string): string {
     routeImports,
     '',
     'const app = new Hono<{ Bindings: Env }>();',
+    '',
+    `app.get("/", (c) => c.json({ service: "${projectName}", pattern: "${pattern}" }));`,
+    '',
+    '// TODO: replace/extend with your primary intent route(s) — see registered routes below.',
     '',
     registrations,
     '',
@@ -340,16 +344,11 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
   const qp = facts.qualityProfile;
   const intention = facts.intention;
 
-  // Extract traits map
-  const traitsMap: Record<string, string> = {};
-  for (const t of facts.traits) {
-    const idx = t.indexOf(':');
-    if (idx > 0) {
-      traitsMap[t.slice(0, idx).trim()] = t.slice(idx + 1).trim();
-    }
-  }
+  // Fine-grained source pattern (e.g. 'stripe-webhook', 'cron-worker') — distinct from
+  // the coarse `pattern` (PatternName) above, which several source patterns share.
+  const sourcePattern = facts.sourcePattern ?? pattern;
 
-  const routes = (traitsMap['default_routes'] ?? '')
+  const routes = (facts.traitMap?.['default_routes'] ?? '')
     .split(',')
     .map((r) => r.trim())
     .filter(Boolean);
@@ -362,9 +361,9 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
   const hasAi = bindingTypes.includes('ai');
 
   const profile = {
-    needsTenancy: pattern === 'workers-saas' || qp.piiHandling,
-    needsPayments: pattern === 'stripe-webhook',
-    needsStreaming: pattern === 'ai-chat',
+    needsTenancy: sourcePattern === 'workers-saas' || qp.piiHandling,
+    needsPayments: sourcePattern === 'stripe-webhook',
+    needsStreaming: sourcePattern === 'ai-chat',
     needsStorage: hasR2,
     needsJwt: qp.authentication && intention.toLowerCase().includes('jwt'),
     needsOAuth: intention.toLowerCase().includes('oauth'),
@@ -376,11 +375,11 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
       path: 'wrangler.toml',
       role: 'config',
       content: [
-        'name = "stackbilder-generated"',
+        `name = "${facts.projectName}"`,
         'main = "src/worker.ts"',
         'compatibility_date = "2026-05-24"',
         '',
-        generateWranglerBindings(bindings, pattern),
+        generateWranglerBindings(bindings, sourcePattern),
       ].join('\n'),
     },
     {
@@ -388,7 +387,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
       role: 'config',
       content: JSON.stringify(
         {
-          name: 'stackbilder-scaffold',
+          name: facts.projectName,
           private: true,
           type: 'module',
           scripts: {
@@ -399,7 +398,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
           },
           dependencies: {
             hono: '^4.9.0',
-            ...(pattern === 'mcp-server' ? { '@modelcontextprotocol/sdk': '^1.0.0' } : {}),
+            ...(sourcePattern === 'mcp-server' ? { '@modelcontextprotocol/sdk': '^1.0.0' } : {}),
           },
           devDependencies: {
             '@cloudflare/workers-types': '^4.20260405.1',
@@ -473,7 +472,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
     {
       path: 'src/worker.ts',
       role: 'entry',
-      content: generateIndexFile(routes, pattern),
+      content: generateIndexFile(routes, sourcePattern, facts.projectName),
     },
     {
       path: 'src/types/env.ts',
@@ -487,7 +486,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
         ...(hasAi ? ['  AI: Ai;'] : []),
         '  AUTH_BEARER_TOKEN?: string;',
         '  STRIPE_WEBHOOK_SECRET?: string;',
-        ...(pattern === 'generic-webhook'
+        ...(sourcePattern === 'generic-webhook'
           ? ['  WEBHOOK_SECRET?: string;', '  WEBHOOK_SIGNATURE_HEADER?: string;']
           : []),
         ...(profile.needsJwt ? ['  JWT_SECRET?: string;'] : []),
@@ -589,7 +588,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
 
   // D1 schema and migration
   if (hasD1) {
-    const schema = SCHEMA_BY_PATTERN[pattern] ?? SCHEMA_BY_PATTERN['rest-api']!;
+    const schema = SCHEMA_BY_PATTERN[sourcePattern] ?? SCHEMA_BY_PATTERN['rest-api']!;
     files.push({ path: 'src/db/schema.sql', role: 'migration', content: schema + '\n' });
     files.push({ path: 'migrations/0001_initial.sql', role: 'migration', content: schema + '\n' });
   }
@@ -613,7 +612,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
   }
 
   // Durable Object stub
-  if (pattern === 'durable-objects' || hasDo) {
+  if (sourcePattern === 'durable-objects' || hasDo) {
     files.push({
       path: 'src/objects/room.ts',
       role: 'entry',
@@ -724,7 +723,7 @@ export function baseFiles(facts: ScaffoldFacts): ScaffoldFile[] {
   }
 
   // Hardening overlay
-  if (pattern === 'hardening-overlay') {
+  if (sourcePattern === 'hardening-overlay') {
     files.push({
       path: '.ai/hardening-checklist.md',
       role: 'adf',
@@ -780,7 +779,9 @@ export function addGovernanceFiles(
     ...files,
     { path: '.ai/threat-model.md', role: 'adf', content: governance.threatModel },
     { path: '.ai/adr-001.md', role: 'adf', content: governance.adr001 },
-    { path: '.ai/adr-002.md', role: 'adf', content: governance.adr002 ?? '' },
+    // adr-002 covers compliance-domain requirements (PHI/PCI/PII/telephony) — omit the
+    // file entirely when there are none rather than shipping a 0-byte artifact.
+    ...(governance.adr002 ? [{ path: '.ai/adr-002.md', role: 'adf' as const, content: governance.adr002 }] : []),
     { path: '.ai/test-plan.md', role: 'test', content: governance.testPlan },
     {
       path: '.ai/constraints.yaml',

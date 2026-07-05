@@ -364,9 +364,10 @@ function renderContractTs(facts: Facts, projectName: string, prd: PrdSections): 
       },
     },` : '';
 
-  const surfaces = (apiRoutes || dbSurface)
-    ? `\n\n  surfaces: {${apiRoutes}${dbSurface}\n  },`
-    : '';
+  // @stackbilt/contracts' ContractDefinition.surfaces is a required field (its two
+  // sub-fields, api/db, are each optional) — always emit it, even empty, or
+  // defineContract()'s generated call fails to typecheck against the real package.
+  const surfaces = `\n\n  surfaces: {${apiRoutes}${dbSurface}\n  },`;
 
   const description = str(facts, 'requirement_name') || projectName;
 
@@ -430,7 +431,7 @@ const FIRST_PARTY_DEPS: FirstPartyDep[] = [
   },
   {
     pkg: '@stackbilt/contracts',
-    version: '^0.2.1',
+    version: '^0.8.0',
     depType: 'devDep',
     deps: { zod: '^4.3.6' },
     trigger: () => true,
@@ -441,14 +442,13 @@ const FIRST_PARTY_DEPS: FirstPartyDep[] = [
     }],
   },
   {
-    // Observability: always inject for Workers
+    // Observability: disabled — @stackbilt/worker-observability 404s on the npm
+    // registry (unpublished, same defect class as the tarotscript twin). Re-enable
+    // the trigger below once the package ships.
     pkg: '@stackbilt/worker-observability',
     version: '^0.3.0',
     depType: 'dep',
-    trigger: (facts, intention) =>
-      traitsInclude(facts, 'edge', 'v8-isolate', 'serverless', 'isolat') ||
-      str(facts, 'runtime_name').toLowerCase().includes('worker') ||
-      /\b(worker|workers|cloudflare|wrangler)\b/i.test(intention),
+    trigger: () => false,
   },
   {
     // Audit chain: tamper-evident audit trail

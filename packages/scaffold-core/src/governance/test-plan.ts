@@ -72,7 +72,7 @@ export function buildTestPlan(facts: ScaffoldFacts): string {
     `# Test Plan — ${facts.projectName}`,
     '',
     `**Testing level**: ${level}  `,
-    `**Pattern**: \`${facts.pattern}\``,
+    `**Pattern**: \`${facts.sourcePattern ?? facts.pattern}\``,
     '',
     '## Required Coverage',
     '',
