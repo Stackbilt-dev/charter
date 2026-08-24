@@ -116,9 +116,9 @@ jobs:
           cache: 'pnpm'
 
       # npm 11.5.1+ required for trusted-publisher OIDC auth on publish.
-      # The version bundled with Node 20 on setup-node is ~10.x.
+      # Pin the npm 11 line: npm@latest is now npm 12, which requires Node 22.22.2+.
       - name: Upgrade npm for trusted-publisher support
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.6.2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
