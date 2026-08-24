@@ -21,7 +21,7 @@ npx charter adf compile --target all --write
 
 `bootstrap` detects the stack, creates modular `.ai/` context, and migrates existing `CLAUDE.md`, `.cursorrules`, and `GEMINI.md` rules. The compiler produces each supported vendor file from that shared source.
 
-See the [reproducible context-routing benchmark](https://github.com/Stackbilt-dev/charter/tree/main/examples/context-routing-benchmark) for pinned tasks, raw fixtures, expected results, and measurement limitations. ADF itself is a [vendor-neutral open specification](https://github.com/adf-spec/adf); Charter is its TypeScript reference implementation.
+See the [reproducible context-routing benchmark](https://github.com/Stackbilt-dev/charter/tree/main/examples/context-routing-benchmark) for pinned tasks, raw fixtures, expected results, and measurement limitations. The broader [Charter Evidence Register](https://github.com/Stackbilt-dev/charter/blob/main/papers/charter-evidence-2026-08.md) separates reproducible results from observational evidence and publishes the current exact-routing failures: 29/38 sessions match every reviewed module count. These measurements establish deterministic preservation, routing behavior, and relative context size; they do not establish improved model adherence or code quality. ADF itself is a [vendor-neutral open specification](https://github.com/adf-spec/adf); Charter is its TypeScript reference implementation.
 
 ## Install (Recommended)
 
