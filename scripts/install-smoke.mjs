@@ -49,9 +49,11 @@ function packPackage(packageDir) {
   const cwd = join(root, packageDir);
   const manifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
   const output = run('pnpm', ['pack', '--json', '--pack-destination', tempDir], { cwd });
-  const parsed = JSON.parse(output);
-  if (typeof parsed.filename === 'string') {
-    return { name: manifest.name, tarball: parsed.filename };
+  if (output.trim()) {
+    const parsed = JSON.parse(output);
+    if (typeof parsed.filename === 'string') {
+      return { name: manifest.name, tarball: parsed.filename };
+    }
   }
   const tarballs = readdirSync(tempDir).filter((file) => file.endsWith('.tgz'));
   const expectedPrefix = manifest.name.replace('@', '').replace('/', '-');

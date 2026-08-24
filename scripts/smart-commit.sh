@@ -78,11 +78,37 @@ is_substantive_change() {
   grep -q '[^[:space:]]' "$file"
 }
 
+is_version_only_package_manifest() {
+  local file="$1"
+
+  [[ "$file" =~ ^packages/[^/]+/package\.json$ ]] || return 1
+  git cat-file -e "HEAD:$file" 2>/dev/null || return 1
+  diff -q \
+    <(git show "HEAD:$file" | sed '/^[[:space:]]*"version"[[:space:]]*:/d') \
+    <(sed '/^[[:space:]]*"version"[[:space:]]*:/d' "$file") \
+    >/dev/null
+}
+
 group_for_file() {
   local file="$1"
 
+  if is_version_only_package_manifest "$file"; then
+    echo 'chore:release'
+    return
+  fi
+
   if [[ "$file" =~ ^packages/([^/]+)/ ]]; then
     echo "pkg:${BASH_REMATCH[1]}"
+    return
+  fi
+
+  if [[ "$file" =~ ^harness/ ]]; then
+    echo 'test:harness'
+    return
+  fi
+
+  if [[ "$file" =~ ^\.ai/ ]] || [[ "$file" == 'AGENTS.md' ]] || [[ "$file" == 'GEMINI.md' ]] || [[ "$file" == '.cursorrules' ]]; then
+    echo 'chore:adf-context'
     return
   fi
 
@@ -130,6 +156,15 @@ commit_message_for_group() {
       ;;
     docs:repo)
       echo 'docs(repo): update project documentation'
+      ;;
+    test:harness)
+      echo 'test(harness): freeze routing benchmark evidence'
+      ;;
+    chore:adf-context)
+      echo 'chore(adf): refresh project context'
+      ;;
+    chore:release)
+      echo 'chore(release): bump workspace packages to 1.9.1'
       ;;
     chore:scripts)
       echo 'chore(scripts): update commit automation workflow'
