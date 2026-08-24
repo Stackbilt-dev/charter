@@ -164,7 +164,9 @@ commit_message_for_group() {
       echo 'chore(adf): refresh project context'
       ;;
     chore:release)
-      echo 'chore(release): bump workspace packages to 1.9.1'
+      local version
+      version="$(node -p "require('./packages/cli/package.json').version")"
+      echo "chore(release): bump workspace packages to $version"
       ;;
     chore:scripts)
       echo 'chore(scripts): update commit automation workflow'
