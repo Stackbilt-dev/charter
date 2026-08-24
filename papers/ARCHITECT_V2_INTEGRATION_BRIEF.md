@@ -2,10 +2,15 @@
 title: "Architect v2 × Charter ADF Integration Brief"
 date: 2026-02-26
 audience: Architect v2 Engineering Team
-status: proposal
+status: superseded
+superseded-by:
+  - CSA-002
+  - CSA-003
 ---
 
 # Architect v2 × Charter ADF Integration Brief
+
+> **Historical note (2026-08-24):** This pre-build proposal is retained as provenance. SRR was subsequently built and is now dormant. Its results are documented as a single-team observational case study in [CSA-002](./context-as-code-greenfield-v0.1.md) and revalidated with explicit limitations in [CSA-003](./charter-evidence-2026-08.md). The parity plans were planning baselines, not a randomized or no-ADF control, so the original "controlled experiment" framing below is not supported. Proposed commands and feedback-loop phases should not be read as current Charter interfaces or commitments.
 
 ## TL;DR
 

@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- **Post-release evidence documentation** — synchronized current ADF state, marked the pre-build Architect v2 brief as superseded, added evidence limitations to the CLI package README and launch FAQ, recorded completed v1.9.1 publication gates, and added evidence-audit follow-up copy.
+
+### Fixed
+
+- **Trusted-publishing toolchain pin** — pinned the release workflow to npm 11.6.2 after `npm@latest` advanced to npm 12 and became incompatible with the workflow's Node 20 runtime.
+- **Compiled-context feedback loop** — pre-commit auto-tidy now ignores files produced by `charter adf compile`, preventing generated vendor context from being migrated back into `.ai/` and duplicated. The repository's three duplicated generated blocks were removed from `core.adf`.
+
 ## [1.9.1] - 2026-08-24
 
 ### Added

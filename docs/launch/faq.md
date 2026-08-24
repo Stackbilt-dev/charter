@@ -34,7 +34,7 @@ No. It validates fixture preservation, deterministic module selection, and relat
 
 ## Why is the benchmark synthetic?
 
-It makes every input, expected module, rule identity, and result publishable and stable in CI. Charter also publishes a real greenfield case study, but the small synthetic fixture is easier for anyone to rerun and challenge.
+It makes every input, expected module, rule identity, and result publishable and stable in CI. Charter also publishes a historical single-team greenfield case study, now revalidated as a dormant-project freshness check. That study is observational; the small synthetic fixture is easier for anyone to rerun and challenge. The [evidence register](../../papers/charter-evidence-2026-08.md) separates those evidence classes and publishes known failures.
 
 ## Why trigger keywords instead of embeddings?
 

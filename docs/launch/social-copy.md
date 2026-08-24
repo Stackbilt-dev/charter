@@ -107,6 +107,48 @@ I am looking for real repository scores and hard criticism of the routing model�
 
 #ContextEngineering #AIAgents #DeveloperTools #OpenSource
 
+## LinkedIn follow-up — evidence audit
+
+After publishing Charter's benchmark, I went looking for evidence that would make the project look worse.
+
+I found some.
+
+The original synthetic benchmark preserved 30/30 rules and measured 40.0–77.4% less estimated task context. It demonstrated the mechanism, not whether routing stayed correct in messier repositories.
+
+So I tightened the evaluation:
+
+→ replaced permissive scoring with exact-match scoring
+→ froze expected results so changes cannot move the goalposts
+→ tested 38 routing sessions across 24 scenarios
+→ ran structural probes across 16 other local repositories
+→ revisited the dormant project behind the greenfield case study
+
+The less flattering result:
+
+• 29/38 routing sessions matched exactly
+• 9/38 had missing or unexpected modules
+• 8/24 scenarios still fail exact evaluation
+• all 178 source rules were extracted
+• all 38 thin pointers were restored
+
+Failures clustered around mixed-concern prompts combining frontend, backend, infrastructure, QA, or architecture. Deterministic routing works best when task boundaries are clear; broad prompts expose the limitations of keyword selection.
+
+The audit also uncovered three Charter defects: legacy trigger syntax no longer routed correctly, per-trigger observability could report false matches, and migration could duplicate pointer content. Those are fixed in Charter 1.9.1.
+
+Across the 16-repository sample, default-loaded context was 45.5% smaller at the median than loading every module. That is structural evidence, not proof that an AI writes better code.
+
+Charter can currently demonstrate deterministic selection, rule preservation, smaller context surfaces, and detectable drift. It cannot yet demonstrate improved model adherence, fewer defects, or lower production cost. Those require controlled outcome studies.
+
+Evidence register: https://github.com/Stackbilt-dev/charter/blob/main/papers/charter-evidence-2026-08.md
+
+Charter: https://github.com/Stackbilt-dev/charter
+
+If you use coding agents in a mature repository, I am especially interested in the prompts that break deterministic routing.
+
+`npx @stackbilt/cli score`
+
+#ContextEngineering #AIAgents #OpenSource #DeveloperTools
+
 ## X thread
 
 ### 1

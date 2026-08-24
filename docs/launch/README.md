@@ -1,6 +1,6 @@
 # Charter + ADF Publishing Kit
 
-Everything in this directory is publication-ready. Replace only bracketed placeholders, verify the linked changes are on GitHub, and publish in the sequence below.
+This directory records the v1.9.1 publication kit and retains reusable follow-up material. Charter v1.9.1 was published on 2026-08-24; verify live links and current measurements before reusing any copy in a later release.
 
 ## Canonical links
 
@@ -12,7 +12,7 @@ Everything in this directory is publication-ready. Replace only bracketed placeh
 - Charter npm package: https://www.npmjs.com/package/@stackbilt/cli
 - Discord: https://discord.gg/aJmE8wmQDS
 
-Do not publish benchmark links until the benchmark files are on `main`.
+The benchmark and evidence register are public on `main`.
 
 ## Message split
 
@@ -27,10 +27,10 @@ Charter is the reference implementation of ADF. ADF is not a Stackbilt product s
 
 - [charter-announcement.md](./charter-announcement.md) — canonical long-form product announcement.
 - [adf-announcement.md](./adf-announcement.md) — standards-focused announcement.
-- [social-copy.md](./social-copy.md) — final copy for Hacker News, Reddit/forums, LinkedIn, X, and Product Hunt.
+- [social-copy.md](./social-copy.md) — launch copy plus a post-release LinkedIn evidence-audit follow-up.
 - [faq.md](./faq.md) — concise answers to predictable technical objections.
-- [publish-checklist.md](./publish-checklist.md) — ordered launch procedure and measurement sheet.
-- [release-notes-1.9.1.md](./release-notes-1.9.1.md) — patch-release notes ready for the npm/GitHub release that refreshes the package page.
+- [publish-checklist.md](./publish-checklist.md) — release record, remaining outreach tasks, and measurement sheet.
+- [release-notes-1.9.1.md](./release-notes-1.9.1.md) — notes for the published npm/GitHub patch release.
 - [../assets/context-routing-benchmark.svg](../assets/context-routing-benchmark.svg) — 1200×630 share card based on the committed benchmark snapshot.
 - [../assets/adf-spec-card.svg](../assets/adf-spec-card.svg) — 1200×630 neutral share card for the specification launch.
 

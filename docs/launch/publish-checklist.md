@@ -1,19 +1,29 @@
-# Publish Checklist
+# v1.9.1 Publication Record and Outreach Checklist
 
-## Before publishing
+> Release status: published on 2026-08-24. The [GitHub release](https://github.com/Stackbilt-dev/charter/releases/tag/v1.9.1) and all 13 npm packages are live. Unchecked items below are optional distribution or measurement work, not release blockers.
 
-- [ ] Merge the README, benchmark, CI, metadata, and publishing-kit changes to Charter `main`.
-- [ ] Confirm https://github.com/Stackbilt-dev/charter/tree/main/examples/context-routing-benchmark resolves publicly.
+## Completed release gates
+
+- [x] Merge the README, benchmark, CI, metadata, and publishing-kit changes to Charter `main`.
+- [x] Confirm https://github.com/Stackbilt-dev/charter/tree/main/examples/context-routing-benchmark resolves publicly.
+- [x] Run `pnpm run benchmark:context` from the release checkout.
+- [x] Run the npm and pnpm packed-consumer install smoke.
+- [x] Publish all 13 `@stackbilt/*` packages at `1.9.1` through trusted-publisher OIDC.
+- [x] Verify the GitHub release and npm registry versions.
+- [x] Publish the evidence register with estimated-token and model-outcome limitations.
+
+## Remaining optional outreach
+
 - [ ] Confirm the README renders [`context-routing-benchmark.svg`](../assets/context-routing-benchmark.svg) correctly on desktop and mobile.
 - [ ] Run `pnpm run render:launch-assets` and use the PNG cards for platforms that do not accept SVG uploads.
-- [ ] Run `pnpm run benchmark:context` from a fresh checkout.
 - [ ] Run `npx @stackbilt/cli score` in a repository that does not already depend on Charter.
-- [ ] Decide whether the npm README/metadata changes ship as a patch release. npm will not update until a new package version is published.
 - [ ] Confirm the ADF repository description and topics remain neutral.
 - [ ] Replace any bracketed placeholders in the final publication venue.
 - [ ] Prepare a text-only fallback in case a platform suppresses the SVG preview.
 
-## Recommended publication order
+## Original recommended publication order
+
+Retained as the outreach plan; completing the npm/GitHub release did not imply that every promotional step below occurred.
 
 ### Day 0
 
@@ -76,7 +86,7 @@ Record values at publication time, +24 hours, +7 days, and +30 days.
 
 Capture the publication URL and exact text beside each measurement. Attribution is otherwise guesswork.
 
-## Go/no-go gate
+## Go/no-go gate used for v1.9.1
 
 Publish only when all are true:
 
