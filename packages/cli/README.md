@@ -1,8 +1,27 @@
 # @stackbilt/cli
 
-CLI entry point for Charter Kit -- a local-first governance toolkit for software repositories. Orchestrates all other `@stackbilt/*` packages to parse commit trailers, score risk, detect blessed-stack drift, and classify change scope. No LLM calls at runtime.
+**The context compiler for AI coding agents.** Write your project rules once, route only relevant context to each task, and compile the same modular `.ai/` source for Claude Code, Codex, Cursor, and Gemini.
 
 > **This is the only package most users need.** One install gives you the full Charter Kit toolkit.
+
+Start with a read-only audit. It changes no project files and requires no account:
+
+```bash
+npx @stackbilt/cli score
+```
+
+Charter grades the repository's agent configuration, grounding, architecture, testing, governance, and freshness, then returns the five highest-impact fixes. The audit runs locally without LLM or product network calls.
+
+When you are ready to adopt it:
+
+```bash
+npx @stackbilt/cli bootstrap --yes
+npx charter adf compile --target all --write
+```
+
+`bootstrap` detects the stack, creates modular `.ai/` context, and migrates existing `CLAUDE.md`, `.cursorrules`, and `GEMINI.md` rules. The compiler produces each supported vendor file from that shared source.
+
+See the [reproducible context-routing benchmark](https://github.com/Stackbilt-dev/charter/tree/main/examples/context-routing-benchmark) for pinned tasks, raw fixtures, expected results, and measurement limitations. ADF itself is a [vendor-neutral open specification](https://github.com/adf-spec/adf); Charter is its TypeScript reference implementation.
 
 ## Install (Recommended)
 
@@ -19,7 +38,9 @@ pnpm add -Dw @stackbilt/cli
 Use with `npx` in each repository:
 
 ```bash
-npx charter
+npx charter score
+npx charter bootstrap --yes
+npx charter adf compile --target all --write
 npx charter setup --detect-only --format json
 npx charter setup --ci github --yes
 npx charter doctor --format json
@@ -53,6 +74,9 @@ Requires Node >= 18.
 ## Quick Start
 
 ```bash
+charter score          # read-only AI-readiness grade + prioritized fixes
+charter bootstrap      # detect stack, create .ai/, migrate existing agent rules
+charter adf compile --target all --write  # generate supported vendor files from .ai/
 charter                # quick value/risk snapshot + next action
 charter why            # why teams adopt Charter and expected payoff
 charter setup          # bootstrap .charter/ directory + policy baseline
@@ -72,21 +96,6 @@ charter telemetry report --period 24h --format json  # passive local usage summa
 charter blast src/foo.ts --depth 3  # reverse dep graph → files affected by changing this seed
 charter surface --markdown          # extract routes (Hono/Express) + D1 schema as markdown
 ```
-
-## Authentication (optional)
-
-Governance commands (`validate`, `drift`, `blast`, `surface`, etc.) run locally and require no authentication.
-
-Commands that reach the Stackbilt engine (`run`, `architect`) read their API key from the `STACKBILT_API_KEY` environment variable. A custom engine URL can be supplied via `STACKBILT_API_BASE_URL`:
-
-```bash
-export STACKBILT_API_KEY=ea_xxx                       # or sb_live_xxx, sb_test_xxx
-export STACKBILT_API_BASE_URL=https://engine.example  # optional, for self-hosted engines
-```
-
-Environment variables are inherited by any child processes spawned from the same shell and may appear in `/proc/<pid>/environ`. In CI, prefer setting the variable per-invocation (e.g., a job-scoped secret) rather than exporting it globally in a shared developer shell.
-
-The legacy `charter login --key …` command still works but is deprecated and will be removed in `@stackbilt/cli` 1.0 when gateway-bound commands move to a separate package.
 
 ## Human Onboarding (Copy/Paste)
 

@@ -1,7 +1,7 @@
 {
   "name": "charter",
   "private": true,
-  "description": "Charter Governance Kit — repo-adoptable governance checks for any project",
+  "description": "Charter — context compiler and local governance toolkit for AI coding agents",
   "workspaces": [
     "packages/*"
   ],
@@ -13,6 +13,8 @@
     "test": "bash -lc \"pnpm exec vitest run\"",
     "test:watch": "bash -lc \"pnpm exec vitest\"",
     "test:coverage": "bash -lc \"pnpm exec vitest run --coverage\"",
+    "benchmark:context": "node examples/context-routing-benchmark/run.mjs --check",
+    "render:launch-assets": "node scripts/render-launch-assets.mjs",
     "scorecard:generate": "node scripts/generate-scorecard.mjs",
     "scorecard:validate": "node scripts/validate-scorecard.mjs",
     "docs:sync": "node scripts/docs-sync.mjs --write --allow-missing-config && node scripts/papers-lint.mjs",

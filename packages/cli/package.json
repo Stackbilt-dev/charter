@@ -2,7 +2,7 @@
   "name": "@stackbilt/cli",
   "sideEffects": false,
   "version": "1.9.0",
-  "description": "Charter CLI — repo-level governance toolkit",
+  "description": "Context compiler and local governance CLI for AI coding agents",
   "bin": {
     "charter": "./dist/bin.js"
   },
@@ -38,14 +38,17 @@
   "keywords": [
     "charter",
     "cli",
+    "context-engineering",
+    "agent-context",
     "governance",
-    "scaffold",
-    "monorepo",
     "typescript",
-    "architecture",
     "ai",
     "agent",
-    "llm"
+    "llm",
+    "claude-code",
+    "codex",
+    "cursor",
+    "adf"
   ],
   "scripts": {
     "prepublishOnly": "node ../../scripts/ensure-pnpm-publish.mjs",
