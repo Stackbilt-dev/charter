@@ -1,0 +1,48 @@
+# Storefront Agent Instructions
+
+This synthetic repository models a TypeScript storefront maintained with several coding agents. Rule identifiers make migration coverage mechanically verifiable.
+
+## Core
+
+- [CORE-01] Use TypeScript strict mode and target ES2022.
+- [CORE-02] Use two-space indentation, semicolons, and single quotes.
+- [CORE-03] Keep library functions pure and isolate side effects at application boundaries.
+- [CORE-04] Run typecheck, tests, and build before declaring work complete.
+- [CORE-05] Do not expose secrets, credentials, or customer data in logs.
+- [CORE-06] Preserve backward compatibility unless the task explicitly authorizes a breaking change.
+
+## Frontend
+
+- [FRONTEND-01] Use React function components with explicit TypeScript props.
+- [FRONTEND-02] Preserve keyboard navigation and visible focus states for every control.
+- [FRONTEND-03] Meet WCAG AA contrast requirements and label interactive elements.
+- [FRONTEND-04] Keep server state outside local presentation components.
+- [FRONTEND-05] Add tests for loading, empty, error, and success states.
+- [FRONTEND-06] Do not add a client dependency when platform APIs are sufficient.
+
+## Backend
+
+- [BACKEND-01] Validate request bodies before calling domain services.
+- [BACKEND-02] Keep HTTP handlers thin: parse, authorize, call, serialize.
+- [BACKEND-03] Return stable error codes and never leak stack traces.
+- [BACKEND-04] Make write endpoints idempotent where retries are possible.
+- [BACKEND-05] Add contract tests for every public endpoint change.
+- [BACKEND-06] Bound pagination and reject unsupported query parameters.
+
+## Security
+
+- [SECURITY-01] Authenticate before reading tenant-scoped resources.
+- [SECURITY-02] Authorize every object access against the active tenant.
+- [SECURITY-03] Store tokens only in approved secret stores.
+- [SECURITY-04] Compare webhook signatures using constant-time primitives.
+- [SECURITY-05] Redact email, address, payment, and token fields from logs.
+- [SECURITY-06] Add a negative test for every new authorization path.
+
+## Release
+
+- [RELEASE-01] Use Conventional Commits for user-visible changes.
+- [RELEASE-02] Update the changelog before publishing a release.
+- [RELEASE-03] Run the clean-install smoke test against the packed artifact.
+- [RELEASE-04] Publish packages with provenance and public access metadata.
+- [RELEASE-05] Confirm the tag, package version, and release notes agree.
+- [RELEASE-06] Record migration guidance for every breaking contract change.

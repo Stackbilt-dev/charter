@@ -1,51 +1,84 @@
 # Charter
 
-[![Charter score](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FStackbilt-dev%2Fcharter%2Fmain%2F.charter%2Fbadge.json&style=for-the-badge)](#the-repo-grades-itself)
+[![Charter score](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FStackbilt-dev%2Fcharter%2Fmain%2F.charter%2Fbadge.json&style=for-the-badge)](#measured-on-a-real-build)
 [![npm version](https://img.shields.io/npm/v/@stackbilt/cli?label=charter&color=5F7FFF&style=for-the-badge)](https://www.npmjs.com/package/@stackbilt/cli)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](./LICENSE)
 [![Discord](https://img.shields.io/discord/1485683351393407006?color=7289da&label=Discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/aJmE8wmQDS)
 
-## Modular, trigger-loaded context for AI coding agents.
+## The context compiler for AI coding agents
 
-You write 10,000 tokens of flat rules into CLAUDE.md or AGENTS.md. Your agent loads all of it on every task, half gets ignored, and you don't know which half. Charter replaces the one giant file with **ADF (Attention-Directed Format)**: small modules in `.ai/`, loaded on demand by trigger keywords, so the agent gets exactly the rules each task needs. Local-first — zero product dependencies, no network calls, no credentials stored.
+**Write your project rules once. Give every coding agent only the context it needs.**
+
+Charter turns sprawling `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, and `GEMINI.md` files into one modular source of truth. It routes task-specific instructions on demand, enforces context budgets, and compiles the result back to every supported agent format.
+
+Start with a read-only audit. It changes no project files and needs no account; after `npx` obtains the package, the audit runs locally without product network calls:
 
 ```bash
+npx @stackbilt/cli score
+```
+
+`charter score` grades your repository's agent configuration, grounding, architecture, testing, governance, and freshness—then gives you the five highest-impact fixes.
+
+| Before Charter | With Charter |
+|---|---|
+| Every task loads one giant instruction file | Each task can load only matching context modules |
+| Claude, Codex, Cursor, and Gemini configs drift apart | `.ai/` is the source; vendor files are compiled artifacts |
+| Important constraints compete with preferences | Load-bearing rules and measurable ceilings are explicit |
+| Context quality is subjective | `charter score`, evidence checks, and CI produce repeatable results |
+
+### From audit to compiled context
+
+```bash
+# 1. Inspect the repo without changing it
+npx @stackbilt/cli score
+
+# 2. Detect the stack, create .ai/, and migrate existing agent rules
 npx @stackbilt/cli bootstrap --yes
+
+# 3. Generate every vendor file from the same modular source
+npx charter adf compile --target all --write
 ```
 
-Detects your stack, scaffolds `.ai/`, migrates existing CLAUDE.md / `.cursorrules` / GEMINI.md into on-demand modules with trigger keywords.
+```text
+.ai/                         generated agent files
+├── manifest.adf             ├── CLAUDE.md
+├── core.adf        ──────►  ├── AGENTS.md
+├── frontend.adf             ├── .cursorrules
+└── backend.adf              └── GEMINI.md
+```
 
-### The spec has a neutral home
+The manifest keeps universal rules loaded, activates specialist modules using task triggers, and caps the resulting context. `charter adf compile --target all --check` turns vendor-file drift into a CI failure.
 
-ADF is an open specification at [adf-spec/adf](https://github.com/adf-spec/adf) (Apache-2.0), in a vendor-neutral org; a conformance suite is in progress there. Charter is the reference implementation.
+### Measured on a real build
 
-### Compiles to every vendor format
+![Charter context routing benchmark: 30 of 30 rules preserved with 58.1% average estimated context reduction](./docs/assets/context-routing-benchmark.svg)
+
+In Charter's greenfield study, default agent context grew from **558 to 569 estimated tokens (+2%)** while the application grew to **2,074 production LOC across 24 files**. The methodology, measurements, and limitations are published in [Context-as-Code II](./papers/context-as-code-greenfield-v0.1.md#5-findings).
+
+For a smaller result you can reproduce locally, the [context-routing benchmark](./examples/context-routing-benchmark/) preserves 30/30 synthetic rules and measures **40.0–77.4% less estimated task context** across four pinned tasks:
 
 ```bash
-charter adf compile --target claude        # render CLAUDE.md to stdout
-charter adf compile --target all --write   # write CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
-charter adf compile --target all --check   # CI drift gate: exit 1 if any vendor file is stale
+pnpm run build
+pnpm run benchmark:context
 ```
 
-ADF is the source; vendor files are build artifacts. Edit `.ai/` once, compile for Claude Code, Codex, Cursor, and Gemini. `--check` in CI catches hand-edits to generated files before they drift.
+Charter also governs itself. The score badge at the top of this README is generated from [`.charter/badge.json`](./.charter/badge.json), and its metric ceilings run in pre-commit and CI.
 
-### The repo grades itself
+### Open, local, and vendor-neutral
 
-```bash
-charter score                  # letter-grade AI-readiness audit: agent config, grounding, architecture, testing, governance, freshness
-charter score --badge --write  # shields.io endpoint payload -> .charter/badge.json
-```
-
-The badge at the top of this README is Charter scoring its own repo, served live from [`.charter/badge.json`](./.charter/badge.json) on `main`. The scoring is deterministic and unforgiving — broken path references and missing vendor files cost points, ours included.
+- **Local-first:** the CLI makes no product network calls and stores no credentials.
+- **Cross-agent:** compile for Claude Code, Codex, Cursor, and Gemini.
+- **Open specification:** [ADF lives in the vendor-neutral `adf-spec` organization](https://github.com/adf-spec/adf); Charter is the reference implementation.
+- **Useful beyond context:** inspect blast radius, extract API surfaces, detect drift, and expose bounded project context through MCP.
 
 ## What you get
 
-- **Measurable constraints** — per-module metric ceilings (LOC, complexity, bloat) validated at commit time and in CI.
-- **Codebase analysis** — `charter blast` reverse-dependency graphs, `charter surface` route/schema fingerprints. Deterministic, zero runtime deps.
-- **Drift + audit** — anti-pattern scans, commit governance, CI-ready exit codes.
-- **MCP server** — `charter serve` exposes project context to Claude Code, Codex, and Cursor.
-
-Compose with the broader [Stackbilt ecosystem](https://github.com/Stackbilt-dev) — [audit-chain](https://github.com/Stackbilt-dev/audit-chain), [worker-observability](https://github.com/Stackbilt-dev/worker-observability), [llm-providers](https://github.com/Stackbilt-dev/llm-providers), [adf](https://www.npmjs.com/package/@stackbilt/adf) — when you need them.
+- **Context compilation** — one modular `.ai/` source compiled into every supported agent format.
+- **Task-aware loading** — trigger-routed modules and token budgets keep irrelevant rules out of the prompt.
+- **Measurable constraints** — LOC and bloat ceilings validated at commit time and in CI.
+- **AI-readiness scoring** — a deterministic grade, prioritized fixes, and a shareable README badge.
+- **Codebase analysis** — reverse-dependency graphs and route/schema fingerprints without LLM calls.
+- **MCP context** — a bounded project brief for Claude Code, Codex, and Cursor.
 
 ## Install
 
