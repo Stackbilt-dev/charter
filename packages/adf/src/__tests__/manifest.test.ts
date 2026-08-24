@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isKeywordMatch, buildTriggerReport } from '../manifest';
+import { isKeywordMatch, buildTriggerReport, parseManifest } from '../manifest';
+import { parseAdf } from '../parser';
 import type { Manifest } from '../types';
 
 describe('isKeywordMatch', () => {
@@ -36,6 +37,27 @@ describe('isKeywordMatch', () => {
   });
 });
 
+describe('parseManifest compatibility', () => {
+  it('accepts the legacy Triggers: syntax emitted by early Charter versions', () => {
+    const manifest = parseManifest(parseAdf(`ADF: 0.1
+
+📦 DEFAULT_LOAD:
+  - core.adf
+
+📂 ON_DEMAND:
+  - frontend.adf (Triggers: React, CSS, UI)
+`));
+
+    expect(manifest.onDemand).toEqual([
+      {
+        path: 'frontend.adf',
+        triggers: ['React', 'CSS', 'UI'],
+        loadPolicy: 'ON_DEMAND',
+      },
+    ]);
+  });
+});
+
 describe('buildTriggerReport', () => {
   const manifest: Manifest = {
     version: '0.1',
@@ -53,10 +75,13 @@ describe('buildTriggerReport', () => {
   it('reports matched triggers with keywords', () => {
     const report = buildTriggerReport(manifest, ['core.adf', 'frontend.adf'], ['React']);
     const reactEntry = report.find(r => r.trigger === 'React');
+    const cssEntry = report.find(r => r.trigger === 'CSS');
     expect(reactEntry).toBeDefined();
     expect(reactEntry!.matched).toBe(true);
     expect(reactEntry!.matchedKeywords).toEqual(['react']);
     expect(reactEntry!.loadReason).toBe('trigger');
+    expect(cssEntry!.matched).toBe(false);
+    expect(cssEntry!.matchedKeywords).toEqual([]);
   });
 
   it('reports unmatched triggers with empty keywords', () => {

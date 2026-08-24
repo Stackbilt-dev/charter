@@ -113,6 +113,7 @@ function parseSyncEntry(entry: string): SyncEntry | null {
 /**
  * Parse a single ON_DEMAND entry like:
  *   "frontend.adf (Triggers on: React, CSS, UI)"
+ *   "frontend.adf (Triggers: React, CSS, UI)" (legacy)
  *   "frontend.adf (Triggers on: React, CSS, UI) [budget: 1200]"
  */
 function parseTriggerEntry(entry: string): ManifestModule {
@@ -125,7 +126,7 @@ function parseTriggerEntry(entry: string): ManifestModule {
     remaining = remaining.slice(0, budgetMatch.index!).trim();
   }
 
-  const triggerMatch = remaining.match(/^(.+?)\s*\(Triggers?\s+on\s*:\s*(.+)\)\s*$/i);
+  const triggerMatch = remaining.match(/^(.+?)\s*\(Triggers?(?:\s+on)?\s*:\s*(.+)\)\s*$/i);
   if (triggerMatch) {
     const path = triggerMatch[1].trim();
     const triggers = triggerMatch[2]
@@ -227,12 +228,11 @@ export function buildTriggerReport(
     for (const trigger of mod.triggers) {
       const t = trigger.toLowerCase();
       const matchedKeywords = lowerKeywords.filter(k => isKeywordMatch(t, k));
-      const isResolved = resolvedPaths.includes(mod.path);
       const isDefault = defaultLoadSet.has(mod.path);
       matches.push({
         module: mod.path,
         trigger,
-        matched: isResolved,
+        matched: matchedKeywords.length > 0,
         matchedKeywords,
         loadReason: isDefault ? 'default' : 'trigger',
       });
