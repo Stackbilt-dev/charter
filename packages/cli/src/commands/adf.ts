@@ -966,7 +966,7 @@ function parseTriggers(raw: string | undefined): string[] {
 
 function parseModulePathFromEntry(entry: string): string {
   const withoutBudget = entry.replace(/\s*\[budget\s*:\s*\d+\]\s*$/i, '').trim();
-  const triggerMatch = withoutBudget.match(/^(.+?)\s*\(Triggers?\s+on\s*:\s*.+\)\s*$/i);
+  const triggerMatch = withoutBudget.match(/^(.+?)\s*\(Triggers?(?:\s+on)?\s*:\s*.+\)\s*$/i);
   return triggerMatch ? triggerMatch[1].trim() : withoutBudget;
 }
 

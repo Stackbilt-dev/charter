@@ -127,7 +127,12 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     }
 
     if (result.migrateItems.length === 0) {
-      fileResults.push({ file, status: 'clean', itemsExtracted: 0, routing: {} });
+      if (result.needsRestore) {
+        fileResults.push({ file, status: 'tidied', itemsExtracted: 0, routing: {} });
+        if (!dryRun) restorePointer(file, result.stayItems);
+      } else {
+        fileResults.push({ file, status: 'clean', itemsExtracted: 0, routing: {} });
+      }
       continue;
     }
 
@@ -221,6 +226,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
 interface AnalysisResult {
   migrateItems: MigrationItem[];
   stayItems: MigrationItem[];
+  needsRestore: boolean;
 }
 
 function analyzeVendorFile(
@@ -241,7 +247,7 @@ function analyzeVendorFile(
   // Extract content beyond the thin pointer
   const beyondPointer = extractBeyondPointer(content, filePath);
   if (!beyondPointer.trim()) {
-    return { migrateItems: [], stayItems: [] };
+    return { migrateItems: [], stayItems: [], needsRestore: false };
   }
 
   // Parse and classify the extracted content
@@ -255,6 +261,7 @@ function analyzeVendorFile(
   return {
     migrateItems: plan.migrateItems,
     stayItems: plan.stayItems,
+    needsRestore: true,
   };
 }
 
@@ -288,6 +295,12 @@ function readRetainedSections(content: string): string {
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.startsWith('## ')) {
+      // Session Start is part of the canonical CLAUDE.md pointer itself. Re-appending
+      // it would duplicate the block every time tidy restores the pointer.
+      if (trimmed === '## Session Start') {
+        inRetained = false;
+        continue;
+      }
       inRetained = isRetainedHeading(trimmed);
       if (inRetained) out.push(line);
       continue;
@@ -297,7 +310,7 @@ function readRetainedSections(content: string): string {
 
   // Trim trailing blank lines
   while (out.length > 0 && out[out.length - 1].trim() === '') out.pop();
-  return out.length > 0 ? '\n' + out.join('\n') + '\n' : '';
+  return out.length > 0 ? '\n\n' + out.join('\n') + '\n' : '';
 }
 
 function extractBeyondPointer(content: string, fileName: string): string {
@@ -522,7 +535,8 @@ function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
     }
   }
 
-  // Re-append all retained sections (Environment, Session *, Protocol, etc.) from
+  // Re-append user-authored retained sections (Environment, custom Session *,
+  // Protocol, etc.) from
   // the current file verbatim so that operational protocol blocks survive the rewrite
   // (#198). readRetainedSections() covers the same heading set as extractBeyondPointer.
   const retainedBlock = readRetainedSections(currentContent);

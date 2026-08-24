@@ -302,6 +302,7 @@ describe('vendor bloat pipeline (integration)', () => {
     expect(claudeContent).not.toContain('## Frontend Standards');
     // Environment should be preserved
     expect(claudeContent).toContain('## Environment');
+    expect(claudeContent.match(/^## Session Start$/gm)).toHaveLength(1);
   });
 
   it('adf tidy preserves Session/Protocol sections verbatim and does not route them to core.adf (#198)', async () => {
@@ -348,5 +349,18 @@ describe('vendor bloat pipeline (integration)', () => {
     // Architecture bloat must NOT survive in CLAUDE.md
     expect(after).not.toContain('## Architecture');
     expect(after).not.toContain('bypass the repository layer');
+  });
+
+  it('removes an empty non-pointer heading even when no items migrate', async () => {
+    const tmp = makeTempDir('empty-heading');
+    writeFixtureRepo(tmp);
+    writeCleanPointer(tmp);
+    process.chdir(tmp);
+    fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '\n## Empty Notes\n');
+
+    const result = await captureJson(adfTidyCommand, jsonOptions, []);
+
+    expect(result.exitCode).toBe(EXIT_CODE.SUCCESS);
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf8')).not.toContain('## Empty Notes');
   });
 });
