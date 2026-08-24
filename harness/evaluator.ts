@@ -1,8 +1,9 @@
 /**
  * Evaluator — grades actual tidy routing against expected routing.
  *
- * Scoring is lenient by design in early runs: we track direction (over/under)
- * not exact counts, so the data reveals systematic gaps vs. one-off misses.
+ * Scoring is exact: every expected module count must match and no unexpected
+ * module may receive content. This keeps published runs auditable and prevents
+ * near-misses from being reported as passes.
  */
 
 import type {
@@ -42,8 +43,7 @@ export function evaluateSession(
   const totalExpected = Object.values(expected).reduce((s, n) => s + n, 0);
   const totalActual = tidyOutput.totalExtracted;
 
-  // Pass = no missing modules and no module is more than 50% off expected count
-  const pass = moduleEvals.every(e => e.verdict === 'correct' || e.verdict === 'over') &&
+  const pass = moduleEvals.every(e => e.verdict === 'correct') &&
     unexpectedModules.length === 0;
 
   return {
@@ -77,8 +77,7 @@ function grade(expected: number, actual: number): RouteVerdict {
   if (expected === 0 && actual === 0) return 'correct';
   if (expected > 0 && actual === 0) return 'missing';
   if (expected === 0 && actual > 0) return 'over';
-  // Within 1 item tolerance
-  if (Math.abs(actual - expected) <= 1) return 'correct';
+  if (actual === expected) return 'correct';
   if (actual > expected) return 'over';
   return 'under';
 }

@@ -1,0 +1,22 @@
+{
+  "evaluator": "Exact module counts; no unexpected modules",
+  "scenarios": 24,
+  "scenarioPass": 16,
+  "scenarioFail": 8,
+  "sessions": 38,
+  "sessionPass": 29,
+  "sessionFail": 9,
+  "expectedItems": 178,
+  "actualItems": 178,
+  "portableSessions": 38,
+  "failingScenarios": [
+    "worker-kv-and-d1",
+    "worker-architecture-dump",
+    "backend-mixed-concerns",
+    "fullstack-big-bang-onboarding-doc",
+    "edge-soft-rule-imperative",
+    "fullstack-sdlc-handoff-portability",
+    "fullstack-sdlc-generic-checklist-routing",
+    "fullstack-sdlc-mixed-qa-backend-signals"
+  ]
+}

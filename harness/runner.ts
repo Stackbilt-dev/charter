@@ -40,6 +40,7 @@ import { sdlcScenarios } from './corpus/sdlc';
 
 const CLI_BIN = path.resolve(__dirname, '../packages/cli/dist/bin.js');
 const RESULTS_DIR = path.resolve(__dirname, 'results');
+const EXPECTED_STATIC_RESULT = path.resolve(__dirname, 'expected-results.json');
 
 const ALL_STATIC: Scenario[] = [
   ...workerScenarios,
@@ -60,6 +61,7 @@ const filterScenario = getFlag(args, '--scenario');
 const filterArchetype = getFlag(args, '--archetype');
 const useOllama = args.includes('--ollama');
 const useReal = args.includes('--real');
+const checkMode = args.includes('--check');
 const ollamaModel = getFlag(args, '--model') ?? 'llama3.2:latest';
 const sessionCount = parseInt(getFlag(args, '--sessions') ?? '3', 10);
 
@@ -82,8 +84,14 @@ function makeTempRepo(scenario: Scenario): string {
   execFileSync('git', ['config', 'user.email', 'harness@example.com'], { cwd: tmp, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.name', 'Harness'], { cwd: tmp, stdio: 'pipe' });
 
+  // Generate the pointer through the CLI under test so the harness cannot
+  // silently drift when Charter's canonical pointer evolves.
+  execFileSync(process.execPath, [CLI_BIN, 'adf', 'init', '--emit-pointers'], {
+    cwd: tmp,
+    stdio: 'pipe',
+  });
+
   const aiDir = path.join(tmp, '.ai');
-  fs.mkdirSync(aiDir);
 
   // Write manifest from scenario definition
   const manifestLines = ['ADF: 0.1', '', '📦 DEFAULT_LOAD:', '  - core.adf', ''];
@@ -107,27 +115,11 @@ function makeTempRepo(scenario: Scenario): string {
     fs.writeFileSync(path.join(aiDir, mod), `ADF: 0.1\n\n📐 ${key}:\n  - Placeholder\n`);
   }
 
-  // Thin pointer CLAUDE.md
-  fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), THIN_POINTER);
-
   execFileSync('git', ['add', '-A'], { cwd: tmp, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp, stdio: 'pipe' });
 
   return tmp;
 }
-
-const THIN_POINTER = [
-  '# CLAUDE.md',
-  '',
-  '> **DO NOT add rules, constraints, or context to this file.**',
-  '> This file is auto-managed by Charter. All project rules live in `.ai/`.',
-  '> New rules should be added to the appropriate `.ai/*.adf` module.',
-  '> See `.ai/manifest.adf` for the module routing manifest.',
-  '',
-  '## Environment',
-  '- Node 20',
-  '',
-].join('\n');
 
 function cleanup(): void {
   for (const dir of tempDirs) {
@@ -165,13 +157,13 @@ function runStaticScenario(scenario: Scenario): ScenarioResult {
   const snapshots: AdfSnapshot[] = [];
   let prevSnapshot: AdfSnapshot | undefined;
   let scenarioPass = true;
-  const baseClaude = THIN_POINTER.trim();
+  const baseClaude = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8').trim();
   const aiDir = path.join(tmp, '.ai');
 
   for (const session of scenario.sessions) {
     // Each session: inject onto thin pointer, dry-run to evaluate, then apply
     // to reset state so the next session starts from a clean CLAUDE.md.
-    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), THIN_POINTER + '\n' + session.inject);
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), baseClaude + '\n' + session.inject);
 
     const tidyOutput = runTidy(tmp, true);   // dry-run: measure only this session's content
     const sessionResult = evaluateSession(session, tidyOutput);
@@ -187,7 +179,12 @@ function runStaticScenario(scenario: Scenario): ScenarioResult {
     const claudeRestored = postClaude === baseClaude;
     if (!claudeRestored) {
       scenarioPass = false;
-      console.log('      portability warning: CLAUDE.md was not restored to thin pointer state');
+      const baseLines = baseClaude.split('\n');
+      const actualLines = postClaude.split('\n');
+      const diffAt = Math.max(0, baseLines.findIndex((line, index) => line !== actualLines[index]));
+      console.log(`      portability warning: CLAUDE.md differs at line ${diffAt + 1}`);
+      console.log(`        expected: ${JSON.stringify(baseLines[diffAt] ?? '<eof>')}`);
+      console.log(`        actual:   ${JSON.stringify(actualLines[diffAt] ?? '<eof>')}`);
     }
 
     const snapshot = inspectAdfModules(aiDir, session.label, prevSnapshot);
@@ -337,12 +334,13 @@ async function runOllamaScenario(archetype: string): Promise<OllamaScenarioRecor
   };
 
   const tmp = makeTempRepo(synthetic);
+  const thinPointer = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
   const sessionRecords: OllamaSessionRecord[] = [];
   let accumulatedContent = '';
 
   for (const session of generated.sessions) {
     accumulatedContent += '\n' + session.inject;
-    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), THIN_POINTER + accumulatedContent);
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), thinPointer + accumulatedContent);
 
     const tidyOutput = runTidy(tmp);
 
@@ -665,13 +663,43 @@ async function main(): Promise<void> {
   const reportPath = path.join(RESULTS_DIR, `run-${timestamp}.json`);
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
+  const sessions = scenarioResults.flatMap(result => result.sessions);
+  const audits = scenarioResults.flatMap(result => result.staticAudit?.sessions ?? []);
+  const summary = {
+    evaluator: 'Exact module counts; no unexpected modules',
+    scenarios: report.totalScenarios,
+    scenarioPass: passed,
+    scenarioFail: failed,
+    sessions: report.totalSessions,
+    sessionPass: sessions.filter(session => session.pass).length,
+    sessionFail: sessions.filter(session => !session.pass).length,
+    expectedItems: sessions.reduce((sum, session) => sum + session.totalExpected, 0),
+    actualItems: sessions.reduce((sum, session) => sum + session.totalActual, 0),
+    portableSessions: audits.filter(audit => audit.claudeRestored).length,
+    failingScenarios: scenarioResults.filter(result => !result.pass).map(result => result.scenarioId),
+  };
+
+  if (checkMode) {
+    if (filterScenario || filterArchetype) {
+      throw new Error('--check requires the complete static corpus.');
+    }
+    const expected = JSON.parse(fs.readFileSync(EXPECTED_STATIC_RESULT, 'utf8'));
+    if (JSON.stringify(summary) !== JSON.stringify(expected)) {
+      throw new Error('Routing benchmark output changed; review the full report and update harness/expected-results.json intentionally.');
+    }
+  }
+
   console.log('─'.repeat(50));
   console.log(`Scenarios : ${passed} passed, ${failed} failed`);
+  console.log(`Sessions  : ${summary.sessionPass} exact, ${summary.sessionFail} mismatched`);
+  console.log(`Items     : ${summary.actualItems}/${summary.expectedItems} extracted`);
+  console.log(`Pointers  : ${summary.portableSessions}/${summary.sessions} restored`);
+  if (checkMode) console.log('Snapshot  : PASS (known routing failures are preserved above)');
   console.log(`Report    : ${reportPath}`);
   console.log('');
 
   cleanup();
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(checkMode ? 0 : failed > 0 ? 1 : 0);
 }
 
 main().catch(err => {
