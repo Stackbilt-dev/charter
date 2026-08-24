@@ -14,6 +14,7 @@
     "test:watch": "bash -lc \"pnpm exec vitest\"",
     "test:coverage": "bash -lc \"pnpm exec vitest run --coverage\"",
     "benchmark:context": "node examples/context-routing-benchmark/run.mjs --check",
+    "benchmark:routing": "node --import tsx harness/runner.ts --check",
     "render:launch-assets": "node scripts/render-launch-assets.mjs",
     "scorecard:generate": "node scripts/generate-scorecard.mjs",
     "scorecard:validate": "node scripts/validate-scorecard.mjs",
