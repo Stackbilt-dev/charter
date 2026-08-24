@@ -30,6 +30,7 @@ Charter is the reference implementation of ADF. ADF is not a Stackbilt product s
 - [social-copy.md](./social-copy.md) — launch copy plus a post-release LinkedIn evidence-audit follow-up.
 - [faq.md](./faq.md) — concise answers to predictable technical objections.
 - [publish-checklist.md](./publish-checklist.md) — release record, remaining outreach tasks, and measurement sheet.
+- [release-notes-1.9.2.md](./release-notes-1.9.2.md) — follow-up patch notes for evidence-documentation and compiled-context safety fixes.
 - [release-notes-1.9.1.md](./release-notes-1.9.1.md) — notes for the published npm/GitHub patch release.
 - [../assets/context-routing-benchmark.svg](../assets/context-routing-benchmark.svg) — 1200×630 share card based on the committed benchmark snapshot.
 - [../assets/adf-spec-card.svg](../assets/adf-spec-card.svg) — 1200×630 neutral share card for the specification launch.
