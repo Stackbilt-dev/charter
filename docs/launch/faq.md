@@ -30,7 +30,7 @@ They are Charter's estimated tokens, calculated with its structural approximatio
 
 ## Does the benchmark prove models follow instructions better?
 
-No. It proves fixture preservation, deterministic module selection, and relative estimated-context reduction. Model adherence requires a separate controlled evaluation.
+No. It validates fixture preservation, deterministic module selection, and relative estimated-context reduction. Model adherence requires a separate controlled evaluation.
 
 ## Why is the benchmark synthetic?
 

@@ -59,7 +59,7 @@ Current result:
 
 Average estimated context reduction: **58.1%**.
 
-These are estimated context tokens, not a claim about model quality or provider billing. Charter uses a documented structural heuristic of roughly four characters per token. The fixture proves deterministic routing, preservation, and relative reduction. It does not prove that an LLM follows every instruction.
+These are estimated context tokens, not a claim about model quality or provider billing. Charter uses a documented structural heuristic of roughly four characters per token. The fixture validates deterministic routing, preservation, and relative reduction. It does not show that an LLM follows every instruction.
 
 You can reproduce it with:
 

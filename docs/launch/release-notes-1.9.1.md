@@ -1,11 +1,13 @@
 # Charter v1.9.1 — launch clarity and reproducible context benchmark
 
-This patch release sharpens Charter's context-compiler onboarding and publishes a reproducible benchmark for its deterministic ADF routing behavior. No CLI commands, flags, JSON contracts, or ADF semantics changed.
+This patch release sharpens Charter's context-compiler onboarding, publishes reproducible evidence, and repairs compatibility and observability defects. No commands, flags, schema shapes, or ADF source semantics changed.
 
 ## Added
 
 - A synthetic context-routing benchmark with 30 byte-for-byte-preserved rules and four pinned tasks.
 - A reviewed expected-result snapshot and CI gate for routing or estimation changes.
+- An exact-scoring 38-session migration-routing snapshot that preserves known failures instead of accepting near-misses.
+- A public evidence register separating reproducible, observational, and development evidence.
 - Reproducible SVG and PNG launch assets.
 - Publication-ready Charter and ADF technical announcements, FAQs, and launch copy.
 
@@ -16,6 +18,12 @@ This patch release sharpens Charter's context-compiler onboarding and publishes 
 - Added explicit measurement limitations and links to the raw benchmark fixture.
 - Clarified that ADF is a vendor-neutral specification and Charter is its TypeScript reference implementation.
 - Removed obsolete Stackbilt engine authentication guidance from the CLI package README.
+
+## Fixed
+
+- Restored legacy `(Triggers: ...)` manifest compatibility.
+- Corrected `triggerMatches[].matched` to report individual trigger matches.
+- Fixed `adf tidy` pointer restoration for duplicated `Session Start` blocks and empty/deduplicated headings.
 
 ## Benchmark snapshot
 

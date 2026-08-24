@@ -49,18 +49,24 @@ npx charter adf compile --target all --write
 
 The manifest keeps universal rules loaded, activates specialist modules using task triggers, and caps the resulting context. `charter adf compile --target all --check` turns vendor-file drift into a CI failure.
 
-### Measured on a real build
+### Measured and reproducible
 
 ![Charter context routing benchmark: 30 of 30 rules preserved with 58.1% average estimated context reduction](./docs/assets/context-routing-benchmark.svg)
 
-In Charter's greenfield study, default agent context grew from **558 to 569 estimated tokens (+2%)** while the application grew to **2,074 production LOC across 24 files**. The methodology, measurements, and limitations are published in [Context-as-Code II](./papers/context-as-code-greenfield-v0.1.md#5-findings).
-
-For a smaller result you can reproduce locally, the [context-routing benchmark](./examples/context-routing-benchmark/) preserves 30/30 synthetic rules and measures **40.0–77.4% less estimated task context** across four pinned tasks:
+The [context-routing benchmark](./examples/context-routing-benchmark/) preserves 30/30 synthetic rules and measures **40.0–77.4% less estimated task context** across four pinned tasks:
 
 ```bash
 pnpm run build
 pnpm run benchmark:context
 ```
+
+The exact-scoring migration harness extracts 178/178 expected items and restores 38/38 vendor pointers; 29/38 sessions currently match every reviewed module count. Its nine mismatches remain committed as known failures:
+
+```bash
+pnpm run benchmark:routing
+```
+
+The [Charter Evidence Register](./papers/charter-evidence-2026-08.md) distinguishes reproducible results from historical observations, publishes unfavorable findings, and lists claims these measurements do not support. The older [greenfield case study](./papers/context-as-code-greenfield-v0.1.md) is retained as an explicitly limited retrospective.
 
 Charter also governs itself. The score badge at the top of this README is generated from [`.charter/badge.json`](./.charter/badge.json), and its metric ceilings run in pre-commit and CI.
 

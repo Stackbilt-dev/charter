@@ -150,7 +150,7 @@ Raw fixture + snapshot: https://github.com/Stackbilt-dev/charter/tree/main/examp
 
 Limitations matter.
 
-The estimator is roughly 4 characters/token. This proves deterministic routing and relative context reduction—not exact provider billing or better model adherence.
+The estimator is roughly 4 characters/token. This validates deterministic routing and relative context reduction—not exact provider billing or better model adherence.
 
 ### 6
 

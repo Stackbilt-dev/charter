@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [1.9.1] - 2026-08-24
+
+### Added
+
+- **Reproducible context-routing benchmark** — added a synthetic fixture with 30 byte-for-byte-preserved rules, four pinned tasks, reviewed expected results, and a CI gate for routing or estimation changes.
+- **Evidence register and exact migration benchmark** — published evidence-strength labels, limitations, unfavorable results, and an exact-scoring 38-session routing snapshot with known failures preserved.
+- **Launch assets and publication kit** — added reproducible SVG/PNG assets, technical announcements, FAQ material, social copy, and a launch checklist.
+
+### Changed
+
+- **CLI package positioning** — updated the npm description, keywords, and README around Charter's primary role as a context compiler for AI coding agents, with the read-only `charter score` command as the first-run entry point.
+- **MCP SDK dependency** — updated `@modelcontextprotocol/sdk` from `^1.29.0` to `^1.30.0`.
+
+### Fixed
+
+- **Legacy ADF manifest compatibility** — restored support for the `(Triggers: ...)` syntax emitted by early Charter versions; current releases continue to emit the canonical `(Triggers on: ...)` form.
+- **Per-trigger observability** — `triggerMatches[].matched` now reports whether that individual trigger matched a task keyword instead of inheriting the resolved state of its module.
+- **Thin-pointer restoration** — `adf tidy` no longer duplicates the canonical `Session Start` block and now removes empty or fully deduplicated non-pointer headings.
+
+### Documentation
+
+- Clarified that ADF is a vendor-neutral specification and Charter is its TypeScript reference implementation.
+- Documented the benchmark's structural token estimate and measurement limitations.
+- Removed obsolete Stackbilt engine authentication guidance from the CLI package README.
+
+No CLI commands, flags, JSON schema shapes, or ADF source semantics changed. The patch corrects values emitted by the existing per-trigger observability contract.
+
 ## [1.9.0] - 2026-07-05
 
 > Unified workspace release. `@stackbilt/adf`/`@stackbilt/cli` were already bumped to 1.9.0 in-repo by `#246`; the release gate enforces one version across all workspace packages, so every package (including `@stackbilt/scaffold-core`, previously staged as 1.8.0) publishes as 1.9.0. No 1.8.0 was ever published to npm.

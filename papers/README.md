@@ -13,7 +13,8 @@ Long-form research, architecture, and rationale documents.
 | ID | Title | Version | Date | Status |
 |---|---|---|---|---|
 | CSA-001 | [Context-as-Code](./context-as-code-v1.1.md) | 1.1 | 2026-02-26 | Published |
-| CSA-002 | [Context-as-Code II: Greenfield](./context-as-code-greenfield-v0.1.md) | 0.2 | 2026-02-26 | Draft |
+| CSA-002 | [Context-as-Code II: Greenfield](./context-as-code-greenfield-v0.1.md) | 0.3 | 2026-08-24 | Retrospective |
+| CSA-003 | [Charter Evidence Register](./charter-evidence-2026-08.md) | 1.0 | 2026-08-24 | Published |
 | RM-001 | [ADF vNext Roadmap (Draft): Agent DX-Driven Priorities](./adf-vnext-roadmap-v0.1.md) | 0.1 | 2026-02-26 | Draft |
 | n/a | [Architect v2 x Charter ADF Integration Brief](./ARCHITECT_V2_INTEGRATION_BRIEF.md) | n/a | 2026-02-26 | Proposal |
 

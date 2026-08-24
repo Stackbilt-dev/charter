@@ -6,6 +6,7 @@ Everything in this directory is publication-ready. Replace only bracketed placeh
 
 - Charter: https://github.com/Stackbilt-dev/charter
 - Reproducible benchmark: https://github.com/Stackbilt-dev/charter/tree/main/examples/context-routing-benchmark
+- Evidence register: https://github.com/Stackbilt-dev/charter/blob/main/papers/charter-evidence-2026-08.md
 - ADF specification: https://github.com/adf-spec/adf
 - ADF specification text: https://github.com/adf-spec/adf/blob/main/SPEC.md
 - Charter npm package: https://www.npmjs.com/package/@stackbilt/cli
@@ -50,7 +51,8 @@ Set `CHARTER_CHROME_BIN` if Chrome is installed under a different executable nam
 - The synthetic benchmark preserves 30/30 rules byte-for-byte.
 - Its four pinned tasks reduce estimated context by 40.0–77.4%, averaging 58.1%.
 - Charter's estimator is structural and approximates one token per four characters; it is not a provider billing tokenizer.
-- The greenfield study measured default context growing from 558 to 569 estimated tokens while the subject application reached 2,074 production LOC across 24 files.
+- The exact-scoring migration harness extracts 178/178 expected items and restores 38/38 pointers; exact module routing currently passes 29/38 sessions, with all mismatches disclosed.
+- The historical greenfield study is observational and does not establish model-outcome improvements.
 - ADF Draft 0.1 has parser, resolver, and compiler conformance fixtures. Charter is the listed TypeScript reference implementation.
 
 If a post needs a shorter claim, omit detail rather than strengthening the wording.

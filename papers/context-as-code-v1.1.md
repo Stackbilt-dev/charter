@@ -11,9 +11,9 @@ abstract: >
   After shipping v1 of an enterprise AI Orchestration Engine, the team wrote
   a moonshot PRD to guide a ground-up v2 rebuild. This paper quantifies the
   v2 SDLC, proving that ADF — an AST-backed, manifest-routed context
-  microformat used to govern the AI agents building v2 — yields up to 80%
-  token payload reduction and enforces architectural invariants with 0%
-  violation across 33 generated modules.
+  microformat used to govern the AI agents building v2 — was associated with
+  up to 80% lower estimated instruction payload and no observed LOC-limit
+  violations across 33 generated modules.
 ---
 
 # Context-as-Code: Quantifying the Impact of Attention-Directed Format (ADF) on Autonomous System Architecture
@@ -21,13 +21,15 @@ abstract: >
 An AI Orchestration Engine v2 SDLC White-Paper
 Date: February 2026
 
+> **Evidence note (2026-08-24):** This is a historical, single-project observational report. Its provider transcripts and raw project snapshots are not public, it has no randomized or no-ADF control, and its token figures use a characters/4 structural estimate. Passing tests and observed LOC compliance do not establish that ADF caused better model outcomes. See the current [Charter Evidence Register](./charter-evidence-2026-08.md) for reproducible results, limitations, and known failures.
+
 ## Abstract
 
 The transition from deterministic software engineering to LLM-driven autonomous generation introduces significant risks: architectural drift ("god objects"), token context bloat, and non-deterministic logic failures.
 
 After shipping v1 of an enterprise AI Orchestration Engine and cataloging these failures first-hand, the engineering team authored a moonshot Product Requirements Document (PRD) to guide a ground-up v2 rebuild. The PRD codified the architectural invariants that v1 had violated — strict module boundaries, token budgets, and zero tolerance for god objects — and established the measurement rubric that would track the entire v2 SDLC.
 
-To govern the AI agents responsible for building v2 from this PRD, the team replaced standard monolithic system prompts with Attention-Directed Format (ADF) — an AST-backed, manifest-routed context microformat. This report quantifies the data from five major release tiers of that PRD-driven build, proving that applying standard software engineering principles to LLM context ("Prompt-as-Code") yields up to an 80% reduction in token payloads and strictly enforces architectural invariants (0% violation of LOC limits across 33 generated modules).
+To govern the AI agents responsible for building v2 from this PRD, the team replaced standard monolithic system prompts with Attention-Directed Format (ADF) — an AST-backed, manifest-routed context microformat. This report records data from five major release tiers of that PRD-driven build: up to 80% lower estimated loaded instruction context and no observed LOC-limit violations across 33 generated modules. The study does not isolate causality.
 
 ## 1. Methodology & Measurement Rubric
 
@@ -104,15 +106,15 @@ Throughout 5 complex domain implementations (Telemetry, SPRINT scaling, MCP Prot
 
 The test count increased from 339 to 525 unit tests (npx vitest run).
 
-The pass rate remained at 100% (525/525). This proves that dynamically injecting context via the ADF bundler did not introduce logic contradictions or hallucinations into the generated code.
+The pass rate remained at 100% (525/525). This shows that the measured test suite stayed green during the build; it does not prove the absence of hallucinations or isolate the effect of ADF routing.
 
 ## Conclusion
 
-The data collected across the full PRD-driven v2 SDLC proves that treating "Prompts as Text" is an architectural dead-end for autonomous systems.
+The data collected across the PRD-driven v2 SDLC records one team's experience replacing a monolithic prompt with routed ADF modules. It should not be read as proof that monolithic context is always inferior.
 
 The moonshot PRD defined the invariants; ADF enforced them at compile-time. By implementing Prompt-as-Code via the Attention-Directed Format (ADF), the engineering team achieved quantifiable victories against every metric the PRD established:
 
-- **Token Efficiency**: Context payloads reduced by >80%.
+- **Estimated Context Size**: Loaded instruction payload was more than 80% smaller at the measured checkpoints.
 - **Structural Governance**: 0% drift from the <400 LOC module invariant.
 - **Dynamic Scalability**: Seamless, zero-regression injection of domain-specific instructions via AST keyword routing.
 

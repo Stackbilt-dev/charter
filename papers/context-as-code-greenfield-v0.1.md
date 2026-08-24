@@ -1,20 +1,20 @@
 ---
 title: "Context-as-Code II: Measuring ADF Governance From Line Zero in a Greenfield Build"
 paper-id: CSA-002
-version: "0.2"
-status: draft
-date: 2026-02-26
+version: "0.3"
+status: retrospective
+date: 2026-08-24
 authors:
   - Charter Kit Engineering
-charter-version: "0.3.x → 0.4.0"
+charter-version: "0.3.x → 0.4.0 (study); reviewed against 1.9.1"
 baseline-source: "Stackbilt Architect v2 parity tests (Anthropic, Gemini, Groq)"
 subject-project: "Smart Revenue Rescue (SRR) Platform"
 related:
   - paper-id: CSA-001
     relationship: "predecessor — retrofit measurement; this paper covers greenfield"
 abstract: >
-  CSA-001 proved ADF's effectiveness on a v1-to-v2 retrofit. This paper
-  measures ADF governance applied from line zero on a greenfield build —
+  CSA-001 reported ADF measurements from a v1-to-v2 retrofit. This paper
+  examines ADF governance applied from line zero on a greenfield build —
   Smart Revenue Rescue (SRR) — where the AI pipeline that planned the
   architecture also generated the governance constraints that governed
   its own build. Uniquely, baseline data was captured before development
@@ -27,11 +27,45 @@ abstract: >
 
 A Stackbilt Architect v2 + Charter Kit SDLC White-Paper
 Date: February 2026
-Status: DRAFT v0.2 — Backend build complete, deployed, tested. Frontend phase pending.
+Status: RETROSPECTIVE v0.3 — Backend study complete; frontend phase was not measured.
 
 ## Premise
 
-CSA-001 demonstrated that ADF reduces token payloads by 80% and enforces architectural invariants with 0% violation — but that study measured a retrofit where v1 failures were already cataloged. The natural question: **does ADF deliver the same results when applied from the start, before any technical debt exists to correct?**
+CSA-001 reported an estimated 80% reduction in loaded instruction context and no observed LOC-limit violations during a retrofit where v1 failures were already cataloged. The natural question was: **would the same measurements hold when ADF was applied from the start, before technical debt existed to correct?**
+
+## 2026-08 Retrospective Update
+
+This document preserves a February 2026 single-project case study. It is not a controlled experiment, and its subject repository, raw task transcripts, and provider outputs are not public. The results are therefore observational and cannot establish that ADF caused higher task success, lower model cost, or better instruction adherence.
+
+The original study also used `ceil(characterCount / 4)` as a structural estimator. Values labeled “tokens” below are estimates for relative context size, not tokenizer counts or provider billing measurements. Two historical LOC totals appear in the captured notes: 2,074 tested production LOC and a 2,147-LOC phase snapshot with a broader source boundary. Because the original raw snapshots are not public, this revision retains both values but uses 2,074 for the headline result and does not treat the difference as resolved.
+
+Since the study, Charter has advanced from `0.3.x`/`0.4.0` to `1.9.1`. Current ADF routing adds bounded prefix-stem matching, trigger-match reports, local resolution telemetry, and `adf suggest` diagnostics. The original `ingest`/`ingestion` false negative is historical; it is not representative of the current matcher. The proposed `adf baseline`, `adf trend`, and `--append-log` interfaces described below were part of the study design and are not current CLI commands.
+
+The repository now includes a smaller [reproducible context-routing benchmark](../examples/context-routing-benchmark/). It preserves 30/30 fixture rules byte-for-byte and checks four pinned task routes. The committed snapshot measures 40.0%–77.4% less estimated instruction context than loading the fixture monolith, averaging 58.1%. That benchmark validates deterministic preservation, routing, and relative context size only; it does not measure model task success or instruction adherence.
+
+Recent external work sharpens the hypothesis. Anthropic recommends selecting the smallest high-signal context set and warns about context pollution. OpenAI describes a short repository map that points agents to deeper sources of truth. GitHub now supports repository-wide, path-specific, and agent instruction files across different Copilot surfaces. More importantly, 2026 evaluations report that repository context files can increase inference cost without a statistically significant task-success gain, and that coding agents often favor context recall over precision. These findings support measuring selective routing, but they do not validate Charter specifically.
+
+References:
+
+- Anthropic, [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents), 2025.
+- OpenAI, [Harness engineering: leveraging Codex in an agent-first world](https://openai.com/index/harness-engineering/), 2026.
+- GitHub, [Support for different types of custom instructions](https://docs.github.com/en/copilot/reference/custom-instructions-support), accessed 2026-08-24.
+- Gloaguen et al., [Evaluating AGENTS.md: Are Repository-Level Context Files Helpful for Coding Agents?](https://arxiv.org/abs/2602.11988), 2026.
+- Li et al., [ContextBench: A Benchmark for Context Retrieval in Coding Agents](https://arxiv.org/abs/2602.05892), 2026.
+- Yang et al., [Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents](https://arxiv.org/abs/2607.24882), 2026.
+
+### Dormant-project revalidation (2026-08-24)
+
+The subject repository was revalidated at commit `d0bff55d38cde1ae32b2a7ab304e8457ab43c802` after no active development since March. The frontend phase had in fact landed on 2026-02-26 and later March work expanded the application.
+
+- 47/47 backend tests passed across eight suites.
+- Root TypeScript validation passed.
+- The React frontend production build passed with 73 transformed modules.
+- Current scope contains 4,783 production LOC across 60 `.ts`, `.tsx`, and `.css` files, plus 628 test LOC across eight files.
+- Current Charter estimated 2,276 units for all five ADF modules, 1,768 for a frontend task, and 1,729 for a backend task. These are not directly comparable to the February 558/569 figures because the default-load set and project scope changed.
+- Dependency audits reported 14 root findings (including one critical) and seven frontend findings. Counts may overlap and do not establish exploitability.
+
+The rerun initially failed to route the repository's historical `(Triggers: ...)` manifest syntax. Charter `1.9.1` restores that compatibility. Full measurements and limitations are recorded in [CSA-003](./charter-evidence-2026-08.md).
 
 This paper answers that question using a greenfield build of the Smart Revenue Rescue (SRR) platform. What makes this study unique is the existence of pre-development baseline data: before a single line of SRR code was written, three LLM providers independently generated complete architecture plans from the same PRD through the Stackbilt Architect v2 pipeline. Those plans — including component counts, test scenario counts, ADR inventories, token costs, and deployable scaffolds — serve as the "predicted" baseline against which the actual ADF-governed build is measured.
 
@@ -71,7 +105,7 @@ This preflight data establishes the governance posture at the moment before deve
 
 ## 2. Measurement Rubric
 
-All metrics are captured automatically by Charter CLI and the ADF evidence pipeline. No manual instrumentation required beyond standard CI integration (`charter adf evidence --auto-measure --append-log --ci`).
+The study combined Charter CLI output with manually retained milestone notes. Current Charter can reproduce the bundle and ceiling checks with `charter adf bundle --format json` and `charter adf evidence --auto-measure --ci --format json`; it does not implement the historical `--append-log`, `adf baseline`, or `adf trend` interfaces proposed in this rubric.
 
 ### 2.1 Context Economics
 
@@ -144,17 +178,17 @@ All metrics are captured automatically by Charter CLI and the ADF evidence pipel
 
 ### 3.1 Evidence Ledger
 
-Every CI run appends a JSON line to `.charter/evidence-log.jsonl`:
+The study design proposed appending a JSON line to `.charter/evidence-log.jsonl` on every CI run:
 
 ```bash
-charter adf evidence --auto-measure --append-log --ci --format json
+charter adf evidence --auto-measure --ci --format json
 ```
 
-Each line contains: timestamp, constraint results, token estimate, budget utilization, weight summary, sync status, verdict, and auto-measured metric values.
+Current Charter emits a report for each invocation; persistent longitudinal logging must be supplied by CI artifact storage or another external collector.
 
 ### 3.2 Baseline Snapshot
 
-At project initialization, `charter adf baseline` captures the day-zero state:
+The project retained a day-zero baseline snapshot. The proposed `charter adf baseline` command was not shipped:
 
 ```json
 {
@@ -180,7 +214,7 @@ At each phase boundary (matching the PRD's 3-phase roadmap), a full snapshot is 
 
 ### 3.4 Trend Report
 
-At project completion, `charter adf trend` reads the evidence log + baseline and produces the plan-vs-actual reconciliation report that forms the core of this paper's findings.
+At project completion, the baseline and milestone notes were reconciled manually. The proposed `charter adf trend` command was not shipped.
 
 ## 4. Expected Findings (Hypotheses)
 
@@ -281,7 +315,7 @@ Time from PRD to live deployment: **single session**.
 | Phase 0 (baseline) | 0 | 558 | — |
 | Phase 3 (complete) | 2,147 | 569 | +11 tokens (+2.0%) |
 
-**H1 CONFIRMED:** ADF context cost stayed effectively flat (+2%) while production code grew to 2,147 LOC. DEFAULT_LOAD routing works — on-demand modules (backend.adf, frontend.adf) were never loaded into evidence snapshots because the evidence command doesn't simulate task-based routing.
+**H1 OBSERVED FOR DEFAULT LOAD:** Estimated default instruction context stayed effectively flat (+2%) while the broader phase snapshot grew to 2,147 LOC. Because these evidence snapshots did not simulate task-based routing, they do not establish routing precision, recall, or agent outcomes.
 
 ### Architectural Health (H2 — Ceiling Compliance)
 
@@ -292,7 +326,7 @@ Time from PRD to live deployment: **single session**.
 | adapter_loc | 200 | ~70-100 per adapter | PASS (in backend.adf, not auto-measured) |
 | component_loc | 300 | N/A (no frontend yet) | N/A |
 
-**H2 CONFIRMED:** Zero ceiling violations throughout the build. No file exceeded its ceiling.
+**H2 OBSERVED:** No ceiling violations were recorded in the retained build measurements. This is evidence of compliance in one build, not evidence that ADF alone caused the result.
 
 ### Plan-vs-Actual Reconciliation (H3)
 
@@ -304,7 +338,7 @@ Time from PRD to live deployment: **single session**.
 | Sprints | 3 | 2 | 2 | 3 phases in 1 session |
 | Token cost (plan) | 79,393 | 62,794 | 69,746 | 569 (governance only) |
 
-**H3 CONFIRMED:** Actual file count (24) is 2.4-4x the planned component count (6-10), and test count (41) exceeds all three plans' highest estimate (25). The expansion followed predicted domain boundaries — the 8 logical modules (ingest, adapters, scorecard, doctor, webhooks, config, models, lib) align with the Gemini/Groq component predictions. Sprint structure (3 phases) matched the Anthropic plan exactly. The key insight: LLM plans underestimate file granularity but correctly predict domain boundaries.
+**H3 SUPPORTED IN THIS CASE:** Actual file count (24) was 2.4-4x the planned component count (6-10), and test count (41) exceeded all three plans' highest estimate (25). The eight logical modules aligned with several predicted domain boundaries, while the three-phase structure matched the Anthropic plan. A single build is insufficient to generalize that LLM plans systematically predict domains better than file granularity.
 
 ### ADF Routing Observations (H4)
 
@@ -315,7 +349,7 @@ Time from PRD to live deployment: **single session**.
 | `charter bootstrap` overwrote custom ADF content | ADX-004 filed, severity HIGH |
 | `adf fmt --write` strips scaffold comments | ADX-002 P0 fix is ephemeral |
 
-**H4 PARTIAL:** Trigger routing has a systematic stemming gap. Precision cannot be measured without per-task bundle logs (evidence only captures DEFAULT_LOAD).
+**H4 NOT MEASURED:** The February build exposed an exact-token stemming gap, but no per-task bundle logs were retained, so routing precision and recall cannot be calculated. Current Charter uses bounded prefix-stem matching and reports matched triggers and keywords; the historical `ingest`/`ingestion` gap has been addressed at the matcher level.
 
 ### Velocity Signal
 
@@ -340,7 +374,7 @@ Charter v0.4.0 closes this gap with `charter hook install --pre-commit`, a git p
 
 ### Impact on CSA-002 Hypotheses
 
-**H2 (Ceiling Compliance):** With pre-commit hooks, ceiling enforcement shifts from "observed compliance" to "enforced compliance." The hook makes ceiling violations structurally impossible to commit, eliminating the window between commit and CI detection. For this study, H2 was confirmed without the hook (zero violations observed), but the hook guarantees it going forward.
+**H2 (Ceiling Compliance):** With pre-commit hooks, configured ceiling violations can be detected before a normal commit instead of only in CI. Hooks can be bypassed and only validate declared metrics, so CI remains the authoritative gate. For this study, no violations were observed before the hook existed.
 
 **Velocity impact:** The hook is a no-op when ceilings are respected (which they always were in the SRR build). It only adds friction when friction is warranted — a file that needs splitting. This aligns with ADF's design principle: governance should be invisible when you're doing the right thing.
 
@@ -359,17 +393,17 @@ This feature addresses the temporal gap surfaced in the SRR build: `adf evidence
 
 ## 7. Conclusion
 
-The greenfield build of Smart Revenue Rescue — from empty repo to deployed, tested platform in a single session — confirms and extends CSA-001's findings:
+The greenfield build of Smart Revenue Rescue — from empty repository to a deployed, tested backend in a single session — adds one observational data point to CSA-001:
 
-**Context economics scale.** ADF context cost stayed flat (+2%, from 558 to 569 tokens) while production code grew to 2,074 LOC across 24 files. The DEFAULT_LOAD routing system works exactly as designed: core.adf and state.adf carry universal context, while backend.adf and frontend.adf are loaded only when task keywords trigger them.
+**Default context remained nearly flat in this build.** The structural estimate increased 2%, from 558 to 569, while tested production code reached 2,074 LOC across 24 files. This measures default-load size; it does not measure task-routing quality or model performance.
 
-**Ceiling compliance holds from day one.** Zero ceiling violations throughout the build — not because of corrective pressure (as in CSA-001's retrofit), but because ADF's modular decomposition guidance naturally produces files within ceiling bounds. With Charter v0.4.0's pre-commit hook, this compliance becomes structurally enforced rather than merely observed.
+**Ceiling compliance was observed from day one.** The retained measurements recorded no declared LOC-ceiling violations. Pre-commit and CI checks now make violations easier to catch, but the study cannot isolate the effect of ADF guidance from the architecture, model, or developer workflow.
 
-**LLM plans predict domain boundaries, not file granularity.** Three models predicted 6-10 components; the actual build produced 24 files in 8 logical modules. The 2.4-4x expansion ratio is significant but structurally predictable — expansion happened within predicted domain boundaries (ingest, scorecard, doctor, config), not across new domains. Test count (41) exceeded all three plans' highest estimate (25), reflecting the natural expansion from "scenario" to "test case."
+**The plans were closer on domains than files in this instance.** Three models predicted 6-10 components; the actual build produced 24 files in eight logical modules. Test count (41) exceeded all three plans' highest estimate (25). More projects would be needed before treating that pattern as general.
 
 **The feedback loop works.** The study surfaced 4 DX feedback items (ADX-001 through ADX-004), covering trigger keyword stemming, bootstrap merge strategy, scaffold comment ephemerality, and the pre-commit enforcement gap. One fix (v0.3.3 bootstrap) shipped during the build session itself. Charter v0.4.0's pre-commit hook directly addresses findings from this study. This demonstrates the intended feedback loop: ADF-governed development surfaces tooling gaps, which the charter team closes, which improves the next governed build.
 
-**Single-session velocity.** PRD to deployed platform (4 Cloudflare resources, 6 D1 tables, 41 passing tests, live health check) in one session. ADF governance added no measurable overhead — the context loading, constraint checking, and evidence collection happened alongside development, not as separate ceremonies. The agent operated under ADF constraints (tenant isolation, confidence scoring, engine boundaries, conventional commits) without any constraint violations or forced rollbacks.
+**Single-session velocity was recorded, but governance overhead was not isolated.** The build reached four Cloudflare resources, six D1 tables, 41 passing tests, and a live health check in one session. Context loading and checks ran alongside development; the study did not capture a no-ADF baseline or separately time governance work.
 
 ### Open Questions for Frontend Phase
 
