@@ -19,6 +19,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run supply-chain:check
       - run: pnpm run build
+      - name: Verify context routing benchmark
+        run: pnpm run benchmark:context
       - name: Measure brief token budget
         run: node scripts/measure-brief-size.mjs
       - name: Eval brief orientation coverage
