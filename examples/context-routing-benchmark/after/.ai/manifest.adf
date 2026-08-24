@@ -1,0 +1,15 @@
+ADF: 0.1
+
+ROLE: Modular storefront context router
+
+DEFAULT_LOAD:
+  - core.adf
+
+ON_DEMAND:
+  - frontend.adf (Triggers on: react, component, ui, accessibility) [budget: 300]
+  - backend.adf (Triggers on: api, endpoint, request, handler) [budget: 300]
+  - security.adf (Triggers on: auth, authentication, token, tenant, webhook) [budget: 300]
+  - release.adf (Triggers on: release, publish, npm, changelog, version) [budget: 300]
+
+BUDGET:
+  MAX_TOKENS: 1000

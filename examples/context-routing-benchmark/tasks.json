@@ -1,0 +1,22 @@
+[
+  {
+    "id": "frontend",
+    "task": "Fix the React checkout component accessibility",
+    "expectedModules": ["core.adf", "frontend.adf"]
+  },
+  {
+    "id": "secure-api",
+    "task": "Add authentication token validation to the API endpoint",
+    "expectedModules": ["core.adf", "backend.adf", "security.adf"]
+  },
+  {
+    "id": "release",
+    "task": "Prepare the changelog and npm release",
+    "expectedModules": ["core.adf", "release.adf"]
+  },
+  {
+    "id": "core-only",
+    "task": "Refactor the shared TypeScript utility",
+    "expectedModules": ["core.adf"]
+  }
+]

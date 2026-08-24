@@ -1,0 +1,9 @@
+ADF: 0.1
+
+CONSTRAINTS [load-bearing]:
+  - [RELEASE-01] Use Conventional Commits for user-visible changes.
+  - [RELEASE-02] Update the changelog before publishing a release.
+  - [RELEASE-03] Run the clean-install smoke test against the packed artifact.
+  - [RELEASE-04] Publish packages with provenance and public access metadata.
+  - [RELEASE-05] Confirm the tag, package version, and release notes agree.
+  - [RELEASE-06] Record migration guidance for every breaking contract change.

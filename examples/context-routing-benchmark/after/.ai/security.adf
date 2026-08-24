@@ -1,0 +1,9 @@
+ADF: 0.1
+
+CONSTRAINTS [load-bearing]:
+  - [SECURITY-01] Authenticate before reading tenant-scoped resources.
+  - [SECURITY-02] Authorize every object access against the active tenant.
+  - [SECURITY-03] Store tokens only in approved secret stores.
+  - [SECURITY-04] Compare webhook signatures using constant-time primitives.
+  - [SECURITY-05] Redact email, address, payment, and token fields from logs.
+  - [SECURITY-06] Add a negative test for every new authorization path.

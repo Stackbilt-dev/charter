@@ -1,0 +1,11 @@
+ADF: 0.1
+
+ROLE: Storefront development rules
+
+CONSTRAINTS [load-bearing]:
+  - [CORE-01] Use TypeScript strict mode and target ES2022.
+  - [CORE-02] Use two-space indentation, semicolons, and single quotes.
+  - [CORE-03] Keep library functions pure and isolate side effects at application boundaries.
+  - [CORE-04] Run typecheck, tests, and build before declaring work complete.
+  - [CORE-05] Do not expose secrets, credentials, or customer data in logs.
+  - [CORE-06] Preserve backward compatibility unless the task explicitly authorizes a breaking change.

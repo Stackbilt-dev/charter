@@ -1,0 +1,55 @@
+{
+  "estimator": "Charter ADF structural heuristic (~4 characters per estimated token)",
+  "fixture": "Synthetic; 30 rules preserved byte-for-byte before and after modularization",
+  "tasks": [
+    {
+      "id": "frontend",
+      "task": "Fix the React checkout component accessibility",
+      "baselineTokens": 580,
+      "routedTokens": 252,
+      "savedTokens": 328,
+      "reductionPercent": 56.6,
+      "resolvedModules": [
+        "core.adf",
+        "frontend.adf"
+      ]
+    },
+    {
+      "id": "secure-api",
+      "task": "Add authentication token validation to the API endpoint",
+      "baselineTokens": 580,
+      "routedTokens": 348,
+      "savedTokens": 232,
+      "reductionPercent": 40,
+      "resolvedModules": [
+        "core.adf",
+        "backend.adf",
+        "security.adf"
+      ]
+    },
+    {
+      "id": "release",
+      "task": "Prepare the changelog and npm release",
+      "baselineTokens": 580,
+      "routedTokens": 242,
+      "savedTokens": 338,
+      "reductionPercent": 58.3,
+      "resolvedModules": [
+        "core.adf",
+        "release.adf"
+      ]
+    },
+    {
+      "id": "core-only",
+      "task": "Refactor the shared TypeScript utility",
+      "baselineTokens": 580,
+      "routedTokens": 131,
+      "savedTokens": 449,
+      "reductionPercent": 77.4,
+      "resolvedModules": [
+        "core.adf"
+      ]
+    }
+  ],
+  "averageReductionPercent": 58.1
+}

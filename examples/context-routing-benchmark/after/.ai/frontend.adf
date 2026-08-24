@@ -1,0 +1,9 @@
+ADF: 0.1
+
+CONSTRAINTS [load-bearing]:
+  - [FRONTEND-01] Use React function components with explicit TypeScript props.
+  - [FRONTEND-02] Preserve keyboard navigation and visible focus states for every control.
+  - [FRONTEND-03] Meet WCAG AA contrast requirements and label interactive elements.
+  - [FRONTEND-04] Keep server state outside local presentation components.
+  - [FRONTEND-05] Add tests for loading, empty, error, and success states.
+  - [FRONTEND-06] Do not add a client dependency when platform APIs are sufficient.

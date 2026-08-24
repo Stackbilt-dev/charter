@@ -1,0 +1,9 @@
+ADF: 0.1
+
+CONSTRAINTS [load-bearing]:
+  - [BACKEND-01] Validate request bodies before calling domain services.
+  - [BACKEND-02] Keep HTTP handlers thin: parse, authorize, call, serialize.
+  - [BACKEND-03] Return stable error codes and never leak stack traces.
+  - [BACKEND-04] Make write endpoints idempotent where retries are possible.
+  - [BACKEND-05] Add contract tests for every public endpoint change.
+  - [BACKEND-06] Bound pagination and reject unsupported query parameters.

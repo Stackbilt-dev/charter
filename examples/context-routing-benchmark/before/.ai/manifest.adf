@@ -1,0 +1,9 @@
+ADF: 0.1
+
+ROLE: Monolithic benchmark baseline
+
+DEFAULT_LOAD:
+  - monolith.adf
+
+BUDGET:
+  MAX_TOKENS: 2000
