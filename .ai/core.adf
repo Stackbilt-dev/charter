@@ -11,6 +11,18 @@ ADF: 0.1
   - Conventional Commits: feat(scope):, fix(scope):, docs:, chore:
   - .charter/ holds governance config: config.json, patterns/*.json, policies/*.md
   - CLI command handlers in packages/cli/src/commands/, config in src/config.ts
+  - This is a **public infrastructure package** governed by the Stackbilt OSS Infrastructure Package Update Policy.
+Rules:
+  - Full policy: `stackbilt_llc/policies/oss-infrastructure-update-policy.md`
+  - # agents-modules
+  - Read the matching file before working in these areas:
+  - # /agents-modules
+  - <!-- agents-modules -->
+  - Read the matching file before working in these areas:
+  - <!-- /agents-modules -->
+  - <!-- agents-modules -->
+  - Read the matching file before working in these areas:
+  - <!-- /agents-modules -->
 
 ⚠ CONSTRAINTS [load-bearing]:
   - TypeScript strict mode, ES2022 target, CommonJS output
@@ -26,16 +38,72 @@ ADF: 0.1
   - Validation gates: pnpm run typecheck, pnpm run build, pnpm run test
   - Use pnpm exec tsc instead of npx tsc in WSL
   - Bias toward action over clarification; implement rather than ask when task is clear
+  - **Additive only** — never remove or rename public API without a major version bump
+  - **No product logic** — framework patterns and generic utilities only. If a competitor could reconstruct Stackbilt product architecture from this code, it doesn't belong here.
+  - **Strict semver** — patch for fixes, minor for new features, major for breaking changes
+  - **Tests travel with code** — every public export must have test coverage
+  - **Validate at boundaries** — all external API responses validated before returning to consumers
+  - `adf_commands_loc`: 991 / 1041 [lines]
+  - `adf_bundle_loc`: 185 / 202 [lines]
+  - `adf_sync_loc`: 217 / 250 [lines]
+  - `adf_evidence_loc`: 274 / 313 [lines]
+  - `adf_migrate_loc`: 688 / 792 [lines]
+  - `bundler_loc`: 129 / 144 [lines]
+  - `parser_loc`: 214 / 247 [lines]
+  - `cli_entry_loc`: 249 / 297 [lines]
+  - **CURRENT**: v1.9.1 release prepared for npm. The patch restores legacy ADF trigger compatibility, fixes per-trigger match observability and tidy pointer restoration, freezes an exact routing-harness snapshot, and refreshes the public evidence register with reproducible, unfavorable, and cross-repo findings.
+  - **NEXT**: Publish/tag v1.9.1 through npm trusted publishing. Use the exact-routing failures as the baseline for routing-quality improvements. #200 (authority-gated governance, P1 — propose→gate→commit contract). #90 (package ecosystem — configurable dependency orchestration). #201 (tiered execution contract, P2).
+  - **BLOCKED_ON**: Nothing critical. #116 (charter_brief via gateway) deferred to commercial layer. #200 is design-first before implementation.
+  - **COMPLETED**: Phase 1-7, M0-M2, blast + surface subsystems, compile pipeline (outbound ADF→vendor), conformance suite (adf-spec/adf), MCP setup diagnostics (#191), ADF tidy routing (#198), displayAiDir compiler fix (#207), docs-sync graceful flags (#195), README cleanup (#206), Rust/WASM first-class support (#230), scaffold-core output-quality fixes (#246 follow-through), and the August 2026 evidence refresh (CSA-003).
+  - `.ai/adf-dev.adf` — Triggers: ADF, parser, formatter, patcher, bundler, metric, weight
+  - `.ai/governance.adf` — Triggers: validate, drift, audit, trailer, risk, governance
+  - `.ai/classifier.adf` — Triggers: classifier, routing, auto-route, adf add, classify, rule placement
+  - `.ai/analysis.adf` — Triggers: blast, surface, dependency graph, blast radius, route extraction, schema extraction
+  - `.ai/typed-data-access.adf` — Triggers: tenant, user, subscription, quota, credit, mrr, pii, sensitivity, data registry, ontology, disambiguation, DATA_AUTHORITY, raw D1, service boundary, auth_scoped, billing_critical
+  - `adf_commands_loc`: 991 / 1041 [lines]
+  - `adf_bundle_loc`: 185 / 202 [lines]
+  - `adf_sync_loc`: 217 / 250 [lines]
+  - `adf_evidence_loc`: 274 / 313 [lines]
+  - `adf_migrate_loc`: 688 / 792 [lines]
+  - `bundler_loc`: 129 / 144 [lines]
+  - `parser_loc`: 214 / 247 [lines]
+  - `cli_entry_loc`: 249 / 297 [lines]
+  - **CURRENT**: v1.9.1 release prepared for npm. The patch restores legacy ADF trigger compatibility, fixes per-trigger match observability and tidy pointer restoration, freezes an exact routing-harness snapshot, and refreshes the public evidence register with reproducible, unfavorable, and cross-repo findings.
+  - **NEXT**: Publish/tag v1.9.1 through npm trusted publishing. Use the exact-routing failures as the baseline for routing-quality improvements. #200 (authority-gated governance, P1 — propose→gate→commit contract). #90 (package ecosystem — configurable dependency orchestration). #201 (tiered execution contract, P2).
+  - **BLOCKED_ON**: Nothing critical. #116 (charter_brief via gateway) deferred to commercial layer. #200 is design-first before implementation.
+  - **COMPLETED**: Phase 1-7, M0-M2, blast + surface subsystems, compile pipeline (outbound ADF→vendor), conformance suite (adf-spec/adf), MCP setup diagnostics (#191), ADF tidy routing (#198), displayAiDir compiler fix (#207), docs-sync graceful flags (#195), README cleanup (#206), Rust/WASM first-class support (#230), scaffold-core output-quality fixes (#246 follow-through), and the August 2026 evidence refresh (CSA-003).
+  - `.ai/adf-dev.adf` — Triggers: ADF, parser, formatter, patcher, bundler, metric, weight
+  - `.ai/governance.adf` — Triggers: validate, drift, audit, trailer, risk, governance
+  - `.ai/classifier.adf` — Triggers: classifier, routing, auto-route, adf add, classify, rule placement
+  - `.ai/analysis.adf` — Triggers: blast, surface, dependency graph, blast radius, route extraction, schema extraction
+  - `.ai/typed-data-access.adf` — Triggers: tenant, user, subscription, quota, credit, mrr, pii, sensitivity, data registry, ontology, disambiguation, DATA_AUTHORITY, raw D1, service boundary, auth_scoped, billing_critical
+  - `adf_commands_loc`: 991 / 1041 [lines]
+  - `adf_bundle_loc`: 185 / 202 [lines]
+  - `adf_sync_loc`: 217 / 250 [lines]
+  - `adf_evidence_loc`: 274 / 313 [lines]
+  - `adf_migrate_loc`: 688 / 792 [lines]
+  - `bundler_loc`: 129 / 144 [lines]
+  - `parser_loc`: 214 / 247 [lines]
+  - `cli_entry_loc`: 249 / 297 [lines]
+  - **CURRENT**: v1.9.1 release prepared for npm. The patch restores legacy ADF trigger compatibility, fixes per-trigger match observability and tidy pointer restoration, freezes an exact routing-harness snapshot, and refreshes the public evidence register with reproducible, unfavorable, and cross-repo findings.
+  - **NEXT**: Publish/tag v1.9.1 through npm trusted publishing. Use the exact-routing failures as the baseline for routing-quality improvements. #200 (authority-gated governance, P1 — propose→gate→commit contract). #90 (package ecosystem — configurable dependency orchestration). #201 (tiered execution contract, P2).
+  - **BLOCKED_ON**: Nothing critical. #116 (charter_brief via gateway) deferred to commercial layer. #200 is design-first before implementation.
+  - **COMPLETED**: Phase 1-7, M0-M2, blast + surface subsystems, compile pipeline (outbound ADF→vendor), conformance suite (adf-spec/adf), MCP setup diagnostics (#191), ADF tidy routing (#198), displayAiDir compiler fix (#207), docs-sync graceful flags (#195), README cleanup (#206), Rust/WASM first-class support (#230), scaffold-core output-quality fixes (#246 follow-through), and the August 2026 evidence refresh (CSA-003).
+  - `.ai/adf-dev.adf` — Triggers: ADF, parser, formatter, patcher, bundler, metric, weight
+  - `.ai/governance.adf` — Triggers: validate, drift, audit, trailer, risk, governance
+  - `.ai/classifier.adf` — Triggers: classifier, routing, auto-route, adf add, classify, rule placement
+  - `.ai/analysis.adf` — Triggers: blast, surface, dependency graph, blast radius, route extraction, schema extraction
+  - `.ai/typed-data-access.adf` — Triggers: tenant, user, subscription, quota, credit, mrr, pii, sensitivity, data registry, ontology, disambiguation, DATA_AUTHORITY, raw D1, service boundary, auth_scoped, billing_critical
 
 📊 METRICS [load-bearing]:
-  adf_commands_loc: 905 / 1041 [lines]
-  adf_bundle_loc: 175 / 202 [lines]
+  adf_commands_loc: 991 / 1041 [lines]
+  adf_bundle_loc: 185 / 202 [lines]
   adf_sync_loc: 217 / 250 [lines]
-  adf_evidence_loc: 272 / 313 [lines]
+  adf_evidence_loc: 274 / 313 [lines]
   adf_migrate_loc: 688 / 792 [lines]
-  bundler_loc: 125 / 144 [lines]
+  bundler_loc: 129 / 144 [lines]
   parser_loc: 214 / 247 [lines]
-  cli_entry_loc: 258 / 297 [lines]
+  cli_entry_loc: 249 / 297 [lines]
 
 BUDGET_RATIONALES:
   adf_commands_loc_2026-05-22: 0 -> 905, ceiling 800 -> 1041; updateEvidence MCP tool and adf patch changes[] added in v0.16.0 — both features intentionally expand commands/ and serve.ts
