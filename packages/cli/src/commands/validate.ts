@@ -209,6 +209,10 @@ function validateCommits(
     );
   }
   const totalTrailers = parsed.governedBy.length + parsed.resolvesRequest.length;
+  const policyOffendingCommits = policy.requireTrailers
+    ? commits.filter(commit => !linkedCommits.has(commit.sha))
+    : [];
+  const policyModeActive = policyOffendingCommits.length > 0;
 
   let status: 'PASS' | 'WARN' | 'FAIL';
   let summary: string;
@@ -216,9 +220,9 @@ function validateCommits(
   if (highRiskUnlinked > 0) {
     status = 'FAIL';
     summary = `${unlinked.length} commit(s) above ${threshold} risk threshold without governance trailers.`;
-  } else if (policy.requireTrailers && totalTrailers === 0) {
+  } else if (policyModeActive) {
     status = policy.citationStrictness === 'FAIL' || policy.citationStrictness === 'STRICT' ? 'FAIL' : 'WARN';
-    summary = `No governance trailers found across ${commits.length} commit(s) in scope.`;
+    summary = `${policyOffendingCommits.length} of ${commits.length} commit(s) missing required governance trailers.`;
   } else if (unlinked.length > 0) {
     status = 'WARN';
     summary = `${unlinked.length} commit(s) above ${threshold} risk threshold without governance trailers.`;
@@ -237,21 +241,18 @@ function validateCommits(
     trailersFound: totalTrailers,
     highRiskUnlinked,
     strictTrailerMode: {
-      active: policy.requireTrailers && totalTrailers === 0,
-      mode: policy.requireTrailers && totalTrailers === 0
+      active: policyModeActive,
+      mode: policyModeActive
         ? (unlinked.length > 0 ? 'STRICT_AND_RISK' : 'STRICT_ONLY')
         : (unlinked.length > 0 ? 'RISK_ONLY' : 'NONE'),
-      reason: policy.requireTrailers && totalTrailers === 0
-        ? `requireTrailers=true and no trailers found in range (${policy.citationStrictness}).`
+      reason: policyModeActive
+        ? `requireTrailers=true and ${policyOffendingCommits.length} of ${commits.length} commits have no trailers (${policy.citationStrictness}).`
         : 'strict trailer mode not triggered',
     },
     suggestions,
     trailerParsingWarnings,
     evidence: {
-      policyOffenders: buildPolicyOffenders(
-        commits,
-        policy.requireTrailers && totalTrailers === 0
-      ),
+      policyOffenders: buildPolicyOffenders(policyOffendingCommits),
       riskOffenders: buildRiskOffenders(
         commits,
         unlinked,
@@ -261,11 +262,7 @@ function validateCommits(
   };
 }
 
-function buildPolicyOffenders(
-  commits: GitCommit[],
-  strictModeActive: boolean
-): OffenderCommit[] {
-  if (!strictModeActive) return [];
+function buildPolicyOffenders(commits: GitCommit[]): OffenderCommit[] {
   return commits.map((commit) => {
     const filesChanged = commit.files_changed || [];
     const subject = commit.message.split('\n')[0].slice(0, 200);
@@ -523,4 +520,3 @@ function detectTrailerParsingWarnings(
 
   return warnings;
 }
-

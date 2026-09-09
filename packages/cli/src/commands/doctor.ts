@@ -14,6 +14,7 @@ import type { LocBudgetRule } from '@stackbilt/adf';
 import { isGitRepo } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
 import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
+import { checkGateEnforcement } from './doctor-gate-enforcement';
 
 interface DoctorResult {
   status: 'PASS' | 'WARN';
@@ -117,7 +118,13 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
     });
 
     if (hasConfig) {
-      checks.push(validateJSONConfig(configFile));
+      const configCheck = validateJSONConfig(configFile);
+      checks.push(configCheck);
+      const strictTrailers = config.git.requireTrailers
+        && ['FAIL', 'STRICT'].includes(config.validation.citationStrictness);
+      if (configCheck.status === 'PASS' && strictTrailers && inGitRepo) {
+        checks.push(checkGateEnforcement());
+      }
     }
 
     const patterns = loadPatterns(options.configPath);

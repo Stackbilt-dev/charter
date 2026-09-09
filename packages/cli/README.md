@@ -215,7 +215,7 @@ Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|b
 
 ### `charter doctor`
 
-Validate CLI installation, `.charter/` config, and ADF readiness (manifest existence, module parseability, sync lock status).
+Validate CLI installation, `.charter/` config, governance gate wiring, and ADF readiness (manifest existence, module parseability, sync lock status). Strict trailer configuration warns when no active hook or GitHub Actions workflow invokes `charter validate --ci`; the commit-msg hook alone only normalizes trailers that are already present.
 Use `charter doctor --adf-only --ci` for strict ADF wiring gates in automation.
 
 ### `charter validate`
@@ -228,6 +228,10 @@ charter validate --range HEAD~10..HEAD --format json
 ```
 
 When `--range` is omitted, JSON includes `effectiveRangeSource` and `defaultCommitRange` so automation can trace default selection behavior.
+
+With `git.requireTrailers` enabled, trailer presence is evaluated per commit. A
+trailer on one commit does not satisfy other commits in the selected range;
+`policyOffenders` identifies each missing commit.
 
 Trailer formatting requirement:
 - Governance trailers must be in one contiguous trailer block at the end of the commit message.
