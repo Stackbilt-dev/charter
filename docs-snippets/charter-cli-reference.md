@@ -25,6 +25,9 @@ npx charter validate --range HEAD~5..HEAD  # specific commit range
 
 JSON output includes `policyOffenders` (missing required trailers) and `riskOffenders` (high-risk paths without governance), plus `effectiveRangeSource` and `defaultCommitRange` for agent transparency.
 
+With `git.requireTrailers` enabled, trailer presence is evaluated per commit. A
+trailer on one commit does not satisfy other commits in the selected range.
+
 ### charter drift
 
 Scans the codebase for deviations from your blessed stack patterns. Detects unapproved dependencies, frameworks, and patterns defined in `.charter/patterns/*.json`.
@@ -96,7 +99,7 @@ npx charter init --preset worker
 
 ### charter doctor
 
-Checks CLI installation and repository config health. Validates ADF readiness: manifest existence, manifest parse, default-load module presence, and sync lock status.
+Checks CLI installation and repository config health. Validates ADF readiness: manifest existence, manifest parse, default-load module presence, and sync lock status. Strict trailer configuration also warns when no active hook or GitHub Actions workflow invokes `charter validate --ci`; the commit-msg hook alone only normalizes trailers that are already present.
 
 ```bash
 npx charter doctor

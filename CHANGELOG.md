@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [1.9.3] - 2026-09-08
+
+### Fixed
+
+- **Governance gate enforcement diagnostics** (`#289`) — `charter doctor` now warns when strict trailer requirements are declared without an active local hook or GitHub Actions step that invokes `charter validate --ci`. The diagnostic resolves `core.hooksPath` and does not mistake audit-only workflows or the non-enforcing commit-msg normalizer for a blocking gate.
+- **Per-commit trailer validation** (`#289`) — `charter validate` now evaluates required trailers for each commit in a range. One compliant commit can no longer make unchanged untrailered commits pass; `policyOffenders` retains each missing commit and strict/advisory modes return `FAIL`/`WARN` respectively.
+- **Supply-chain advisories** — refreshed patched dependency pins for `fast-uri`, `hono`, `nanoid`, `qs`, and Vitest before publication.
+
 ## [1.9.2] - 2026-08-24
 
 ### Changed
