@@ -426,6 +426,78 @@ describe('adf compile — --write overwrite guard', () => {
     expect(result.written).toEqual(['CLAUDE.md', 'AGENTS.md', '.cursorrules', 'GEMINI.md']);
   });
 
+  it('compiles a hybrid pointer whose module index has been populated', async () => {
+    const tmp = makeTmp();
+    // bootstrap fills the sentinel block in from the manifest — the populated
+    // index must not read as user-authored content (#295).
+    const populated = POINTER_CLAUDE_MD_HYBRID.replace(
+      '<!-- charter:module-index:end -->',
+      '| Module | Triggers |\n| --- | --- |\n| `.ai/frontend.adf` | React, CSS |\n<!-- charter:module-index:end -->',
+    );
+    scaffoldAi(tmp, { 'CLAUDE.md': populated });
+
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toContain(COMPILE_BANNER_MARKER);
+  });
+
+  it('refuses a pointer carrying user notes under ## Environment', async () => {
+    const tmp = makeTmp();
+    // The shape `charter adf tidy` produces and the pre-commit hook manufactures:
+    // a thin pointer with retained Environment rules. The compiler emits no
+    // Environment section and .ai/ holds none of it, so overwriting destroys it.
+    const withNotes = POINTER_CLAUDE_MD_HYBRID.replace(
+      '<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->',
+      '- In WSL, use the Windows credential helper if HTTPS push fails.\n- Keep core.hooksPath pointed at .githooks.',
+    );
+    scaffoldAi(tmp, { 'CLAUDE.md': withNotes });
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    const warning = spy.mock.calls.map(c => String(c[0])).join('\n');
+    spy.mockRestore();
+
+    expect(exitCode).toBe(1);
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toBe(withNotes);
+    // The message must name the cause, not the generic hand-authored wording.
+    expect(warning).toContain('## Environment');
+    expect(warning).toContain('--force');
+  });
+
+  it('refuses a pointer carrying a retained operational protocol section', async () => {
+    const tmp = makeTmp();
+    const withProtocol = `${POINTER_AGENTS_MD}\n## Release Protocol\n\n- Tag before publishing.\n`;
+    scaffoldAi(tmp, { 'AGENTS.md': withProtocol });
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'agents', '--write']);
+    const warning = spy.mock.calls.map(c => String(c[0])).join('\n');
+    spy.mockRestore();
+
+    expect(exitCode).toBe(1);
+    expect(fs.readFileSync(path.join(tmp, 'AGENTS.md'), 'utf-8')).toBe(withProtocol);
+    expect(warning).toContain('## Release Protocol');
+  });
+
+  it('--force overwrites a pointer carrying user notes', async () => {
+    const tmp = makeTmp();
+    const withNotes = POINTER_CLAUDE_MD_HYBRID.replace(
+      '<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->',
+      '- Some hand-written environment rule.',
+    );
+    scaffoldAi(tmp, { 'CLAUDE.md': withNotes });
+
+    const exitCode = await adfCommand(TEXT_OPTIONS, [
+      'compile', '--target', 'claude', '--write', '--force',
+    ]);
+
+    expect(exitCode).toBe(0);
+    const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(content).toContain(COMPILE_BANNER_MARKER);
+    expect(content).not.toContain('Some hand-written environment rule');
+  });
+
   it('flags the pointer-to-compiled switch in the written line', async () => {
     const tmp = makeTmp();
     scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD_HYBRID });
