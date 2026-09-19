@@ -3,7 +3,7 @@
  *
  * Tests:
  * - stdout rendering (single target)
- * - --write with overwrite protection (banner check, --force bypass)
+ * - --write with overwrite protection (charter-owned check, --force bypass)
  * - --check stale/current paths
  * - error handling (missing manifest, bad --target, mutually exclusive flags)
  * - JSON output format
@@ -16,7 +16,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
-import { adfCommand } from '../commands/adf';
+import {
+  adfCommand,
+  POINTER_CLAUDE_MD,
+  POINTER_CLAUDE_MD_HYBRID,
+  POINTER_AGENTS_MD,
+  POINTER_CURSORRULES,
+  POINTER_GEMINI_MD,
+} from '../commands/adf';
 import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
 
 // ============================================================================
@@ -295,23 +302,6 @@ describe('adf compile — --write mode', () => {
     expect(content).toBe('# My hand-written CLAUDE.md\n\nDo not overwrite me.\n');
   });
 
-  it('refuses to overwrite pointer stubs without --force', async () => {
-    const tmp = makeTmp();
-    scaffoldAi(tmp);
-
-    // Pointer stub from `adf init --emit-pointers` — no compile banner
-    const pointerStub = '# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n';
-    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), pointerStub);
-
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
-    spy.mockRestore();
-
-    expect(exitCode).toBe(1);
-    const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
-    expect(content).toBe(pointerStub);
-  });
-
   it('--force overwrites a file without the compile banner', async () => {
     const tmp = makeTmp();
     scaffoldAi(tmp);
@@ -353,6 +343,111 @@ describe('adf compile — --write mode', () => {
     expect(result.written).toContain('CLAUDE.md');
     expect(result.refused).toEqual([]);
     expect(Array.isArray(result.nextActions)).toBe(true);
+  });
+});
+
+// ============================================================================
+// --write overwrite guard (#295)
+// ============================================================================
+
+/**
+ * The guard admits charter-owned files and only those. Before #295 it keyed on
+ * the compile banner alone, so the first compile after a clean bootstrap refused
+ * every pointer file Charter had just written. The refusal case below is the
+ * guard's remaining purpose — without it the change degrades to "always
+ * overwrite".
+ */
+describe('adf compile — --write overwrite guard', () => {
+  it('overwrites a thin pointer stub without --force', async () => {
+    const tmp = makeTmp();
+    scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD });
+
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+
+    expect(exitCode).toBe(0);
+    const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(content).toContain(COMPILE_BANNER_MARKER);
+    expect(content).toContain('## CONTEXT');
+  });
+
+  it('overwrites the bootstrap hybrid pointer without --force', async () => {
+    const tmp = makeTmp();
+    scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD_HYBRID });
+
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+
+    expect(exitCode).toBe(0);
+    const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(content).toContain(COMPILE_BANNER_MARKER);
+  });
+
+  it('overwrites a previous compile artifact without --force', async () => {
+    const tmp = makeTmp();
+    scaffoldAi(tmp, {
+      'CLAUDE.md': `<!-- ${COMPILE_BANNER_MARKER} -->\n\n# CLAUDE.md\n\nStale compiled output.\n`,
+    });
+
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+
+    expect(exitCode).toBe(0);
+    const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(content).not.toContain('Stale compiled output.');
+    expect(content).toContain(COMPILE_BANNER_MARKER);
+  });
+
+  it('still refuses hand-authored content carrying no charter marker', async () => {
+    const tmp = makeTmp();
+    const handWritten = '# My CLAUDE.md\n\nHouse rules I wrote myself.\n';
+    scaffoldAi(tmp, { 'CLAUDE.md': handWritten });
+
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    spy.mockRestore();
+
+    expect(exitCode).toBe(1);
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toBe(handWritten);
+  });
+
+  it('a clean bootstrap pointer set compiles with --target all and no --force', async () => {
+    const tmp = makeTmp();
+    scaffoldAi(tmp, {
+      'CLAUDE.md': POINTER_CLAUDE_MD_HYBRID,
+      'AGENTS.md': POINTER_AGENTS_MD,
+      '.cursorrules': POINTER_CURSORRULES,
+      'GEMINI.md': POINTER_GEMINI_MD,
+    });
+
+    const logs = await captureLog(() =>
+      adfCommand(JSON_OPTIONS, ['compile', '--target', 'all', '--write']),
+    );
+
+    const result = JSON.parse(logs[0]);
+    expect(result.refused).toEqual([]);
+    expect(result.written).toEqual(['CLAUDE.md', 'AGENTS.md', '.cursorrules', 'GEMINI.md']);
+  });
+
+  it('flags the pointer-to-compiled switch in the written line', async () => {
+    const tmp = makeTmp();
+    scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD_HYBRID });
+
+    const logs = await captureLog(() =>
+      adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']),
+    );
+
+    expect(logs.join('\n')).toContain('[ok] Written CLAUDE.md (replaced charter pointer stub)');
+  });
+
+  it('does not flag a re-compile of an existing artifact', async () => {
+    const tmp = makeTmp();
+    scaffoldAi(tmp);
+
+    await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    const logs = await captureLog(() =>
+      adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']),
+    );
+
+    expect(logs.join('\n')).toContain('[ok] Written CLAUDE.md');
+    expect(logs.join('\n')).not.toContain('replaced charter pointer stub');
   });
 });
 

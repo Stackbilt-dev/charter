@@ -26,6 +26,7 @@ import type { CompileTarget } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
+import { POINTER_MARKERS } from './adf';
 
 // ============================================================================
 // Zod validation — at the CLI boundary per Zod-core-out architecture
@@ -146,20 +147,30 @@ function runWriteMode(
   for (const target of targets) {
     const filename = TARGET_FILENAMES[target];
 
-    // Overwrite protection: refuse to clobber a hand-written file
+    // Overwrite protection: refuse to clobber a hand-written file.
+    //
+    // Charter-owned files are safe to replace: compile artifacts (which carry the
+    // banner) and the thin pointer stubs written by `bootstrap` and
+    // `adf init --emit-pointers`. POINTER_MARKERS already includes
+    // COMPILE_BANNER_MARKER, so this subsumes the previous banner-only check
+    // rather than widening it arbitrarily. Without this, the first compile after
+    // a clean bootstrap refuses every file Charter itself just wrote (#295).
+    let replacedPointer = false;
     if (fs.existsSync(filename) && !force) {
       const existing = fs.readFileSync(filename, 'utf-8');
-      if (!existing.includes(COMPILE_BANNER_MARKER)) {
+      if (!POINTER_MARKERS.some(marker => existing.includes(marker))) {
         refused.push(filename);
         if (options.format !== 'json') {
           console.error(
-            `  [warn] Refused to overwrite ${filename} — no compile banner found (hand-written or pointer stub).\n` +
-            `         Pass --force to overwrite. This protects hand-authored CLAUDE.md files.\n` +
-            `         If migrating from thin pointers, run --force once to convert.`,
+            `  [warn] Refused to overwrite ${filename} — hand-authored content found.\n` +
+            `         Pass --force to overwrite. This protects hand-authored CLAUDE.md files.`,
           );
         }
         continue;
       }
+      // Charter-owned, but not a previous compile artifact — the file is being
+      // converted from a pointer stub to compiled output. Surface the mode switch.
+      replacedPointer = !existing.includes(COMPILE_BANNER_MARKER);
     }
 
     const result = compileAdf({ target, aiDir, displayAiDir, readFile });
@@ -167,7 +178,9 @@ function runWriteMode(
     written.push(filename);
 
     if (options.format !== 'json') {
-      console.log(`  [ok] Written ${filename}`);
+      console.log(
+        `  [ok] Written ${filename}${replacedPointer ? ' (replaced charter pointer stub)' : ''}`,
+      );
     }
   }
 
