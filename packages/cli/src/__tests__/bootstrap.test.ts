@@ -603,3 +603,228 @@ describe('bootstrapCommand — AGENTS.md pointer casing (#297)', () => {
     expect(gitAdd.cmd).not.toMatch(/\bagents\.md\b/);
   });
 });
+
+// #307: every phase counts its warnings into `Bootstrap complete. N warnings.`,
+// but phases 6 (populate) and 7 (doctor) never printed the text, so a plain
+// `charter bootstrap` run reported a number with nothing to read. The same class
+// of silence hid the destructive `--force` advice fixed in #305.
+describe('bootstrapCommand — every phase prints its warnings (#307)', () => {
+  let originalCwd: string;
+  let tempDir: string;
+  let logs: string[];
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'charter-phase-warnings-')));
+    process.chdir(tempDir);
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    mockIsGitRepo = null;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  /** Runs bootstrap twice over identical inputs and returns both views of the run. */
+  async function runBothFormats(args: string[]): Promise<{ steps: Array<{ name: string; warnings: string[] }>; text: string[] }> {
+    logs = [];
+    await bootstrapCommand({ ...baseOptions, format: 'json' }, args);
+    const steps = JSON.parse(logs[0]).steps;
+
+    // Second run over the files the first one wrote; the phases under test warn
+    // on repo state, not on first-run-ness.
+    logs = [];
+    await bootstrapCommand(baseOptions, args);
+    return { steps, text: logs };
+  }
+
+  function warningsOf(steps: Array<{ name: string; warnings: string[] }>, name: string): string[] {
+    const step = steps.find(s => s.name === name);
+    expect(step, `no ${name} step in the JSON report`).toBeDefined();
+    return step!.warnings;
+  }
+
+  // Bug detector, phase 7. `doctor` raises "Some health checks returned warnings."
+  // whenever any check is WARN — here, the missing git repository.
+  it('prints the doctor phase warning in text output', async () => {
+    mockIsGitRepo = false;
+
+    await bootstrapCommand(baseOptions, ['--preset', 'worker', '--skip-install']);
+
+    expect(logs).toContain('  Warning: Some health checks returned warnings.');
+  });
+
+  // Bug detector, phase 6. Whatever `populate` records must reach the screen.
+  // The precondition assertion is deliberate: if populate ever stops warning in
+  // this environment this test must fail loudly rather than pass vacuously.
+  it('prints the populate phase warnings in text output', async () => {
+    mockIsGitRepo = false;
+
+    const { steps, text } = await runBothFormats(['--preset', 'worker', '--skip-install', '--skip-doctor']);
+    const populateWarnings = warningsOf(steps, 'populate');
+
+    expect(populateWarnings.length).toBeGreaterThan(0);
+    for (const warning of populateWarnings) {
+      expect(text.some(line => line.includes(warning))).toBe(true);
+    }
+  });
+
+  // Guard against an over-eager hoist: phase 2 already printed its own warnings
+  // (#304), so a hoisted printer must not print them a second time.
+  it('prints the setup phase stale --ai-dir warning exactly once', async () => {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    fs.writeFileSync(
+      '.mcp.json',
+      JSON.stringify({
+        mcpServers: { charter: { command: 'npx', args: ['@stackbilt/cli', 'serve', '--ai-dir', '/home/someone-else/project/.ai'] } },
+      }, null, 2) + '\n',
+    );
+    execFileSync('git', ['add', '.mcp.json'], { stdio: 'ignore' });
+
+    await bootstrapCommand(baseOptions, ['--preset', 'worker', '--skip-install', '--skip-doctor']);
+
+    expect(logs.filter(l => l.includes('pins an absolute --ai-dir'))).toHaveLength(1);
+  });
+
+  // Guard: phase 1 renders the not-a-git-repo warning as three wrapped lines. A
+  // hoisted printer must not append the raw one-line form on top of them.
+  it('prints the not-a-git-repo warning only in its wrapped three-line form', async () => {
+    mockIsGitRepo = false;
+
+    await bootstrapCommand(baseOptions, ['--preset', 'worker', '--skip-install', '--skip-doctor']);
+
+    expect(logs.filter(l => l.includes('Not inside a git repository'))).toHaveLength(1);
+    expect(logs.filter(l => l.includes('governance files will be written'))).toHaveLength(1);
+  });
+
+  // Guard: lean mode never runs phases 4-6, so it must not gain their headers or
+  // stray blank sections.
+  it('does not print skipped lean-mode phase sections', async () => {
+    mockIsGitRepo = false;
+
+    await bootstrapCommand(baseOptions, ['--preset', 'worker', '--mode', 'lean', '--skip-doctor']);
+
+    expect(logs.some(l => l.includes('Migrating agent configs'))).toBe(false);
+    expect(logs.some(l => l.includes('Installing dependencies'))).toBe(false);
+    expect(logs.some(l => l.includes('Auto-populating ADF modules'))).toBe(false);
+  });
+});
+
+// #307 part 2: `absoluteAiDirArg` gated on `path.isAbsolute`, which is the POSIX
+// implementation on a POSIX host and returns false for a Windows absolute path.
+// A .mcp.json authored on native Windows and read in CI, a container or a
+// colleague's Linux checkout therefore pinned a machine path with no warning.
+describe('bootstrapCommand — Windows absolute --ai-dir detected on a POSIX host (#307)', () => {
+  let originalCwd: string;
+  let tempDir: string;
+  let logs: string[];
+
+  // String.raw so the literals carry single backslashes, exactly as a Windows
+  // .mcp.json stores them after JSON parsing.
+  const DRIVE_LETTER = String.raw`C:\Users\someone-else\project\.ai`;
+  const DRIVE_LETTER_FORWARD = String.raw`C:/Users/someone-else/project/.ai`;
+  const UNC = String.raw`\\build-server\share\project\.ai`;
+  // Drive-relative, NOT absolute: `C:foo` resolves against the current directory
+  // on drive C. Must stay silent.
+  const DRIVE_RELATIVE = String.raw`C:project\.ai`;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'charter-win-aidir-')));
+    process.chdir(tempDir);
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    mockIsGitRepo = null;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  // Proves the fixtures are what they claim before anything asserts on them: a
+  // test that fed the source a single-backslash UNC path would pass for the
+  // wrong reason.
+  it('uses fixtures with the literal separators a Windows path has', () => {
+    expect(DRIVE_LETTER.slice(0, 3).split('').map(c => c.charCodeAt(0))).toEqual([67, 58, 92]);
+    expect(UNC.charCodeAt(0)).toBe(92);
+    expect(UNC.charCodeAt(1)).toBe(92);
+    expect(UNC.charCodeAt(2)).not.toBe(92);
+    expect(DRIVE_RELATIVE.charCodeAt(2)).toBe('p'.charCodeAt(0));
+    // The premise of the whole describe block: this host does not see these as absolute.
+    expect(path.isAbsolute(DRIVE_LETTER)).toBe(false);
+    expect(path.isAbsolute(UNC)).toBe(false);
+  });
+
+  function writeTrackedMcpConfig(aiDir: string): void {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    fs.writeFileSync(
+      '.mcp.json',
+      JSON.stringify({
+        mcpServers: { charter: { command: 'npx', args: ['@stackbilt/cli', 'serve', '--ai-dir', aiDir] } },
+      }, null, 2) + '\n',
+    );
+    execFileSync('git', ['add', '.mcp.json'], { stdio: 'ignore' });
+  }
+
+  async function runBootstrap(): Promise<string | undefined> {
+    const exitCode = await bootstrapCommand(baseOptions, ['--preset', 'worker', '--skip-install', '--skip-doctor']);
+    expect(exitCode).toBe(0);
+    return logs.find(l => l.includes('pins an absolute --ai-dir'));
+  }
+
+  // Bug detectors.
+  it('warns about a drive-letter --ai-dir with backslashes', async () => {
+    writeTrackedMcpConfig(DRIVE_LETTER);
+    const warning = await runBootstrap();
+    expect(warning).toBeDefined();
+    expect(warning).toContain(DRIVE_LETTER);
+  });
+
+  it('warns about a drive-letter --ai-dir with forward slashes', async () => {
+    writeTrackedMcpConfig(DRIVE_LETTER_FORWARD);
+    const warning = await runBootstrap();
+    expect(warning).toBeDefined();
+    expect(warning).toContain(DRIVE_LETTER_FORWARD);
+  });
+
+  it('warns about a UNC --ai-dir', async () => {
+    writeTrackedMcpConfig(UNC);
+    const warning = await runBootstrap();
+    expect(warning).toBeDefined();
+    expect(warning).toContain(UNC);
+  });
+
+  // Guards against an over-eager matcher.
+  it('stays silent about a drive-relative --ai-dir', async () => {
+    writeTrackedMcpConfig(DRIVE_RELATIVE);
+    expect(await runBootstrap()).toBeUndefined();
+  });
+
+  it('stays silent about the repo-relative --ai-dir bootstrap itself writes', async () => {
+    writeTrackedMcpConfig('.ai');
+    expect(await runBootstrap()).toBeUndefined();
+  });
+
+  // The tracked-ness gate from #298 still governs: an untracked .mcp.json is the
+  // documented machine-local escape hatch, on Windows paths too.
+  it('stays silent about a Windows --ai-dir when .mcp.json is untracked', async () => {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    fs.writeFileSync(
+      '.mcp.json',
+      JSON.stringify({
+        mcpServers: { charter: { command: 'npx', args: ['@stackbilt/cli', 'serve', '--ai-dir', DRIVE_LETTER] } },
+      }, null, 2) + '\n',
+    );
+
+    expect(await runBootstrap()).toBeUndefined();
+  });
+});
