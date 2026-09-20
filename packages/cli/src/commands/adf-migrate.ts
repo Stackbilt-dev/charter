@@ -29,7 +29,7 @@ import {
   POINTER_AGENTS_MD,
   POINTER_GEMINI_MD,
   POINTER_COPILOT_MD,
-  POINTER_MARKERS,
+  CHARTER_OWNED_MARKERS,
   MODULE_INDEX_START,
   MODULE_INDEX_END,
 } from './adf';
@@ -217,7 +217,7 @@ export function migrateSource(
   const content = fs.readFileSync(fullPath, 'utf-8');
 
   // Skip if already a thin pointer
-  if (POINTER_MARKERS.some(marker => content.includes(marker))) {
+  if (CHARTER_OWNED_MARKERS.some(marker => content.includes(marker))) {
     return {
       source: sourcePath,
       skipped: true,

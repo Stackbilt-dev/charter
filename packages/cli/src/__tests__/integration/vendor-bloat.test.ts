@@ -18,6 +18,8 @@ import type { CLIOptions } from '../../index';
 import { EXIT_CODE } from '../../index';
 import { doctorCommand } from '../../commands/doctor';
 import { adfTidyCommand } from '../../commands/adf-tidy';
+import { adfCommand } from '../../commands/adf';
+import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
 
 // ============================================================================
 // Fixture Helpers
@@ -152,6 +154,16 @@ function writeBloatedPointer(tmp: string): void {
 - CSS modules for component-scoped styles
 - Layout components handle responsive breakpoints
 `);
+}
+
+/** Byte-level snapshot of every file in .ai/, keyed by filename. */
+function snapshotAiDir(tmp: string): Record<string, string> {
+  const dir = path.join(tmp, '.ai');
+  const snapshot: Record<string, string> = {};
+  for (const name of fs.readdirSync(dir).sort()) {
+    snapshot[name] = fs.readFileSync(path.join(dir, name), 'utf-8');
+  }
+  return snapshot;
 }
 
 /** Capture console.log output during a command invocation */
@@ -349,6 +361,94 @@ describe('vendor bloat pipeline (integration)', () => {
     // Architecture bloat must NOT survive in CLAUDE.md
     expect(after).not.toContain('## Architecture');
     expect(after).not.toContain('bypass the repository layer');
+  });
+
+  // ── #296: compiled vendor output must not be fed back into .ai/ ──────────
+  it('adf tidy leaves .ai/ and the vendor file byte-identical when the vendor file is compile output (#296)', async () => {
+    const tmp = makeTempDir('compiled-roundtrip');
+    writeFixtureRepo(tmp);
+    process.chdir(tmp);
+
+    // Render the whole ruleset into CLAUDE.md — the vendor mode from #296.
+    const compile = await captureJson(adfCommand, jsonOptions, ['compile', '--target', 'claude', '--write']);
+    expect(compile.exitCode).toBe(EXIT_CODE.SUCCESS);
+    const compiled = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(compiled).toContain(COMPILE_BANNER_MARKER);
+
+    const before = snapshotAiDir(tmp);
+
+    const tidy = await captureJson(adfTidyCommand, jsonOptions, []);
+    expect(tidy.exitCode).toBe(EXIT_CODE.SUCCESS);
+
+    // Compiled output is derived from .ai/. Round-tripping it through tidy must
+    // change neither the source of truth nor the artifact.
+    expect(snapshotAiDir(tmp)).toEqual(before);
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toBe(compiled);
+
+    const result = tidy.output as {
+      totalExtracted: number;
+      files: Array<{ file: string; status: string }>;
+      warnings: string[];
+    };
+    expect(result.totalExtracted).toBe(0);
+    expect(result.files.find(f => f.file === 'CLAUDE.md')!.status).toBe('compiled');
+    // The skip is explained, not silent — it points at the way to regenerate.
+    expect(result.warnings.join('\n')).toContain('charter adf compile --write');
+  });
+
+  it('adf tidy does not restore a rule deleted from .ai/ after the vendor file was compiled (#296)', async () => {
+    const tmp = makeTempDir('compiled-deletion');
+    writeFixtureRepo(tmp);
+    process.chdir(tmp);
+
+    const corePath = path.join(tmp, '.ai', 'core.adf');
+    fs.writeFileSync(corePath, `ADF: 0.1
+
+📁 STRUCTURE:
+  - src/ — source code
+
+📐 CONSTRAINTS: [load-bearing]
+  - All changes require tests
+  - Never import from dist in source files
+`);
+
+    const compile = await captureJson(adfCommand, jsonOptions, ['compile', '--target', 'claude', '--write']);
+    expect(compile.exitCode).toBe(EXIT_CODE.SUCCESS);
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toContain('Never import from dist');
+
+    // A human deletes the rule from the source of truth. The compiled artifact
+    // still carries it until the next compile — tidy must not read it back.
+    fs.writeFileSync(corePath, fs.readFileSync(corePath, 'utf-8')
+      .replace('  - Never import from dist in source files\n', ''));
+
+    await captureJson(adfTidyCommand, jsonOptions, []);
+
+    const aiContents = Object.values(snapshotAiDir(tmp)).join('\n');
+    expect(aiContents).not.toContain('Never import from dist');
+    expect(aiContents).toContain('All changes require tests');
+  });
+
+  it('adf tidy prints the compiled-output warning in text mode (#296)', async () => {
+    const tmp = makeTempDir('compiled-warn-text');
+    writeFixtureRepo(tmp);
+    process.chdir(tmp);
+
+    await captureJson(adfCommand, jsonOptions, ['compile', '--target', 'claude', '--write']);
+
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...msgs: unknown[]) => {
+      logs.push(msgs.map(String).join(' '));
+    });
+    try {
+      await adfTidyCommand({ ...jsonOptions, format: 'text' }, []);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const out = logs.join('\n');
+    expect(out).toContain('CLAUDE.md');
+    expect(out).toContain('compile');
+    expect(out).toContain('charter adf compile --write');
   });
 
   it('removes an empty non-pointer heading even when no items migrate', async () => {

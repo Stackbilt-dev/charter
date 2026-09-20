@@ -286,10 +286,29 @@ interface AdfInitResult {
 }
 
 // -- Thin pointer detection markers --
+//
+// Two different questions get asked about a vendor config file, and they need
+// different answers. One list answering both is the bug in #296.
+//
+//   POINTER_MARKERS        — "is this file a THIN POINTER?"   (shape)
+//   CHARTER_OWNED_MARKERS  — "did Charter author this file?"  (ownership)
+//
+// A compile artifact carries COMPILE_BANNER_MARKER. It is Charter-authored, so
+// `adf compile --write` may replace it and `adf migrate` must not ingest it —
+// ownership. But it is NOT a thin pointer: it is the full ruleset rendered FROM
+// .ai/. `adf tidy` treats everything past the pointer preamble as content the
+// user added beyond the pointer, so calling a compile artifact a pointer makes
+// tidy fold the compiled copy of .ai/ back into .ai/ — duplicating content and
+// resurrecting deliberately deleted rules (#296).
+//
+// Do not re-merge these two lists.
 
-/** Strings that identify an agent config file as a thin pointer to .ai/. */
+/**
+ * Strings that identify an agent config file as a thin pointer to .ai/.
+ *
+ * Deliberately excludes COMPILE_BANNER_MARKER — see the note above.
+ */
 export const POINTER_MARKERS = [
-  COMPILE_BANNER_MARKER,
   'Do not duplicate ADF rules here',
   'Do not duplicate rules from .ai/',
   'Do not add stack rules here',
@@ -298,6 +317,13 @@ export const POINTER_MARKERS = [
   'DO NOT add instructions to this file',
   'DO NOT add rules or context to this file',
 ];
+
+/**
+ * Strings that identify an agent config file as Charter-authored — either a
+ * thin pointer or compiled output. Callers asking "is it safe to overwrite
+ * this?" or "must I avoid ingesting this back into .ai/?" use this superset.
+ */
+export const CHARTER_OWNED_MARKERS = [COMPILE_BANNER_MARKER, ...POINTER_MARKERS];
 
 // -- Module index sentinels --
 

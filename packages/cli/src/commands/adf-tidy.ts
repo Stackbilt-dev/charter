@@ -17,6 +17,7 @@ import {
   isDuplicateItem,
   buildMigrationPlan,
   stripCharterSentinels,
+  COMPILE_BANNER_MARKER,
 } from '@stackbilt/adf';
 import type { AdfDocument, PatchOperation, MigrationItem, TriggerMap } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -57,7 +58,8 @@ const SECTION_SIZE_WARN_THRESHOLD = 20;
 
 interface TidyFileResult {
   file: string;
-  status: 'clean' | 'tidied' | 'not-found';
+  /** `compiled` — the file is `adf compile` output; tidy leaves it alone (#296). */
+  status: 'clean' | 'tidied' | 'not-found' | 'compiled';
   itemsExtracted: number;
   routing: Record<string, number>;
 }
@@ -83,6 +85,8 @@ interface TidyResult {
   totalExtracted: number;
   modulesModified: string[];
   moduleWarnings: ModuleSizeWarning[];
+  /** Explanations for files tidy deliberately did not process. */
+  warnings: string[];
   /** Populated when --verbose: per-item routing trace for each migrated item. */
   itemRoutes?: ItemRoute[];
 }
@@ -105,7 +109,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
 
   if (targets.length === 0) {
     if (options.format === 'json') {
-      console.log(JSON.stringify({ dryRun, files: [], totalExtracted: 0, modulesModified: [], moduleWarnings: [] }, null, 2));
+      console.log(JSON.stringify({ dryRun, files: [], totalExtracted: 0, modulesModified: [], moduleWarnings: [], warnings: [] }, null, 2));
     } else {
       console.log('  No vendor config files found.');
     }
@@ -116,6 +120,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
   const triggerMap = loadTriggerMap(aiDir);
 
   const fileResults: TidyFileResult[] = [];
+  const warnings: string[] = [];
   const allModuleGroups: Record<string, Record<string, MigrationItem[]>> = {};
 
   for (const file of targets) {
@@ -123,6 +128,16 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
 
     if (!result) {
       fileResults.push({ file, status: 'not-found', itemsExtracted: 0, routing: {} });
+      continue;
+    }
+
+    if (result.compiled) {
+      fileResults.push({ file, status: 'compiled', itemsExtracted: 0, routing: {} });
+      warnings.push(
+        `${file} is \`charter adf compile\` output, not a thin pointer — skipping. ` +
+        `Its content is generated from ${aiDir}/, so tidy will not ingest it. ` +
+        `Edit the ${aiDir}/ modules and re-run: charter adf compile --write`,
+      );
       continue;
     }
 
@@ -202,7 +217,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     }
   }
 
-  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings, itemRoutes };
+  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings, warnings, itemRoutes };
 
   // Output
   if (options.format === 'json') {
@@ -227,6 +242,8 @@ interface AnalysisResult {
   migrateItems: MigrationItem[];
   stayItems: MigrationItem[];
   needsRestore: boolean;
+  /** The file is `adf compile` output — nothing to ingest, nothing to restore. */
+  compiled?: boolean;
 }
 
 function analyzeVendorFile(
@@ -238,6 +255,14 @@ function analyzeVendorFile(
   if (!fs.existsSync(fullPath)) return null;
 
   const content = fs.readFileSync(fullPath, 'utf-8');
+
+  // Compile output is rendered FROM .ai/. Everything past its banner is the
+  // compiled ruleset, so ingesting it would copy .ai/ back into .ai/ and restore
+  // rules the user deliberately deleted (#296). Checked before the pointer test
+  // because a compile artifact is Charter-owned but is not a thin pointer.
+  if (content.includes(COMPILE_BANNER_MARKER)) {
+    return { migrateItems: [], stayItems: [], needsRestore: false, compiled: true };
+  }
 
   // If it's not a thin pointer at all, skip — use `adf migrate` instead
   if (!POINTER_MARKERS.some(marker => content.includes(marker))) {
@@ -668,8 +693,16 @@ function printTextResult(result: TidyResult): void {
   const tidied = result.files.filter(f => f.status === 'tidied');
   const clean = result.files.filter(f => f.status === 'clean');
 
+  // Printed before the early return below: a run whose only file was skipped has
+  // nothing tidied, and "all clean" alone would leave the skip unexplained (#296).
+  for (const warning of result.warnings) {
+    console.log(`  ⚠ ${warning}`);
+  }
+
   if (tidied.length === 0) {
-    console.log('  All vendor files are clean.');
+    if (clean.length > 0 || result.warnings.length === 0) {
+      console.log('  All remaining vendor files are clean.');
+    }
     return;
   }
 
