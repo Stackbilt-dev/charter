@@ -14,7 +14,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { detectPackageManager, inferProjectName, loadPackageContexts } from './setup';
 import { hasCommits, isGitRepo, runGit } from '../git-helpers';
-import { POINTER_MARKERS } from './adf';
+import { CHARTER_OWNED_MARKERS } from './adf';
 
 type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 type BadgeColor = 'brightgreen' | 'green' | 'yellowgreen' | 'yellow' | 'orange' | 'red';
@@ -1082,7 +1082,7 @@ function hasDocumentedConstraints(content: string): boolean {
 function isSubstantiveInstruction(content: string): boolean {
   if (!content) return false;
   let normalized = content;
-  for (const marker of POINTER_MARKERS) {
+  for (const marker of CHARTER_OWNED_MARKERS) {
     normalized = normalized.replaceAll(marker, '');
   }
   normalized = normalized

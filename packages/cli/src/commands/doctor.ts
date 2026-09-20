@@ -12,7 +12,7 @@ import { loadPatterns, loadConfig } from '../config';
 import { parseAdf, parseManifest, stripCharterSentinels, evaluateLocBudgets, matchPath } from '@stackbilt/adf';
 import type { LocBudgetRule } from '@stackbilt/adf';
 import { isGitRepo, runGit } from '../git-helpers';
-import { POINTER_MARKERS } from './adf';
+import { CHARTER_OWNED_MARKERS } from './adf';
 import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
 import { checkGateEnforcement } from './doctor-gate-enforcement';
 
@@ -310,7 +310,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       for (const file of AGENT_CONFIG_FILES) {
         if (fs.existsSync(file)) {
           const content = fs.readFileSync(file, 'utf-8');
-          const isPointer = POINTER_MARKERS.some(marker => content.includes(marker));
+          const isPointer = CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
           if (!isPointer) {
             nonPointerFiles.push(file);
           } else {
@@ -399,7 +399,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
         const nonPointerContent = lines.filter(l => {
           const t = l.trim();
           if (t.startsWith('>') || t.startsWith('<!--') || t.startsWith('#') && !t.startsWith('## ')) return false;
-          if (POINTER_MARKERS.some(m => t.includes(m))) return false;
+          if (CHARTER_OWNED_MARKERS.some(m => t.includes(m))) return false;
           if (t.includes('.ai/manifest.adf') || t.includes('auto-managed by Charter')) return false;
           return true;
         }).join('\n');

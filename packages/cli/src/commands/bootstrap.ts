@@ -14,7 +14,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { isGitRepo, runGit } from '../git-helpers';
-import { POINTER_MARKERS } from './adf';
+import { CHARTER_OWNED_MARKERS } from './adf';
 import { initializeCharter, type StackPreset } from './init';
 import {
   detectStack,
@@ -1073,7 +1073,7 @@ function runMigratePhase(
       const fullPath = path.resolve(f);
       if (!fs.existsSync(fullPath)) return false;
       const content = fs.readFileSync(fullPath, 'utf-8');
-      return !POINTER_MARKERS.some(marker => content.includes(marker));
+      return !CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
     });
 
     if (sources.length === 0) {
@@ -1400,7 +1400,7 @@ function hashContent(content: string): string {
 function isAlreadyThinPointer(filePath: string): boolean {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    return POINTER_MARKERS.some(marker => content.includes(marker));
+    return CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
   } catch {
     return false;
   }

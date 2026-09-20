@@ -28,7 +28,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import {
-  POINTER_MARKERS,
+  CHARTER_OWNED_MARKERS,
   POINTER_CLAUDE_MD,
   POINTER_CLAUDE_MD_HYBRID,
   POINTER_AGENTS_MD,
@@ -233,14 +233,18 @@ function runWriteMode(
     //
     // Charter-owned files are safe to replace: compile artifacts (which carry the
     // banner) and the thin pointer stubs written by `bootstrap` and
-    // `adf init --emit-pointers`. POINTER_MARKERS already includes
-    // COMPILE_BANNER_MARKER, so this subsumes the previous banner-only check
-    // rather than widening it arbitrarily. Without this, the first compile after
-    // a clean bootstrap refuses every file Charter itself just wrote (#295).
+    // `adf init --emit-pointers`. CHARTER_OWNED_MARKERS covers both — it is the
+    // banner plus every pointer marker. The pointer half is what stops the first
+    // compile after a clean bootstrap refusing every file Charter itself just
+    // wrote (#295); the banner half keeps re-compiles working.
+    //
+    // This is the OWNERSHIP question, not the pointer-shape question — see the
+    // note on the two marker lists in adf.ts. Do not narrow it to
+    // POINTER_MARKERS: that drops the banner and regresses #295's sibling case.
     let replacedPointer = false;
     if (fs.existsSync(filename) && !force) {
       const existing = fs.readFileSync(filename, 'utf-8');
-      if (!POINTER_MARKERS.some(marker => existing.includes(marker))) {
+      if (!CHARTER_OWNED_MARKERS.some(marker => existing.includes(marker))) {
         refused.push(filename);
         if (options.format !== 'json') {
           console.error(
