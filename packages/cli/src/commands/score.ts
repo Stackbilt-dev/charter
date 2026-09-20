@@ -423,8 +423,52 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     commandSignals.push(...extractCommandSignals(file, content, inventory.fileSet, packageManager));
   }
 
+  // #293: a bare filename inside a fenced directory tree carries its path prefix structurally,
+  // through indentation, not textually — so `random.ts` fails a literal path check even though
+  // src/simulation/random.ts exists. Before calling a reference broken, fall back to matching it
+  // against the repo's real files by basename plus trailing-segment agreement.
+  //
+  // inventory.files comes from `git ls-files --cached --others --exclude-standard` in a git repo,
+  // and otherwise from a filesystem walk that skips WALK_IGNORE_DIRS. Either way node_modules and
+  // the usual build output stay out of the index; the walk fallback does not read .gitignore, so
+  // an unusual ignored directory could contribute a file there.
+  //
+  // Two conditions must both hold, and matching is exact-case throughout, mirroring git:
+  //   1. the basename is UNIQUE in the repo — zero or several matches stay broken rather than
+  //      resolving arbitrarily;
+  //   2. every segment the author actually wrote agrees with the real file's trailing segments.
+  // Condition 2 is checked against `reference.candidate`, the authored text, NOT against
+  // `reference.resolved` — resolveReferencedPath prefixes the source file's directory, so a
+  // reference to `random.ts` from .ai/core.adf resolves to `.ai/random.ts`, which is not a suffix
+  // of src/random.ts. Comparing the resolved form would break every reference made from a
+  // non-root document. Without condition 2 a stale `src/utils/helper.ts` would silently resolve
+  // against packages/core/lib/helper.ts, hiding exactly the documentation rot this check exists
+  // to surface.
+  const basenameIndex = new Map<string, string[]>();
+  for (const file of inventory.files) {
+    const basename = path.posix.basename(file);
+    const matches = basenameIndex.get(basename);
+    if (matches) {
+      matches.push(file);
+    } else {
+      basenameIndex.set(basename, [file]);
+    }
+  }
+  const resolvesByBasename = (reference: ResolvedPathReference): boolean => {
+    const wanted = normalizeRelativePath(reference.candidate)
+      .split('/')
+      .filter((segment) => segment && segment !== '.' && segment !== '..');
+    if (wanted.length === 0) return false;
+    const matches = basenameIndex.get(wanted[wanted.length - 1]);
+    if (matches?.length !== 1) return false;
+    const actual = matches[0].split('/');
+    if (wanted.length > actual.length) return false;
+    const offset = actual.length - wanted.length;
+    return wanted.every((segment, index) => segment === actual[offset + index]);
+  };
+
   const brokenPaths = [...pathReferences.values()]
-    .filter((reference) => !pathExists(reference.resolved))
+    .filter((reference) => !pathExists(reference.resolved) && !resolvesByBasename(reference))
     .map((reference) => reference.resolved);
   const validPaths = pathReferences.size - brokenPaths.length;
   const documentedTestCommands = [...new Set(
