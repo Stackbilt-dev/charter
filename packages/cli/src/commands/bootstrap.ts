@@ -701,7 +701,9 @@ function ensureProjectMcpConfig(
   const configPath = path.resolve('.mcp.json');
   const desiredServer = {
     command: 'npx',
-    args: ['@stackbilt/cli', 'serve', '--ai-dir', path.resolve(aiDir)],
+    // Repo-relative on purpose: .mcp.json is committed and shared, and `charter serve`
+    // resolves --ai-dir against its own cwd, which MCP clients set to the repo root.
+    args: ['@stackbilt/cli', 'serve', '--ai-dir', aiDir],
   };
 
   const configExists = fs.existsSync(configPath);
@@ -754,13 +756,12 @@ function ensureProjectMcpConfig(
   mcpServers.charter = desiredServer;
   root.mcpServers = mcpServers;
   fs.writeFileSync(configPath, JSON.stringify(root, null, 2) + '\n');
-  const absolutePathWarning = 'Generated .mcp.json uses an absolute --ai-dir path. Update it if you share this file across machines.';
 
   if (!configExists) {
-    return { created: true, updated: false, warning: absolutePathWarning };
+    return { created: true, updated: false };
   }
 
-  return { created: false, updated: true, warning: absolutePathWarning };
+  return { created: false, updated: true };
 }
 
 // ============================================================================

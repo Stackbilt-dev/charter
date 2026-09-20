@@ -181,15 +181,35 @@ STATE:
     expect(exitCode).toBe(0);
     expect(fs.existsSync('.mcp.json')).toBe(true);
 
-    const parsed = JSON.parse(fs.readFileSync('.mcp.json', 'utf-8'));
+    const raw = fs.readFileSync('.mcp.json', 'utf-8');
+    const parsed = JSON.parse(raw);
     expect(parsed).toHaveProperty('mcpServers.charter');
     expect(parsed.mcpServers.charter.command).toBe('npx');
     expect(parsed.mcpServers.charter.args).toEqual([
       '@stackbilt/cli',
       'serve',
       '--ai-dir',
-      path.resolve('.ai'),
+      '.ai',
     ]);
+  });
+
+  // #298: .mcp.json is committed and shared, so it must carry no machine-local path.
+  it('writes a repo-relative --ai-dir into .mcp.json, never an absolute path', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    const raw = fs.readFileSync('.mcp.json', 'utf-8');
+    // The generated file must not leak the machine's directory layout.
+    expect(raw).not.toContain(tempDir);
+    expect(raw).not.toContain(path.resolve('.ai'));
+
+    const args: string[] = JSON.parse(raw).mcpServers.charter.args;
+    expect(args.some(arg => path.isAbsolute(arg))).toBe(false);
+    expect(args[args.indexOf('--ai-dir') + 1]).toBe('.ai');
   });
 
   it('does not overwrite existing mcpServers.charter without --force', async () => {
@@ -221,6 +241,25 @@ STATE:
 
     expect(exitCode).toBe(0);
     expect(fs.readFileSync('.mcp.json', 'utf-8')).toBe(before);
+  });
+
+  // #298: telemetry is per-machine usage data and must never be staged by `git add -A`.
+  it('ignores the telemetry directory in the generated .charter/.gitignore', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    const gitignorePath = path.join('.charter', '.gitignore');
+    expect(fs.existsSync(gitignorePath)).toBe(true);
+
+    // Line-based, not substring: a comment mentioning telemetry must not satisfy this.
+    // The pattern is relative to .charter/, so it covers the <configPath>/telemetry/
+    // directory that telemetry.ts writes events.ndjson into.
+    const lines = fs.readFileSync(gitignorePath, 'utf-8').split('\n').map(l => l.trim());
+    expect(lines).toContain('telemetry/');
   });
 
   it('treats security deny drift matches as CI policy violations', async () => {
