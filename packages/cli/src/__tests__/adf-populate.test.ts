@@ -189,6 +189,39 @@ describe('adf populate — ESM extension constraint (#294)', () => {
     expect(await populate(tmp)).not.toContain(ESM_RULE);
   });
 
+  it('stops after one level of extends rather than resolving a grandparent', async () => {
+    const tmp = makeTmp();
+    write(tmp, 'package.json', JSON.stringify({ name: 'two-hop', type: 'module' }));
+    write(tmp, 'tsconfig.base.json', JSON.stringify({
+      compilerOptions: { moduleResolution: 'nodenext' },
+    }));
+    write(tmp, 'tsconfig.mid.json', JSON.stringify({ extends: './tsconfig.base' }));
+    write(tmp, 'tsconfig.json', JSON.stringify({ extends: './tsconfig.mid.json' }));
+
+    // The nodenext two hops up is real, but MAX_EXTENDS_DEPTH stops before it.
+    // Over-resolving would only ever find a true answer, so the boundary is
+    // pinned here to keep the miss deliberate rather than accidental.
+    expect(await populate(tmp)).not.toContain(ESM_RULE);
+  });
+
+  it('emits the rule for a nested package inheriting nodenext from the root tsconfig', async () => {
+    const tmp = makeTmp();
+    write(tmp, 'package.json', JSON.stringify({ name: 'root', private: true }));
+    write(tmp, 'tsconfig.json', JSON.stringify({
+      compilerOptions: { moduleResolution: 'nodenext' },
+    }));
+    write(tmp, 'worker/package.json', JSON.stringify({
+      name: 'worker',
+      type: 'module',
+      devDependencies: { typescript: '^5.9.0' },
+    }));
+
+    // Inferred from a different package's config. Defensible — TypeScript's own
+    // lookup walks up — but it is the one path where a package with no config of
+    // its own still produces a load-bearing rule, so it is pinned deliberately.
+    expect(await populate(tmp)).toContain(ESM_RULE);
+  });
+
   it('falls back to the root tsconfig for a nested package that has none', async () => {
     const tmp = makeTmp();
     write(tmp, 'package.json', JSON.stringify({ name: 'root', private: true }));

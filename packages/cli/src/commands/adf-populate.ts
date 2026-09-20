@@ -316,6 +316,13 @@ function readModuleResolution(tsconfigPath: string, depth: number): EsmExtension
   return readModuleResolution(basePath, depth + 1);
 }
 
+/**
+ * Deliberately bounded: only the package itself and the repo root are consulted.
+ * A monorepo confining `typescript` to a sibling outside the scanned set reports
+ * false here. That is reachable only when no tsconfig exists anywhere in the
+ * scanned tree, which is already the weakest branch; widening the search would
+ * cost more false negatives than it prevents.
+ */
 function usesTypeScript(ctx: PackageContext, contexts: PackageContext[]): boolean {
   const root = contexts.find(c => c.source === 'package.json');
   return [ctx, root].some(c =>
