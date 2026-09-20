@@ -84,8 +84,9 @@ function checkMcpWiring(): DoctorResult['checks'][number] {
  * git index is consulted — never the filesystem — so the answer is identical
  * on case-sensitive and case-insensitive checkouts.
  */
-function checkTelemetryTracking(configPath: string): DoctorResult['checks'][number] {
+function checkTelemetryTracking(configPath: string): DoctorResult['checks'][number] | undefined {
   const telemetryDir = path.join(configPath, 'telemetry').replace(/\\/g, '/');
+  const gitignorePath = path.join(configPath, '.gitignore').replace(/\\/g, '/');
 
   let tracked: string[];
   try {
@@ -94,13 +95,10 @@ function checkTelemetryTracking(configPath: string): DoctorResult['checks'][numb
       .map(line => line.trim())
       .filter(Boolean);
   } catch {
-    // Unreadable index, or a --config directory outside this work tree:
-    // nothing is tracked from here, so there is nothing to report.
-    return {
-      name: 'telemetry tracking',
-      status: 'PASS',
-      details: `${telemetryDir} is not tracked by git.`,
-    };
+    // Unreadable index, or a --config directory outside this work tree. We
+    // established nothing either way, so report nothing rather than claim a
+    // PASS this check did not earn.
+    return undefined;
   }
 
   if (tracked.length === 0) {
@@ -111,14 +109,23 @@ function checkTelemetryTracking(configPath: string): DoctorResult['checks'][numb
     };
   }
 
+  // Intentionally INFO, not WARN: doctor fails CI on any WARN, and this is
+  // state Charter's own pre-#298 bootstrap created rather than anything the
+  // user opted into — warning would break an existing repo's CI purely on
+  // upgrade. Same ruling as the source LOC budget nudge (#186).
+  //
+  // The ignore entry comes first deliberately: after `git rm -r --cached` the
+  // file is untracked but still on disk, so the reflexive `git add -A` that
+  // caused this in the first place would re-stage it before the user finished.
   return {
     name: 'telemetry tracking',
-    status: 'WARN',
+    status: 'INFO',
     details: `${tracked.length} telemetry file(s) tracked by git: ${tracked.slice(0, 5).join(', ')}`
-      + `\n    Every charter run appends to this file, so each "git add -A" stages it again.`
-      + `\n    Run: git rm -r --cached ${telemetryDir}`
-      + `\n    The file stays on disk, so "charter telemetry report" keeps working.`
-      + `\n    Add "telemetry/" to ${path.join(configPath, '.gitignore').replace(/\\/g, '/')} so it is not re-staged.`,
+      + `\n    Every charter run appends to this log, so each "git add -A" stages it again.`
+      + `\n    1. Make sure "telemetry/" is ignored — by ${gitignorePath}, or any .gitignore`
+      + `\n       already covering it — or step 2 is undone by the next "git add -A".`
+      + `\n    2. Run: git rm -r --cached "${telemetryDir}"`
+      + `\n    The file stays on disk, so "charter telemetry report" keeps working.`,
   };
 }
 
@@ -198,7 +205,8 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
     // Only meaningful with an index to read. Matches `gate enforcement`, which
     // is likewise withheld outside a repo rather than reported as vacuously OK.
     if (inGitRepo) {
-      checks.push(checkTelemetryTracking(options.configPath));
+      const telemetryCheck = checkTelemetryTracking(options.configPath);
+      if (telemetryCheck) checks.push(telemetryCheck);
     }
 
     const securityDenyPath = path.join(options.configPath, 'patterns', 'security-deny.json');

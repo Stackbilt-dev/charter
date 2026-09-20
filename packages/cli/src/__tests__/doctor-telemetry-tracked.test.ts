@@ -53,15 +53,39 @@ afterEach(() => {
 });
 
 describe('charter doctor telemetry tracking', () => {
-  it('warns when the telemetry directory is tracked in the git index', async () => {
+  it('reports when the telemetry directory is tracked in the git index', async () => {
     makeRepo();
     execFileSync('git', ['add', '.charter/telemetry/events.ndjson'], { stdio: 'ignore' });
 
     const check = await telemetryCheck();
 
-    expect(check?.status).toBe('WARN');
-    expect(check?.details).toContain('git rm -r --cached .charter/telemetry');
+    expect(check?.status).toBe('INFO');
+    expect(check?.details).toContain('git rm -r --cached ".charter/telemetry"');
     expect(check?.details).toContain('charter telemetry report');
+  });
+
+  // The condition is state Charter's own pre-#298 bootstrap created, so
+  // surfacing it must never fail an existing repo's CI on upgrade (#186).
+  it('never contributes a WARN, so it cannot fail an existing repo CI on upgrade', async () => {
+    makeRepo();
+    execFileSync('git', ['add', '.charter/telemetry/events.ndjson'], { stdio: 'ignore' });
+
+    const check = await telemetryCheck();
+
+    expect(check).toBeDefined();
+    expect(check?.status).not.toBe('WARN');
+  });
+
+  // After `git rm -r --cached` the file is untracked but still present, so a
+  // reflexive `git add -A` re-stages it unless the ignore entry lands first.
+  it('puts the ignore entry before the untrack command', async () => {
+    makeRepo();
+    execFileSync('git', ['add', '.charter/telemetry/events.ndjson'], { stdio: 'ignore' });
+
+    const details = (await telemetryCheck())?.details ?? '';
+
+    expect(details.indexOf('telemetry/" is ignored')).toBeGreaterThan(-1);
+    expect(details.indexOf('telemetry/" is ignored')).toBeLessThan(details.indexOf('git rm -r --cached'));
   });
 
   it('names the tracked file so the remedy can be verified', async () => {
@@ -93,8 +117,24 @@ describe('charter doctor telemetry tracking', () => {
     const output = JSON.parse(logs.join('\n')) as DoctorOutput;
     const check = output.checks.find(c => c.name === 'telemetry tracking');
 
-    expect(check?.status).toBe('WARN');
-    expect(check?.details).toContain('git rm -r --cached custom-cfg/telemetry');
+    expect(check?.status).toBe('INFO');
+    expect(check?.details).toContain('git rm -r --cached "custom-cfg/telemetry"');
+    expect(check?.details).toContain('custom-cfg/.gitignore');
+  });
+
+  it('quotes the path so a --config directory containing a space stays copy-pasteable', async () => {
+    const repo = makeRepo();
+    fs.mkdirSync(path.join(repo, 'my cfg', 'telemetry'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'my cfg', 'telemetry', 'events.ndjson'), '{}\n');
+    execFileSync('git', ['add', 'my cfg/telemetry/events.ndjson'], { stdio: 'ignore' });
+
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...parts: unknown[]) => logs.push(parts.map(String).join(' ')));
+    await doctorCommand({ ...options, configPath: 'my cfg' }, []);
+    const output = JSON.parse(logs.join('\n')) as DoctorOutput;
+    const check = output.checks.find(c => c.name === 'telemetry tracking');
+
+    expect(check?.details).toContain('git rm -r --cached "my cfg/telemetry"');
   });
 
   it('omits the check under --adf-only so the ADF CI gate is unaffected', async () => {
