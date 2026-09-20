@@ -211,14 +211,15 @@ function buildCoreOps(
       }
     };
 
-    // ESM: detect type: "module" in any package.json
-    const isEsm = contexts.some(ctx => {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(ctx.source, 'utf-8'));
-        return pkg.type === 'module';
-      } catch { return false; }
-    });
-    if (isEsm) {
+    // ESM import extensions: gated on TypeScript's moduleResolution, not on
+    // package.json `type` (#294). Every ESM package must agree that extensions
+    // are required before the rule is emitted — one bundler package vetoes it.
+    const esmSignals = contexts
+      .filter(ctx => readJsonFile(path.resolve(ctx.source))?.type === 'module')
+      .map(ctx => esmExtensionSignal(ctx, contexts));
+    const requiresEsmExtensions =
+      esmSignals.includes('required') && !esmSignals.includes('not-required');
+    if (requiresEsmExtensions) {
       addConstraint(
         'Use .js extensions for all ESM imports (never .ts in import paths)',
         item => item.includes('.js extensions') || (item.includes('ESM') && item.includes('import'))
@@ -241,6 +242,85 @@ function buildCoreOps(
   }
 
   return ops.length > 0 ? ops : null;
+}
+
+// ============================================================================
+// ESM extension detection (#294)
+// ============================================================================
+
+/**
+ * Whether relative ESM imports in a package need an explicit `.js` extension.
+ *
+ * 'unknown' means "could not tell" and never produces a rule: the constraint
+ * lands under CONSTRAINTS [load-bearing], where a wrong entry tells agents to
+ * rewrite correct code.
+ */
+type EsmExtensionSignal = 'required' | 'not-required' | 'unknown';
+
+/** moduleResolution (or the `module` value that implies it) that needs extensions. */
+const EXTENSION_REQUIRING_RESOLUTION = new Set(['node16', 'nodenext']);
+
+/** Only one level of `extends` is followed; a full resolver is out of scope. */
+const MAX_EXTENDS_DEPTH = 1;
+
+function readJsonFile(filePath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    // Missing, unreadable, or JSONC (comments/trailing commas) that JSON.parse
+    // rejects. All resolve to 'unknown' at the call site.
+    return null;
+  }
+}
+
+/**
+ * package.json `type: "module"` says nothing about import extensions — a Vite
+ * app is ESM with `moduleResolution: "bundler"`, where extensionless relative
+ * imports are the correct convention. TypeScript's moduleResolution is the
+ * signal that actually decides it.
+ */
+function esmExtensionSignal(ctx: PackageContext, contexts: PackageContext[]): EsmExtensionSignal {
+  const packageDir = path.resolve(path.dirname(ctx.source));
+  const candidates = [path.join(packageDir, 'tsconfig.json')];
+  if (packageDir !== path.resolve('.')) candidates.push(path.resolve('tsconfig.json'));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return readModuleResolution(candidate, 0);
+  }
+
+  // No tsconfig anywhere: native Node ESM does require extensions, but only
+  // claim that when TypeScript is not in play at all.
+  return usesTypeScript(ctx, contexts) ? 'unknown' : 'required';
+}
+
+function readModuleResolution(tsconfigPath: string, depth: number): EsmExtensionSignal {
+  const config = readJsonFile(tsconfigPath);
+  if (!config) return 'unknown';
+
+  const compilerOptions = config.compilerOptions as Record<string, unknown> | undefined;
+  // `module: node16|nodenext` implies the matching moduleResolution in TS.
+  const declared = compilerOptions?.moduleResolution ?? compilerOptions?.module;
+  if (typeof declared === 'string') {
+    return EXTENSION_REQUIRING_RESOLUTION.has(declared.toLowerCase()) ? 'required' : 'not-required';
+  }
+
+  // Array `extends` (TS 5.0+) and bare package names (@tsconfig/node20,
+  // astro/tsconfigs/strict) are not resolved; neither are project references.
+  const extendsPath = config.extends;
+  if (depth >= MAX_EXTENDS_DEPTH || typeof extendsPath !== 'string') return 'unknown';
+  if (!extendsPath.startsWith('.') && !path.isAbsolute(extendsPath)) return 'unknown';
+
+  const resolved = path.resolve(path.dirname(tsconfigPath), extendsPath);
+  const basePath = fs.existsSync(resolved) ? resolved : `${resolved}.json`;
+  if (!fs.existsSync(basePath)) return 'unknown';
+  return readModuleResolution(basePath, depth + 1);
+}
+
+function usesTypeScript(ctx: PackageContext, contexts: PackageContext[]): boolean {
+  const root = contexts.find(c => c.source === 'package.json');
+  return [ctx, root].some(c =>
+    Boolean(c?.dependencies?.typescript || c?.devDependencies?.typescript)
+  );
 }
 
 // ============================================================================
