@@ -240,7 +240,9 @@ function runWriteMode(
     //
     // This is the OWNERSHIP question, not the pointer-shape question — see the
     // note on the two marker lists in adf.ts. Do not narrow it to
-    // POINTER_MARKERS: that drops the banner and regresses #295's sibling case.
+    // POINTER_MARKERS: that drops the banner, and every re-compile over an
+    // existing artifact would then refuse without --force (pinned by
+    // adf-compile.test.ts, 'overwrites a previous compile artifact').
     let replacedPointer = false;
     if (fs.existsSync(filename) && !force) {
       const existing = fs.readFileSync(filename, 'utf-8');
