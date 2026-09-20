@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -181,15 +182,35 @@ STATE:
     expect(exitCode).toBe(0);
     expect(fs.existsSync('.mcp.json')).toBe(true);
 
-    const parsed = JSON.parse(fs.readFileSync('.mcp.json', 'utf-8'));
+    const raw = fs.readFileSync('.mcp.json', 'utf-8');
+    const parsed = JSON.parse(raw);
     expect(parsed).toHaveProperty('mcpServers.charter');
     expect(parsed.mcpServers.charter.command).toBe('npx');
     expect(parsed.mcpServers.charter.args).toEqual([
       '@stackbilt/cli',
       'serve',
       '--ai-dir',
-      path.resolve('.ai'),
+      '.ai',
     ]);
+  });
+
+  // #298: .mcp.json is committed and shared, so it must carry no machine-local path.
+  it('writes a repo-relative --ai-dir into .mcp.json, never an absolute path', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    const raw = fs.readFileSync('.mcp.json', 'utf-8');
+    // The generated file must not leak the machine's directory layout.
+    expect(raw).not.toContain(tempDir);
+    expect(raw).not.toContain(path.resolve('.ai'));
+
+    const args: string[] = JSON.parse(raw).mcpServers.charter.args;
+    expect(args.some(arg => path.isAbsolute(arg))).toBe(false);
+    expect(args[args.indexOf('--ai-dir') + 1]).toBe('.ai');
   });
 
   it('does not overwrite existing mcpServers.charter without --force', async () => {
@@ -221,6 +242,111 @@ STATE:
 
     expect(exitCode).toBe(0);
     expect(fs.readFileSync('.mcp.json', 'utf-8')).toBe(before);
+  });
+
+  // #298: a repo bootstrapped before the relative --ai-dir fix carries another
+  // machine's absolute path. The warning must name that case and the safe fix --
+  // and must NOT send the user to --force, which re-scaffolds .ai/*.adf.
+  // It is gated on tracked-ness: the harm is a machine path in a SHARED file.
+  const STALE_ABSOLUTE = path.join(path.sep, 'home', 'someone-else', 'project', '.ai');
+
+  function writeStaleMcpConfig(): void {
+    fs.writeFileSync(
+      '.mcp.json',
+      JSON.stringify(
+        {
+          mcpServers: {
+            charter: {
+              command: 'npx',
+              args: ['@stackbilt/cli', 'serve', '--ai-dir', STALE_ABSOLUTE],
+            },
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  }
+
+  it('warns about a stale absolute --ai-dir when git tracks .mcp.json, without recommending --force', async () => {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    writeStaleMcpConfig();
+    // Staged, not committed: `git ls-files` reads the index, which is what the
+    // tracked-ness check consults.
+    execFileSync('git', ['add', '.mcp.json'], { stdio: 'ignore' });
+
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    // Asserted against printed output, not the JSON result: a warning the default
+    // text run never prints is a warning the user never reads.
+    const warning = logs.find(l => l.includes('pins an absolute --ai-dir'));
+
+    expect(warning).toBeDefined();
+    // Names the offending path and the exact replacement.
+    expect(warning).toContain(STALE_ABSOLUTE);
+    expect(warning).toContain('".ai"');
+    // Offers the gitignore route, which is the remedy that actually works.
+    expect(warning).toContain('.gitignore');
+    // Steers away from the destructive remedy rather than toward it.
+    expect(warning).toContain('Do not use --force');
+  });
+
+  // The docs offer an absolute --ai-dir as the escape hatch for clients that spawn
+  // outside the repo root. Warning on that would make the tool contradict its own
+  // manual, so an untracked .mcp.json must stay silent.
+  it('stays silent about an absolute --ai-dir when .mcp.json is untracked', async () => {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    writeStaleMcpConfig();
+    // Deliberately NOT added to the index — the machine-local escape hatch.
+
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(logs.find(l => l.includes('pins an absolute --ai-dir'))).toBeUndefined();
+    // The file is still left alone, as with any pre-existing charter entry.
+    expect(JSON.parse(fs.readFileSync('.mcp.json', 'utf-8')).mcpServers.charter.args)
+      .toContain(STALE_ABSOLUTE);
+  });
+
+  it('stays silent about an absolute --ai-dir outside a git repo', async () => {
+    // No `git init` here: tracked-ness cannot be determined, so the check fails
+    // closed and bootstrap must not warn on a guess.
+    writeStaleMcpConfig();
+
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(logs.find(l => l.includes('pins an absolute --ai-dir'))).toBeUndefined();
+  });
+
+  // #298: telemetry is per-machine usage data and must never be staged by `git add -A`.
+  it('ignores the telemetry directory in the generated .charter/.gitignore', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    const gitignorePath = path.join('.charter', '.gitignore');
+    expect(fs.existsSync(gitignorePath)).toBe(true);
+
+    // Line-based, not substring: a comment mentioning telemetry must not satisfy this.
+    // The pattern is relative to .charter/, so it covers the <configPath>/telemetry/
+    // directory that telemetry.ts writes events.ndjson into.
+    const lines = fs.readFileSync(gitignorePath, 'utf-8').split('\n').map(l => l.trim());
+    expect(lines).toContain('telemetry/');
   });
 
   it('treats security deny drift matches as CI policy violations', async () => {

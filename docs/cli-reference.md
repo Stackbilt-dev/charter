@@ -121,6 +121,21 @@ npx charter init
 npx charter init --preset worker
 ```
 
+This writes `.charter/.gitignore`, which marks the local-only parts of `.charter/` — `.cache/`, `context.md`, and `telemetry/`. Everything else under `.charter/` (config, patterns, policies) is meant to be committed.
+
+#### Upgrading: untracking already-committed telemetry
+
+`.charter/telemetry/events.ndjson` is per-machine usage data. Releases before the `telemetry/` ignore rule did not exclude it, so repos bootstrapped with an older CLI may already have it committed — where it grows with every command and conflicts on every merge between machines.
+
+Adding the ignore rule does **not** untrack a file that is already in the index. Re-running `charter init` or `charter bootstrap` updates `.charter/.gitignore`, but existing repos must also untrack the file once:
+
+```bash
+git rm -r --cached .charter/telemetry
+git commit -m "chore: stop tracking local charter telemetry"
+```
+
+This removes it from version control while leaving it on disk, so `charter telemetry report` keeps working.
+
 ### charter doctor
 
 Checks CLI installation and repository config health. Validates ADF readiness: manifest existence, manifest parse, default-load module presence, sync lock status, and agent config file migration status. When trailers are required with `FAIL`/`STRICT` citation validation, doctor also warns unless an active git hook or GitHub Actions workflow invokes `charter validate --ci`.
@@ -403,7 +418,7 @@ npx charter serve --ai-dir /abs/path/.ai      # explicit ADF directory
 npx charter serve --name "my-project"         # override the server name shown in MCP clients
 ```
 
-- `--ai-dir <dir>` — path to the `.ai/` ADF directory (default: `.ai`). **Always resolved to an absolute path at startup.** When wiring in `.mcp.json`, use an absolute path or a path relative to the project root — relative paths are resolved against the working directory at spawn time, which may differ from the project root in multi-repo setups.
+- `--ai-dir <dir>` — path to the `.ai/` ADF directory (default: `.ai`). **Always resolved to an absolute path at startup**, relative to the working directory the server was spawned in. When wiring in `.mcp.json`, use the repo-relative `.ai` — `.mcp.json` is a committed, shared file, so an absolute path breaks it for every other clone and for CI.
 - `--name <name>` — override the MCP server name (default: inferred from `core.adf` `PROJECT` section or directory name).
 
 #### Wiring in `.mcp.json`
@@ -413,13 +428,17 @@ npx charter serve --name "my-project"         # override the server name shown i
   "mcpServers": {
     "charter": {
       "command": "npx",
-      "args": ["@stackbilt/cli", "serve", "--ai-dir", "/absolute/path/to/.ai"]
+      "args": ["@stackbilt/cli", "serve", "--ai-dir", ".ai"]
     }
   }
 }
 ```
 
-Use an absolute path for `--ai-dir`. A relative path like `.ai` resolves against the MCP host's working directory at spawn time, which may not be the project root.
+Use the repo-relative `.ai` — this is what `charter bootstrap` generates. `.mcp.json` is committed and shared, so an absolute path here leaks your local directory layout and breaks the server for every other clone and for CI.
+
+`.ai` resolves against the working directory the MCP client spawns the server in, which is normally the project root. If your client spawns it somewhere else, set the client's `cwd`, or pass an absolute `--ai-dir` and keep the whole file out of version control — add `.mcp.json` to `.gitignore` (and `git rm --cached .mcp.json` if it is already tracked). An absolute path is only a problem in a file other people clone. A wrong working directory fails loudly rather than silently: `charter serve` emits a startup error naming the path it resolved (see [Startup errors](#startup-errors)).
+
+`charter bootstrap` warns about an absolute `--ai-dir` only when git actually tracks `.mcp.json`, so a deliberately machine-local config stays quiet.
 
 #### Startup errors
 

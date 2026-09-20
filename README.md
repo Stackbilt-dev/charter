@@ -231,11 +231,13 @@ Codex/Cursor can use the same MCP wiring via `.mcp.json`:
   "mcpServers": {
     "charter": {
       "command": "npx",
-      "args": ["@stackbilt/cli", "serve", "--ai-dir", "/absolute/path/to/.ai"]
+      "args": ["@stackbilt/cli", "serve", "--ai-dir", ".ai"]
     }
   }
 }
 ```
+
+Keep `--ai-dir` repo-relative — `.mcp.json` is committed, so an absolute path breaks it for every other clone. If your MCP client spawns the server outside the project root, set the client's `cwd`, or pass an absolute path and add `.mcp.json` to `.gitignore` so it stays machine-local. See [CLI reference](docs/cli-reference.md#wiring-in-mcpjson).
 
 The `charter_brief` MCP tool composes routes, hotspots, and governance into a single pre-digested brief — call it first in any agent session to skip 15-30 cold-boot discovery calls.
 
