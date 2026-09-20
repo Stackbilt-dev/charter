@@ -13,7 +13,7 @@ import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { isGitRepo } from '../git-helpers';
+import { isGitRepo, runGit } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
 import { initializeCharter, type StackPreset } from './init';
 import {
@@ -719,6 +719,23 @@ function absoluteAiDirArg(existingCharter: unknown): string | undefined {
   return value;
 }
 
+/**
+ * Returns `true` only when git demonstrably tracks `relPath`.
+ *
+ * An absolute path is only harmful inside a committed, shared file — in an
+ * untracked or gitignored `.mcp.json` it is the supported escape hatch for
+ * clients that spawn the server outside the repo root. Fails closed: outside a
+ * git repo, before `git init`, or with git unavailable, this reports false and
+ * the caller stays quiet rather than warning on a guess.
+ */
+function isTrackedByGit(relPath: string): boolean {
+  try {
+    return runGit(['ls-files', '--error-unmatch', '--', relPath]).trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function ensureProjectMcpConfig(
   aiDir: string,
   force: boolean,
@@ -772,18 +789,21 @@ function ensureProjectMcpConfig(
 
   if (existingCharter !== undefined && !force) {
     // Repos bootstrapped before the relative --ai-dir fix carry the generating
-    // machine's absolute path, which breaks the server for every other clone.
-    // Name that case and its one-line fix, rather than sending the user to
-    // --force: --force also re-scaffolds .ai/*.adf and overwrites custom modules.
+    // machine's absolute path. That only harms anyone when the file is shared,
+    // so gate on tracked-ness: an absolute path in an untracked or gitignored
+    // .mcp.json is the documented escape hatch, not a defect to nag about.
+    // Name the fix rather than sending the user to --force, which also
+    // re-scaffolds .ai/*.adf and overwrites custom modules.
     const staleAbsolute = absoluteAiDirArg(existingCharter);
-    if (staleAbsolute !== undefined) {
+    if (staleAbsolute !== undefined && isTrackedByGit('.mcp.json')) {
       return {
         created: false,
         updated: false,
         warning:
-          `Skipped MCP config update: .mcp.json pins an absolute --ai-dir (${staleAbsolute}), ` +
+          `Skipped MCP config update: git tracks .mcp.json and it pins an absolute --ai-dir (${staleAbsolute}), ` +
           `which breaks the MCP server for every other clone and for CI. ` +
-          `Edit .mcp.json and replace that path with "${aiDir}". ` +
+          `Edit .mcp.json and replace that path with "${aiDir}", ` +
+          `or, if this config is meant to stay machine-local, add .mcp.json to .gitignore and run 'git rm --cached .mcp.json'. ` +
           `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
       };
     }

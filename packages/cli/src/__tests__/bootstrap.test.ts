@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -246,8 +247,10 @@ STATE:
   // #298: a repo bootstrapped before the relative --ai-dir fix carries another
   // machine's absolute path. The warning must name that case and the safe fix --
   // and must NOT send the user to --force, which re-scaffolds .ai/*.adf.
-  it('warns specifically about a stale absolute --ai-dir and does not recommend --force', async () => {
-    const stalePath = path.join(path.sep, 'home', 'someone-else', 'project', '.ai');
+  // It is gated on tracked-ness: the harm is a machine path in a SHARED file.
+  const STALE_ABSOLUTE = path.join(path.sep, 'home', 'someone-else', 'project', '.ai');
+
+  function writeStaleMcpConfig(): void {
     fs.writeFileSync(
       '.mcp.json',
       JSON.stringify(
@@ -255,7 +258,7 @@ STATE:
           mcpServers: {
             charter: {
               command: 'npx',
-              args: ['@stackbilt/cli', 'serve', '--ai-dir', stalePath],
+              args: ['@stackbilt/cli', 'serve', '--ai-dir', STALE_ABSOLUTE],
             },
           },
         },
@@ -263,6 +266,14 @@ STATE:
         2,
       ) + '\n',
     );
+  }
+
+  it('warns about a stale absolute --ai-dir when git tracks .mcp.json, without recommending --force', async () => {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    writeStaleMcpConfig();
+    // Staged, not committed: `git ls-files` reads the index, which is what the
+    // tracked-ness check consults.
+    execFileSync('git', ['add', '.mcp.json'], { stdio: 'ignore' });
 
     const exitCode = await bootstrapCommand(
       baseOptions,
@@ -277,10 +288,46 @@ STATE:
 
     expect(warning).toBeDefined();
     // Names the offending path and the exact replacement.
-    expect(warning).toContain(stalePath);
+    expect(warning).toContain(STALE_ABSOLUTE);
     expect(warning).toContain('".ai"');
+    // Offers the gitignore route, which is the remedy that actually works.
+    expect(warning).toContain('.gitignore');
     // Steers away from the destructive remedy rather than toward it.
     expect(warning).toContain('Do not use --force');
+  });
+
+  // The docs offer an absolute --ai-dir as the escape hatch for clients that spawn
+  // outside the repo root. Warning on that would make the tool contradict its own
+  // manual, so an untracked .mcp.json must stay silent.
+  it('stays silent about an absolute --ai-dir when .mcp.json is untracked', async () => {
+    execFileSync('git', ['init'], { stdio: 'ignore' });
+    writeStaleMcpConfig();
+    // Deliberately NOT added to the index — the machine-local escape hatch.
+
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(logs.find(l => l.includes('pins an absolute --ai-dir'))).toBeUndefined();
+    // The file is still left alone, as with any pre-existing charter entry.
+    expect(JSON.parse(fs.readFileSync('.mcp.json', 'utf-8')).mcpServers.charter.args)
+      .toContain(STALE_ABSOLUTE);
+  });
+
+  it('stays silent about an absolute --ai-dir outside a git repo', async () => {
+    // No `git init` here: tracked-ness cannot be determined, so the check fails
+    // closed and bootstrap must not warn on a guess.
+    writeStaleMcpConfig();
+
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(logs.find(l => l.includes('pins an absolute --ai-dir'))).toBeUndefined();
   });
 
   // #298: telemetry is per-machine usage data and must never be staged by `git add -A`.

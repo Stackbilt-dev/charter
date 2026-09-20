@@ -436,7 +436,9 @@ npx charter serve --name "my-project"         # override the server name shown i
 
 Use the repo-relative `.ai` — this is what `charter bootstrap` generates. `.mcp.json` is committed and shared, so an absolute path here leaks your local directory layout and breaks the server for every other clone and for CI.
 
-`.ai` resolves against the working directory the MCP client spawns the server in, which is normally the project root. If your client spawns it somewhere else, set the client's `cwd`, or pass an absolute `--ai-dir` and keep that entry out of version control. A wrong working directory fails loudly rather than silently: `charter serve` emits a startup error naming the path it resolved (see [Startup errors](#startup-errors)).
+`.ai` resolves against the working directory the MCP client spawns the server in, which is normally the project root. If your client spawns it somewhere else, set the client's `cwd`, or pass an absolute `--ai-dir` and keep the whole file out of version control — add `.mcp.json` to `.gitignore` (and `git rm --cached .mcp.json` if it is already tracked). An absolute path is only a problem in a file other people clone. A wrong working directory fails loudly rather than silently: `charter serve` emits a startup error naming the path it resolved (see [Startup errors](#startup-errors)).
+
+`charter bootstrap` warns about an absolute `--ai-dir` only when git actually tracks `.mcp.json`, so a deliberately machine-local config stays quiet.
 
 #### Startup errors
 
