@@ -371,6 +371,60 @@ Hostname with port: localhost:3000
     expect(broken).toContain('wrangler.toml');
     expect(broken).toContain('db/schema.sql');
   });
+
+  it('grounding checker keeps a unique basename broken when the referenced directory disagrees', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, 'test', 'fixtures'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'packages', 'core', 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'harness', 'corpus'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'test', 'fixtures', 'database.yml'), 'adapter: sqlite3\n');
+    fs.writeFileSync(path.join(tmp, 'packages', 'core', 'lib', 'helper.ts'), 'export const help = 1;\n');
+    fs.writeFileSync(path.join(tmp, 'harness', 'corpus', 'worker.ts'), 'export default { fetch() {} };\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'wrong-dir-test', version: '1.0.0' }, null, 2));
+
+    // Each basename is unique in the repo, so basename matching alone would resolve all three —
+    // against a file in a directory the author never wrote. `config/database.yml` is not
+    // test/fixtures/database.yml, a stale `src/utils/helper.ts` is documentation rot that
+    // Grounding exists to surface, and `src/worker.ts` is not an unrelated test-corpus fixture.
+    // Trailing-segment agreement keeps all three broken (#293).
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), [
+      'Database settings live in `config/database.yml`.',
+      'Shared helpers are in `src/utils/helper.ts`.',
+      'No Cloudflare Worker artifacts: `src/worker.ts` is never generated.',
+      '',
+    ].join('\n'));
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).toContain('config/database.yml');
+    expect(broken).toContain('src/utils/helper.ts');
+    expect(broken).toContain('src/worker.ts');
+  });
+
+  it('grounding checker resolves a partial path prefix written from a nested source file', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, '.ai'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'packages', 'adf', 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'packages', 'adf', 'src', 'parser.ts'), 'export const parse = 1;\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'nested-source-test', version: '1.0.0' }, null, 2));
+
+    // The reference is authored inside .ai/, so resolveReferencedPath yields `.ai/src/parser.ts`,
+    // which is not a suffix of packages/adf/src/parser.ts. Trailing-segment agreement must be
+    // checked against the authored candidate, not the resolved path, or every reference made from
+    // a non-root document breaks (#293).
+    fs.writeFileSync(path.join(tmp, '.ai', 'manifest.adf'), 'MODULE parser\n  Entry point: `src/parser.ts`\n');
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), 'See `.ai/manifest.adf` for module routing.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).not.toContain('.ai/src/parser.ts');
+  });
 });
 
 describe('badge helpers', () => {
