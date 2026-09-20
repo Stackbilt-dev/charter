@@ -456,7 +456,7 @@ npx charter adf context --files "src/ui/Button.tsx" --bundle
 ```
 
 - `--files <paths>` — comma-separated file paths to derive keywords from
-- `--keywords <list>` — comma-separated keywords, used in addition to any derived
+- `--keywords <text>` — additional keywords, in addition to any derived. Accepts a comma-separated list or free text: the value is split on whitespace and `,;:()[]{}`, and single characters are dropped.
 - `--bundle` — emit the merged ADF document instead of the resolution summary
 - `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
 
