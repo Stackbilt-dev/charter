@@ -6,7 +6,7 @@ import { bootstrapCommand } from '../commands/bootstrap';
 import { doctorCommand } from '../commands/doctor';
 import { driftCommand } from '../commands/drift';
 import type { CLIOptions } from '../index';
-import { parseAdf, parseManifest } from '@stackbilt/adf';
+import { parseAdf, parseManifest, TARGET_FILENAMES } from '@stackbilt/adf';
 
 // Controlled per-test override for isGitRepo (git-helpers uses execFileSync, not execSync)
 let mockIsGitRepo: boolean | null = null;
@@ -406,5 +406,74 @@ load state.adf always
       const installStep = report.steps.find((s: { name: string }) => s.name === 'install');
       expect(installStep.status).toBe('skip');
     });
+  });
+});
+
+// #297 — the pointer file must carry the uppercase AGENTS.md spelling that the
+// compiler targets. On a case-insensitive filesystem fs.existsSync() cannot
+// tell the two spellings apart, so these assertions compare the names the code
+// actually produces (pointer labels, readdir entries) against TARGET_FILENAMES.
+describe('bootstrapCommand — AGENTS.md pointer casing (#297)', () => {
+  let originalCwd: string;
+  let tempDir: string;
+  let logs: string[];
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'charter-agents-case-')));
+    process.chdir(tempDir);
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    mockIsGitRepo = null;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('labels the emitted agents pointer with TARGET_FILENAMES.agents, not agents.md', async () => {
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true, format: 'json' },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+    expect(exitCode).toBe(0);
+
+    const report = JSON.parse(logs[0]);
+    const adfInit = report.steps.find((s: { name: string }) => s.name === 'adf-init');
+    const pointers: string[] = adfInit.details.pointers;
+
+    expect(pointers).toContain(`${TARGET_FILENAMES.agents} (thin pointer)`);
+    expect(pointers.some(p => p.startsWith('agents.md'))).toBe(false);
+  });
+
+  it('writes the pointer at the exact on-disk name the compiler targets', async () => {
+    await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    // readdirSync reports the case the file was created with, even where
+    // existsSync would match either spelling.
+    const agentsEntries = fs.readdirSync(tempDir).filter(f => f.toLowerCase() === 'agents.md');
+    expect(agentsEntries).toEqual([TARGET_FILENAMES.agents]);
+  });
+
+  it('names AGENTS.md and GEMINI.md in the git add next step', async () => {
+    mockIsGitRepo = true;
+    await bootstrapCommand(
+      { ...baseOptions, yes: true, format: 'json' },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    const report = JSON.parse(logs[0]);
+    const gitAdd = report.nextSteps.find((s: { cmd: string }) => s.cmd.startsWith('git add '));
+    expect(gitAdd).toBeDefined();
+    expect(gitAdd.cmd).toContain(TARGET_FILENAMES.agents);
+    expect(gitAdd.cmd).toContain(TARGET_FILENAMES.gemini);
+    expect(gitAdd.cmd).not.toMatch(/\bagents\.md\b/);
   });
 });

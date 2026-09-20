@@ -101,7 +101,7 @@ function writeHookFixtureRepo(tmp: string): void {
     '',
     '# Vendor file auto-tidy',
     'if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then',
-    '  VENDOR_FILES="CLAUDE.md .cursorrules agents.md AGENTS.md GEMINI.md copilot-instructions.md"',
+    '  VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md GEMINI.md copilot-instructions.md"',
     '  STAGED_VENDORS=""',
     '  for vf in $VENDOR_FILES; do',
     '    if git diff --cached --name-only | grep -qx "$vf"; then',
