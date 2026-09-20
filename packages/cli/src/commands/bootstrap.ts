@@ -70,6 +70,47 @@ interface BootstrapResult {
   nextSteps: Array<{ cmd: string; required: boolean; reason: string }>;
 }
 
+const NOT_IN_GIT_REPO_WARNING =
+  "Not inside a git repository. Run 'git init && git add -A && git commit -m \"initial commit\"' before installing hooks. Continuing — governance files will be written but hooks cannot be installed yet.";
+
+/**
+ * Records a finished phase and, under `--format text`, draws it.
+ *
+ * This is the only path a phase has into `result.steps`, so a phase cannot reach
+ * the JSON payload without its warnings also reaching the screen. `render` draws
+ * the phase's own section and returns the warnings it already put on screen in
+ * its own wording; everything it left over is printed here as `  Warning: <text>`,
+ * immediately before the section's trailing blank line. Omit `render` for a phase
+ * that draws no section at all, such as one skipped by `--mode lean`.
+ *
+ * Nothing type-checks that return value: a `render` that claims a warning it did
+ * not draw silently swallows it. So claim strings that were actually printed,
+ * never the whole `step.warnings` array.
+ */
+export function completePhase(
+  result: BootstrapResult,
+  options: CLIOptions,
+  step: StepResult,
+  render?: () => readonly string[],
+): number {
+  result.steps.push(step);
+
+  if (options.format === 'text') {
+    const alreadyRendered = render ? render() : [];
+    let printedWarning = false;
+    for (const warning of step.warnings) {
+      if (alreadyRendered.includes(warning)) continue;
+      console.log(`  Warning: ${warning}`);
+      printedWarning = true;
+    }
+    if (render || printedWarning) {
+      console.log('');
+    }
+  }
+
+  return step.warnings.length;
+}
+
 // ============================================================================
 // Command Entry
 // ============================================================================
@@ -105,8 +146,6 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // Phase 1: Detect
   // ========================================================================
   const detectResult = runDetectPhase(options, presetFlag);
-  result.steps.push(detectResult.step);
-  warnings += detectResult.step.warnings.length;
 
   const selectedPreset: StackPreset = detectResult.selectedPreset;
   const detection = detectResult.detection;
@@ -116,13 +155,10 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // Check git repo status once — used for preflight warning and gating hook next-steps
   const inGitRepo = isGitRepo();
   if (!inGitRepo) {
-    detectResult.step.warnings.push(
-      "Not inside a git repository. Run 'git init && git add -A && git commit -m \"initial commit\"' before installing hooks. Continuing — governance files will be written but hooks cannot be installed yet."
-    );
-    warnings++;
+    detectResult.step.warnings.push(NOT_IN_GIT_REPO_WARNING);
   }
 
-  if (options.format === 'text') {
+  warnings += completePhase(result, options, detectResult.step, () => {
     console.log(`[1/${leanMode ? '4' : '7'}] Detecting stack...`);
     console.log(`  Stack: ${selectedPreset} (${detection.confidence} confidence)`);
     console.log(`  Monorepo: ${detection.monorepo ? 'yes' : 'no'}${detection.monorepo && detection.signals.hasPnpm ? ' (pnpm workspace)' : ''}`);
@@ -135,18 +171,18 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       console.log(`  Warning: Not inside a git repository.`);
       console.log(`  Run 'git init && git add -A && git commit -m "initial commit"' before installing hooks.`);
       console.log(`  Continuing — governance files will be written but hooks cannot be installed yet.`);
+      // Rendered just above as three wrapped lines instead of one long one.
+      return [...detection.warnings, NOT_IN_GIT_REPO_WARNING];
     }
-    console.log('');
-  }
+    return detection.warnings;
+  });
 
   // ========================================================================
   // Phase 2: Setup
   // ========================================================================
   const setupResult = runSetupPhase(options, selectedPreset, detection, contexts, ciTarget, packageManager, setupOverwrite, securitySensitive);
-  result.steps.push(setupResult.step);
-  warnings += setupResult.step.warnings.length;
 
-  if (options.format === 'text') {
+  warnings += completePhase(result, options, setupResult.step, () => {
     console.log(`[2/${leanMode ? '4' : '7'}] Setting up governance...`);
     for (const f of (setupResult.step.details.created as string[] || [])) {
       console.log(`  Created ${f}`);
@@ -154,22 +190,17 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     for (const f of (setupResult.step.details.updated as string[] || [])) {
       console.log(`  Updated ${f}`);
     }
-    // Setup warnings were only ever counted in the final tally, never shown — which
-    // hid actionable messages like the stale absolute --ai-dir in .mcp.json.
-    for (const warning of setupResult.step.warnings) {
-      console.log(`  Warning: ${warning}`);
-    }
-    console.log('');
-  }
+    // Setup's warnings — such as the stale absolute --ai-dir in .mcp.json — are
+    // printed by completePhase, in this same position (#304, #307).
+    return [];
+  });
 
   // ========================================================================
   // Phase 3: ADF Init
   // ========================================================================
   const adfResult = runAdfInitPhase(options, force, selectedPreset);
-  result.steps.push(adfResult.step);
-  warnings += adfResult.step.warnings.length;
 
-  if (options.format === 'text') {
+  warnings += completePhase(result, options, adfResult.step, () => {
     console.log(`[3/${leanMode ? '4' : '7'}] Initializing ADF context...`);
     for (const f of (adfResult.step.details.files as string[] || [])) {
       console.log(`  Created ${f}`);
@@ -181,11 +212,8 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     if (backedUp && backedUp > 0) {
       console.log(`  Backed up ${backedUp} files to .ai/.backup/`);
     }
-    for (const warning of adfResult.step.warnings) {
-      console.log(`  Warning: ${warning}`);
-    }
-    console.log('');
-  }
+    return [];
+  });
 
   // Orphan registration: auto-register in --yes mode, prompt interactively otherwise
   const orphans = adfResult.step.details.orphans as string[] || [];
@@ -244,10 +272,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const migrateResult = leanMode
     ? { step: { name: 'migrate' as StepName, status: 'skip' as StepStatus, details: { reason: 'lean mode' }, warnings: [] as string[] } }
     : runMigratePhase(options, nonInteractive);
-  result.steps.push(migrateResult.step);
-  warnings += migrateResult.step.warnings.length;
-
-  if (options.format === 'text' && !leanMode) {
+  warnings += completePhase(result, options, migrateResult.step, leanMode ? undefined : () => {
     console.log('[4/7] Migrating agent configs...');
     if (migrateResult.step.status === 'skip') {
       console.log('  Skipped (no migratable files)');
@@ -255,12 +280,14 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       for (const w of migrateResult.step.warnings) {
         console.log(`  ${w}`);
       }
+      // The dry-run summary is spelled out above, without the `Warning:` prefix.
+      return migrateResult.step.warnings;
     } else {
       const migrated = migrateResult.step.details.migrated as number;
       console.log(`  Migrated ${migrated} file(s)`);
     }
-    console.log('');
-  }
+    return [];
+  });
 
   // ========================================================================
   // Phase 5: Install
@@ -268,30 +295,35 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const installResult = leanMode
     ? { step: { name: 'install' as StepName, status: 'skip' as StepStatus, details: { reason: 'lean mode' }, warnings: [] as string[] } }
     : runInstallPhase(options, skipInstall);
-  result.steps.push(installResult.step);
-  warnings += installResult.step.warnings.length;
-
-  if (options.format === 'text' && !leanMode) {
+  warnings += completePhase(result, options, installResult.step, leanMode ? undefined : () => {
     console.log('[5/7] Installing dependencies...');
     if (skipInstall) {
       console.log('  Skipped (--skip-install)');
-    } else {
-      console.log(`  Detected: ${installResult.step.details.packageManager}`);
-      console.log(`  Running: ${installResult.step.details.command}`);
-      if (installResult.step.status === 'pass') {
-        console.log('  Done');
-      } else {
-        console.log(`  Failed: ${installResult.step.details.error}`);
-        for (const w of installResult.step.warnings) {
-          if (w.startsWith('Hint:') || w.startsWith('Retry')) {
-            console.log(`  ${w}`);
-          }
-        }
-        console.log('  (non-fatal)');
+      return [];
+    }
+    console.log(`  Detected: ${installResult.step.details.packageManager}`);
+    console.log(`  Running: ${installResult.step.details.command}`);
+    if (installResult.step.status === 'pass') {
+      console.log('  Done');
+      return [];
+    }
+    console.log(`  Failed: ${installResult.step.details.error}`);
+    const drawn: string[] = [];
+    for (const w of installResult.step.warnings) {
+      if (w.startsWith('Hint:') || w.startsWith('Retry')) {
+        console.log(`  ${w}`);
+        drawn.push(w);
+      } else if (w === `Install failed: ${installResult.step.details.error}`) {
+        // The `Failed:` line above is this warning, reworded.
+        drawn.push(w);
       }
     }
-    console.log('');
-  }
+    console.log('  (non-fatal)');
+    // Only the lines actually drawn are claimed. Any other warning this phase
+    // grows later falls through to completePhase and prints, rather than being
+    // swallowed by a wholesale claim on step.warnings.
+    return drawn;
+  });
 
   // ========================================================================
   // Phase 6: Populate (#89)
@@ -299,10 +331,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const populateResult = leanMode
     ? { step: { name: 'populate' as StepName, status: 'skip' as StepStatus, details: { reason: 'lean mode' }, warnings: [] as string[] } }
     : await runPopulatePhase(options);
-  result.steps.push(populateResult.step);
-  warnings += populateResult.step.warnings.length;
-
-  if (options.format === 'text' && !leanMode) {
+  warnings += completePhase(result, options, populateResult.step, leanMode ? undefined : () => {
     console.log('[6/7] Auto-populating ADF modules...');
     const populated = populateResult.step.details.populated as number;
     const skipped = populateResult.step.details.skipped as number;
@@ -311,17 +340,14 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     } else {
       console.log('  No scaffold content to replace');
     }
-    console.log('');
-  }
+    return [];
+  });
 
   // ========================================================================
   // Phase 7: Doctor
   // ========================================================================
   const doctorResult = runDoctorPhase(options, skipDoctor);
-  result.steps.push(doctorResult.step);
-  warnings += doctorResult.step.warnings.length;
-
-  if (options.format === 'text') {
+  warnings += completePhase(result, options, doctorResult.step, () => {
     console.log(`[${leanMode ? '4/4' : '7/7'}] Running health check...`);
     if (skipDoctor) {
       console.log('  Skipped (--skip-doctor)');
@@ -332,8 +358,8 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
         console.log(`  ${icon} ${check.name}`);
       }
     }
-    console.log('');
-  }
+    return [];
+  });
 
   // ========================================================================
   // Summary
@@ -703,6 +729,15 @@ function runSetupPhase(
  * Returns the `--ai-dir` value of an existing mcpServers.charter entry when it is an
  * absolute path, otherwise undefined. Used to detect a .mcp.json generated before
  * bootstrap switched to a repo-relative path.
+ *
+ * "Absolute" is judged under both path flavours, not just the host's. `path.isAbsolute`
+ * is the POSIX implementation on a POSIX host, so it reports false for `C:\Users\...`
+ * and `\\server\share\...` — and a .mcp.json authored on native Windows is read on
+ * Linux every time it reaches CI, a container or a colleague's checkout. `path.win32`
+ * covers drive-letter and UNC roots there. It also treats a rooted, driveless
+ * `\project\.ai` as absolute, which is a superset of the drive-letter and UNC forms
+ * and is machine-specific for the same reason. Drive-relative `C:project` is not
+ * absolute under either flavour and stays unflagged.
  */
 function absoluteAiDirArg(existingCharter: unknown): string | undefined {
   if (!existingCharter || typeof existingCharter !== 'object' || Array.isArray(existingCharter)) {
@@ -715,7 +750,8 @@ function absoluteAiDirArg(existingCharter: unknown): string | undefined {
   if (flagIndex === -1) return undefined;
 
   const value = args[flagIndex + 1];
-  if (typeof value !== 'string' || !path.isAbsolute(value)) return undefined;
+  if (typeof value !== 'string') return undefined;
+  if (!path.isAbsolute(value) && !path.win32.isAbsolute(value)) return undefined;
   return value;
 }
 
