@@ -373,7 +373,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       reason: 'Customize blessed stack patterns',
     });
     result.nextSteps.push({
-      cmd: 'git add .charter .ai CLAUDE.md .cursorrules agents.md && git commit -m "chore: bootstrap charter governance"',
+      cmd: 'git add .charter .ai CLAUDE.md .cursorrules AGENTS.md GEMINI.md copilot-instructions.md && git commit -m "chore: bootstrap charter governance"',
       required: false,
       reason: 'Commit governance baseline',
     });
@@ -905,7 +905,7 @@ function runAdfInitPhase(
     const pointerFiles: Array<{ name: string; content: string; label: string }> = [
       { name: 'CLAUDE.md', content: POINTER_CLAUDE_MD_HYBRID, label: 'CLAUDE.md (hybrid pointer)' },
       { name: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
-      { name: 'agents.md', content: POINTER_AGENTS_MD, label: 'agents.md (thin pointer)' },
+      { name: 'AGENTS.md', content: POINTER_AGENTS_MD, label: 'AGENTS.md (thin pointer)' },
       { name: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
       { name: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
     ];

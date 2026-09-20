@@ -2,7 +2,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { adfCommand, POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID } from '../commands/adf';
+import { adfCommand, POINTER_AGENTS_MD, POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID } from '../commands/adf';
+import { TARGET_FILENAMES } from '@stackbilt/adf';
 
 const originalCwd = process.cwd();
 const tempDirs: string[] = [];
@@ -125,5 +126,23 @@ describe('charter serve startup — error discrimination', () => {
     expect(noDir).not.toBe(noManifest);
     expect(noManifest).toContain('manifest.adf');
     expect(noManifest).toContain('charter adf init');
+  });
+});
+
+// #297 — `adf init --emit-pointers` is the second door onto the same bug that
+// bootstrap had: it must write AGENTS.md, matching TARGET_FILENAMES.agents.
+describe('charter adf init --emit-pointers — AGENTS.md casing (#297)', () => {
+  it('emits the agents pointer at the exact name the compiler targets', async () => {
+    const tmp = fs.realpathSync(makeTmp());
+    await adfCommand(DEFAULT_OPTIONS, ['init', '--emit-pointers']);
+
+    // readdirSync reports the case the file was created with; existsSync would
+    // match either spelling on a case-insensitive filesystem.
+    const agentsEntries = fs.readdirSync(tmp).filter(f => f.toLowerCase() === 'agents.md');
+    expect(agentsEntries).toEqual([TARGET_FILENAMES.agents]);
+  });
+
+  it('titles the agents pointer template with the uppercase filename', () => {
+    expect(POINTER_AGENTS_MD.split('\n')[0]).toBe(`# ${TARGET_FILENAMES.agents}`);
   });
 });

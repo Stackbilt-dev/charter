@@ -348,7 +348,7 @@ export const POINTER_CURSORRULES = `DO NOT modify this file. All project rules a
 See .ai/manifest.adf for the module routing manifest.
 `;
 
-export const POINTER_AGENTS_MD = `# agents.md
+export const POINTER_AGENTS_MD = `# AGENTS.md
 
 > **DO NOT add instructions to this file.**
 > All agent instructions are managed in \`.ai/\` by Charter.
@@ -439,7 +439,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
     const pointerSpecs: Array<{ file: string; content: string; label: string }> = [
       { file: 'CLAUDE.md', content: POINTER_CLAUDE_MD, label: 'CLAUDE.md (thin pointer)' },
       { file: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
-      { file: 'agents.md', content: POINTER_AGENTS_MD, label: 'agents.md (thin pointer)' },
+      { file: 'AGENTS.md', content: POINTER_AGENTS_MD, label: 'AGENTS.md (thin pointer)' },
       { file: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
       { file: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
     ];
@@ -862,7 +862,7 @@ function printHelp(): void {
   console.log('      Scaffold .ai/ directory with manifest, core, and state modules.');
   console.log('      --module <name>: add a single module to an existing .ai/ (additive, no overwrite)');
   console.log('      --preset <preset>: scaffold preset-aware modules (worker|frontend|backend|fullstack|docs)');
-  console.log('      --emit-pointers: also generate thin pointer files (CLAUDE.md, .cursorrules, agents.md)');
+  console.log('      --emit-pointers: also generate thin pointer files (CLAUDE.md, .cursorrules, AGENTS.md)');
   console.log('');
   console.log('    charter adf fmt <file> [--check] [--write]');
   console.log('      Parse and reformat an ADF file to canonical form.');

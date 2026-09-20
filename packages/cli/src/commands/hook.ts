@@ -44,7 +44,7 @@ set -eu
 # Vendor file auto-tidy: extract bloat from staged vendor config files
 # Skip with CHARTER_SKIP_TIDY=1
 if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
-  VENDOR_FILES="CLAUDE.md .cursorrules agents.md AGENTS.md GEMINI.md copilot-instructions.md"
+  VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md GEMINI.md copilot-instructions.md"
   STAGED_VENDORS=""
   for vf in $VENDOR_FILES; do
     if git diff --cached --name-only | grep -qx "$vf"; then
@@ -325,7 +325,7 @@ function printHelp(): void {
   console.log('  Resolves-Request trailers using git interpret-trailers.');
   console.log('');
   console.log('  --pre-commit: Install a git pre-commit hook that auto-tidies vendor config files');
-  console.log('  (CLAUDE.md, .cursorrules, agents.md, etc.) and runs ADF evidence checks.');
+  console.log('  (CLAUDE.md, .cursorrules, AGENTS.md, etc.) and runs ADF evidence checks.');
   console.log('  Vendor file bloat is extracted, routed to .adf modules, and re-staged.');
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
