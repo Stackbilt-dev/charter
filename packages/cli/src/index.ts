@@ -97,7 +97,10 @@ Options:
 // check steps aside so `charter <cmd> [sub] --help` reaches the subcommand docs.
 // Anything not listed here falls back to the root HELP, so a command that never
 // learned to print help can't be executed for real by a stray --help.
-const COMMANDS_WITH_OWN_HELP = new Set(['adf', 'hook', 'score', 'telemetry']);
+//
+// Adding a command here without a --help short-circuit in its handler would run
+// it for real; help-routing.test.ts asserts every member against that.
+export const COMMANDS_WITH_OWN_HELP = new Set(['adf', 'hook', 'score', 'telemetry']);
 
 export const EXIT_CODE = {
   SUCCESS: 0,
