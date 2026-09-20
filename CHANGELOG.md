@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Fixed
 
+- **`charter <command> --help` now reaches the command's own docs** (`#240`) — the top-level dispatcher matched `--help`/`-h` anywhere in the raw arguments, so `charter adf migrate --help` printed the global help and the ADF subcommand reference was only reachable by running `charter adf` bare. `adf`, `hook`, `score` and `telemetry` now render their own help. The remaining commands have no `--help` handler and deliberately keep the root-help fallback, so a stray `--help` can never execute one for real.
 - **`adf compile --write` no longer refuses the files `bootstrap` just generated** (`#295`) — the overwrite guard keyed on the compile banner alone, so a clean `bootstrap` followed by the documented `adf compile --target all --write` produced a wall of refusals and trained users to reach for `--force`. The guard now recognises Charter thin pointers as well as compiler output. Hand-authored files carrying no Charter marker are still refused, and a file converted from pointer to compiled output is reported as `(replaced charter pointer stub)` so the transition is visible.
 - **`adf compile --write` no longer discards retained sections** (`#295`) — it refuses, rather than silently overwriting, a pointer file carrying your own content under `## Environment` or another retained heading. Compiled output has no such section and `.ai/` does not hold that content, so the previous behavior lost it with git as the only recovery. Pass `--force` to discard deliberately.
 

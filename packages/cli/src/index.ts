@@ -93,6 +93,15 @@ Options:
                      Setup only: do not rewrite devDependencies["@stackbilt/cli"]
 `;
 
+// Commands whose own handler renders --help/-h. For these, the top-level help
+// check steps aside so `charter <cmd> [sub] --help` reaches the subcommand docs.
+// Anything not listed here falls back to the root HELP, so a command that never
+// learned to print help can't be executed for real by a stray --help.
+//
+// Adding a command here without a --help short-circuit in its handler would run
+// it for real; help-routing.test.ts asserts every member against that.
+export const COMMANDS_WITH_OWN_HELP = new Set(['adf', 'hook', 'score', 'telemetry']);
+
 export const EXIT_CODE = {
   SUCCESS: 0,
   POLICY_VIOLATION: 1,
@@ -135,7 +144,8 @@ export async function run(args: string[]): Promise<number> {
   };
 
   try {
-    if (args.includes('--help') || args.includes('-h')) {
+    const wantsHelp = args.includes('--help') || args.includes('-h');
+    if (wantsHelp && !COMMANDS_WITH_OWN_HELP.has(args[0])) {
       console.log(HELP);
       writeTelemetry(EXIT_CODE.SUCCESS);
       return EXIT_CODE.SUCCESS;
