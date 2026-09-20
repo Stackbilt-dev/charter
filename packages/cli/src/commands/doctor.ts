@@ -11,7 +11,7 @@ import { EXIT_CODE } from '../index';
 import { loadPatterns, loadConfig } from '../config';
 import { parseAdf, parseManifest, stripCharterSentinels, evaluateLocBudgets, matchPath } from '@stackbilt/adf';
 import type { LocBudgetRule } from '@stackbilt/adf';
-import { isGitRepo } from '../git-helpers';
+import { isGitRepo, runGit } from '../git-helpers';
 import { POINTER_MARKERS } from './adf';
 import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
 import { checkGateEnforcement } from './doctor-gate-enforcement';
@@ -71,6 +71,54 @@ function checkMcpWiring(): DoctorResult['checks'][number] {
     name: 'mcp wiring',
     status: 'WARN',
     details: `MCP config file(s) found but charter not wired: ${missing.join('; ')}\n    Run: charter hook print --mcp-config --client claude`,
+  };
+}
+
+/**
+ * Check whether the local telemetry log is tracked by git (#306).
+ *
+ * `charter bootstrap`/`init` write `telemetry/` into the generated
+ * `<configPath>/.gitignore`, but a gitignore entry never untracks a file that
+ * is already in the index. Repos bootstrapped before that entry existed keep
+ * staging every new telemetry line on each `git add -A`, silently. Only the
+ * git index is consulted — never the filesystem — so the answer is identical
+ * on case-sensitive and case-insensitive checkouts.
+ */
+function checkTelemetryTracking(configPath: string): DoctorResult['checks'][number] {
+  const telemetryDir = path.join(configPath, 'telemetry').replace(/\\/g, '/');
+
+  let tracked: string[];
+  try {
+    tracked = runGit(['ls-files', '--', telemetryDir])
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+  } catch {
+    // Unreadable index, or a --config directory outside this work tree:
+    // nothing is tracked from here, so there is nothing to report.
+    return {
+      name: 'telemetry tracking',
+      status: 'PASS',
+      details: `${telemetryDir} is not tracked by git.`,
+    };
+  }
+
+  if (tracked.length === 0) {
+    return {
+      name: 'telemetry tracking',
+      status: 'PASS',
+      details: `${telemetryDir} is not tracked by git.`,
+    };
+  }
+
+  return {
+    name: 'telemetry tracking',
+    status: 'WARN',
+    details: `${tracked.length} telemetry file(s) tracked by git: ${tracked.slice(0, 5).join(', ')}`
+      + `\n    Every charter run appends to this file, so each "git add -A" stages it again.`
+      + `\n    Run: git rm -r --cached ${telemetryDir}`
+      + `\n    The file stays on disk, so "charter telemetry report" keeps working.`
+      + `\n    Add "telemetry/" to ${path.join(configPath, '.gitignore').replace(/\\/g, '/')} so it is not re-staged.`,
   };
 }
 
@@ -146,6 +194,12 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       status: policyCount > 0 ? 'PASS' : 'WARN',
       details: policyCount > 0 ? `${policyCount} markdown policy file(s).` : 'No policy markdown files found.',
     });
+
+    // Only meaningful with an index to read. Matches `gate enforcement`, which
+    // is likewise withheld outside a repo rather than reported as vacuously OK.
+    if (inGitRepo) {
+      checks.push(checkTelemetryTracking(options.configPath));
+    }
 
     const securityDenyPath = path.join(options.configPath, 'patterns', 'security-deny.json');
     if (fs.existsSync(securityDenyPath)) {
