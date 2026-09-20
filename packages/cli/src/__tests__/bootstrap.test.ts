@@ -265,15 +265,15 @@ STATE:
     );
 
     const exitCode = await bootstrapCommand(
-      { ...baseOptions, format: 'json' },
+      baseOptions,
       ['--preset', 'worker', '--skip-install', '--skip-doctor'],
     );
 
     expect(exitCode).toBe(0);
 
-    const result = JSON.parse(logs.join('\n'));
-    const setupStep = result.steps.find((s: { name: string }) => s.name === 'setup');
-    const warning = setupStep.warnings.find((w: string) => w.includes('.mcp.json'));
+    // Asserted against printed output, not the JSON result: a warning the default
+    // text run never prints is a warning the user never reads.
+    const warning = logs.find(l => l.includes('pins an absolute --ai-dir'));
 
     expect(warning).toBeDefined();
     // Names the offending path and the exact replacement.

@@ -154,6 +154,11 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     for (const f of (setupResult.step.details.updated as string[] || [])) {
       console.log(`  Updated ${f}`);
     }
+    // Setup warnings were only ever counted in the final tally, never shown — which
+    // hid actionable messages like the stale absolute --ai-dir in .mcp.json.
+    for (const warning of setupResult.step.warnings) {
+      console.log(`  Warning: ${warning}`);
+    }
     console.log('');
   }
 
