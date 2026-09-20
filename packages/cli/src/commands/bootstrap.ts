@@ -694,6 +694,26 @@ function runSetupPhase(
   }
 }
 
+/**
+ * Returns the `--ai-dir` value of an existing mcpServers.charter entry when it is an
+ * absolute path, otherwise undefined. Used to detect a .mcp.json generated before
+ * bootstrap switched to a repo-relative path.
+ */
+function absoluteAiDirArg(existingCharter: unknown): string | undefined {
+  if (!existingCharter || typeof existingCharter !== 'object' || Array.isArray(existingCharter)) {
+    return undefined;
+  }
+  const args = (existingCharter as { args?: unknown }).args;
+  if (!Array.isArray(args)) return undefined;
+
+  const flagIndex = args.indexOf('--ai-dir');
+  if (flagIndex === -1) return undefined;
+
+  const value = args[flagIndex + 1];
+  if (typeof value !== 'string' || !path.isAbsolute(value)) return undefined;
+  return value;
+}
+
 function ensureProjectMcpConfig(
   aiDir: string,
   force: boolean,
@@ -746,10 +766,27 @@ function ensureProjectMcpConfig(
   }
 
   if (existingCharter !== undefined && !force) {
+    // Repos bootstrapped before the relative --ai-dir fix carry the generating
+    // machine's absolute path, which breaks the server for every other clone.
+    // Name that case and its one-line fix, rather than sending the user to
+    // --force: --force also re-scaffolds .ai/*.adf and overwrites custom modules.
+    const staleAbsolute = absoluteAiDirArg(existingCharter);
+    if (staleAbsolute !== undefined) {
+      return {
+        created: false,
+        updated: false,
+        warning:
+          `Skipped MCP config update: .mcp.json pins an absolute --ai-dir (${staleAbsolute}), ` +
+          `which breaks the MCP server for every other clone and for CI. ` +
+          `Edit .mcp.json and replace that path with "${aiDir}". ` +
+          `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
+      };
+    }
+
     return {
       created: false,
       updated: false,
-      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (use --force to replace it).',
+      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (edit it by hand, or use --force to replace it — note that --force also re-scaffolds .ai/*.adf).',
     };
   }
 

@@ -243,6 +243,46 @@ STATE:
     expect(fs.readFileSync('.mcp.json', 'utf-8')).toBe(before);
   });
 
+  // #298: a repo bootstrapped before the relative --ai-dir fix carries another
+  // machine's absolute path. The warning must name that case and the safe fix --
+  // and must NOT send the user to --force, which re-scaffolds .ai/*.adf.
+  it('warns specifically about a stale absolute --ai-dir and does not recommend --force', async () => {
+    const stalePath = path.join(path.sep, 'home', 'someone-else', 'project', '.ai');
+    fs.writeFileSync(
+      '.mcp.json',
+      JSON.stringify(
+        {
+          mcpServers: {
+            charter: {
+              command: 'npx',
+              args: ['@stackbilt/cli', 'serve', '--ai-dir', stalePath],
+            },
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, format: 'json' },
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+
+    const result = JSON.parse(logs.join('\n'));
+    const setupStep = result.steps.find((s: { name: string }) => s.name === 'setup');
+    const warning = setupStep.warnings.find((w: string) => w.includes('.mcp.json'));
+
+    expect(warning).toBeDefined();
+    // Names the offending path and the exact replacement.
+    expect(warning).toContain(stalePath);
+    expect(warning).toContain('".ai"');
+    // Steers away from the destructive remedy rather than toward it.
+    expect(warning).toContain('Do not use --force');
+  });
+
   // #298: telemetry is per-machine usage data and must never be staged by `git add -A`.
   it('ignores the telemetry directory in the generated .charter/.gitignore', async () => {
     const exitCode = await bootstrapCommand(
