@@ -285,9 +285,11 @@ function isRetainedHeading(trimmedLine: string): boolean {
 /**
  * Read all retained sections (Environment + operational protocol headings) from
  * vendor file content and return them as a verbatim block to re-append after the
- * thin pointer. Used by restorePointer to preserve section structure (#198).
+ * thin pointer. Used by restorePointer to preserve section structure (#198),
+ * and by the compile overwrite guard to detect user notes worth refusing over
+ * (#295).
  */
-function readRetainedSections(content: string): string {
+export function readRetainedSections(content: string): string {
   const lines = content.split('\n');
   const out: string[] = [];
   let inRetained = false;

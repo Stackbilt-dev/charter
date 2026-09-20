@@ -21,11 +21,21 @@ import {
   COMPILE_TARGETS,
   TARGET_FILENAMES,
   COMPILE_BANNER_MARKER,
+  stripCharterSentinels,
 } from '@stackbilt/adf';
 import type { CompileTarget } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
+import {
+  POINTER_MARKERS,
+  POINTER_CLAUDE_MD,
+  POINTER_CLAUDE_MD_HYBRID,
+  POINTER_AGENTS_MD,
+  POINTER_CURSORRULES,
+  POINTER_GEMINI_MD,
+} from './adf';
+import { readRetainedSections } from './adf-tidy';
 
 // ============================================================================
 // Zod validation — at the CLI boundary per Zod-core-out architecture
@@ -132,6 +142,79 @@ function runStdoutMode(
   return EXIT_CODE.SUCCESS;
 }
 
+// ============================================================================
+// Retained-section protection (#295)
+// ============================================================================
+
+/**
+ * Pointer templates that may legitimately occupy each compile target's file.
+ * CLAUDE.md has two shapes — `adf init --emit-pointers` writes the plain one,
+ * `bootstrap` the hybrid one with a module index.
+ *
+ * Lazy-init to avoid the circular dependency with adf.ts at module load time,
+ * mirroring getPointerTemplates() in adf-tidy.ts.
+ */
+function pointerTemplatesFor(filename: string): string[] {
+  const byFilename: Record<string, string[]> = {
+    'CLAUDE.md': [POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID],
+    'AGENTS.md': [POINTER_AGENTS_MD],
+    '.cursorrules': [POINTER_CURSORRULES],
+    'GEMINI.md': [POINTER_GEMINI_MD],
+  };
+  return byFilename[filename] ?? [];
+}
+
+/**
+ * Split a retained-sections block (from readRetainedSections) into heading → body.
+ * Charter-managed sentinel blocks are stripped first, so a populated
+ * `## Module Index` compares equal to the empty one in the template.
+ */
+function retainedSectionMap(content: string): Map<string, string> {
+  const block = readRetainedSections(stripCharterSentinels(content));
+  const sections = new Map<string, string>();
+  let heading: string | null = null;
+  let body: string[] = [];
+
+  for (const line of block.split('\n')) {
+    if (line.trim().startsWith('## ')) {
+      if (heading) sections.set(heading, body.join('\n').trim());
+      heading = line.trim();
+      body = [];
+      continue;
+    }
+    if (heading) body.push(line);
+  }
+  if (heading) sections.set(heading, body.join('\n').trim());
+
+  return sections;
+}
+
+/**
+ * Headings whose retained content differs from every pointer template for this
+ * file — i.e. notes a user wrote into the `## Environment` slot the templates
+ * invite them to use, or an operational `## ... Protocol` block that `adf tidy`
+ * deliberately keeps in the vendor file (#198).
+ *
+ * Compiled output carries none of these sections, so writing over them would
+ * destroy content no `.ai/` module holds. The guard refuses instead; `--force`
+ * remains the way through.
+ */
+function divergentRetainedHeadings(existing: string, filename: string): string[] {
+  const templates = pointerTemplatesFor(filename);
+  const pristine = new Set<string>();
+  for (const template of templates) {
+    for (const [heading, body] of retainedSectionMap(template)) {
+      pristine.add(`${heading}\n${body}`);
+    }
+  }
+
+  const divergent: string[] = [];
+  for (const [heading, body] of retainedSectionMap(existing)) {
+    if (!pristine.has(`${heading}\n${body}`)) divergent.push(heading);
+  }
+  return divergent;
+}
+
 function runWriteMode(
   options: CLIOptions,
   targets: CompileTarget[],
@@ -146,19 +229,48 @@ function runWriteMode(
   for (const target of targets) {
     const filename = TARGET_FILENAMES[target];
 
-    // Overwrite protection: refuse to clobber a hand-written file
+    // Overwrite protection: refuse to clobber a hand-written file.
+    //
+    // Charter-owned files are safe to replace: compile artifacts (which carry the
+    // banner) and the thin pointer stubs written by `bootstrap` and
+    // `adf init --emit-pointers`. POINTER_MARKERS already includes
+    // COMPILE_BANNER_MARKER, so this subsumes the previous banner-only check
+    // rather than widening it arbitrarily. Without this, the first compile after
+    // a clean bootstrap refuses every file Charter itself just wrote (#295).
+    let replacedPointer = false;
     if (fs.existsSync(filename) && !force) {
       const existing = fs.readFileSync(filename, 'utf-8');
-      if (!existing.includes(COMPILE_BANNER_MARKER)) {
+      if (!POINTER_MARKERS.some(marker => existing.includes(marker))) {
         refused.push(filename);
         if (options.format !== 'json') {
           console.error(
-            `  [warn] Refused to overwrite ${filename} — no compile banner found (hand-written or pointer stub).\n` +
-            `         Pass --force to overwrite. This protects hand-authored CLAUDE.md files.\n` +
-            `         If migrating from thin pointers, run --force once to convert.`,
+            `  [warn] Refused to overwrite ${filename} — hand-authored content found.\n` +
+            `         Pass --force to overwrite. This protects hand-authored CLAUDE.md files.`,
           );
         }
         continue;
+      }
+      // Charter-owned, but not a previous compile artifact — the file is being
+      // converted from a pointer stub to compiled output. Surface the mode switch.
+      replacedPointer = !existing.includes(COMPILE_BANNER_MARKER);
+
+      // A pointer stub the user has written notes into is not disposable: the
+      // compiler emits no Environment or Protocol section, and `adf tidy` routes
+      // none of it into .ai/, so overwriting would destroy it outright.
+      if (replacedPointer) {
+        const divergent = divergentRetainedHeadings(existing, filename);
+        if (divergent.length > 0) {
+          refused.push(filename);
+          if (options.format !== 'json') {
+            console.error(
+              `  [warn] Refused to overwrite ${filename} — it is a charter pointer carrying your own\n` +
+              `         content under ${divergent.join(', ')}. Compiled output has no such section,\n` +
+              `         and .ai/ does not hold this content, so it would be lost.\n` +
+              `         Move it into a .ai/ module first, or pass --force to discard it.`,
+            );
+          }
+          continue;
+        }
       }
     }
 
@@ -167,7 +279,9 @@ function runWriteMode(
     written.push(filename);
 
     if (options.format !== 'json') {
-      console.log(`  [ok] Written ${filename}`);
+      console.log(
+        `  [ok] Written ${filename}${replacedPointer ? ' (replaced charter pointer stub)' : ''}`,
+      );
     }
   }
 
