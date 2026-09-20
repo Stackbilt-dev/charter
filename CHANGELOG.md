@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog and follows Semantic Versioning.
 
+## [Unreleased]
+
+### Fixed
+
+- **`adf compile --write` no longer refuses the files `bootstrap` just generated** (`#295`) — the overwrite guard keyed on the compile banner alone, so a clean `bootstrap` followed by the documented `adf compile --target all --write` produced a wall of refusals and trained users to reach for `--force`. The guard now recognises Charter thin pointers as well as compiler output. Hand-authored files carrying no Charter marker are still refused, and a file converted from pointer to compiled output is reported as `(replaced charter pointer stub)` so the transition is visible.
+- **`adf compile --write` no longer discards retained sections** (`#295`) — it refuses, rather than silently overwriting, a pointer file carrying your own content under `## Environment` or another retained heading. Compiled output has no such section and `.ai/` does not hold that content, so the previous behavior lost it with git as the only recovery. Pass `--force` to discard deliberately.
+
+### Changed
+
+- **CLI reference completeness** — added entries for `adf compile`, `adf tidy`, `adf populate`, `adf context` and `adf suggest`, which were implemented but undocumented.
+
 ## [1.9.3] - 2026-09-08
 
 ### Fixed

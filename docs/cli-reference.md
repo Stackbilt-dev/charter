@@ -381,6 +381,104 @@ npx charter adf metrics recalibrate --auto-rationale --format json     # machine
 
 One of `--reason` or `--auto-rationale` is required.
 
+### charter adf compile
+
+Outbound compiler: renders the `.ai/*.adf` source tree into flat vendor agent-config files. The inverse of `charter adf migrate` and `charter adf tidy`, which fold vendor content back into `.ai/`.
+
+```bash
+npx charter adf compile --target claude                 # print to stdout
+npx charter adf compile --target all --write            # write all four vendor files
+npx charter adf compile --target all --check            # CI drift gate
+npx charter adf compile --target claude --write --force # overwrite regardless of guard
+```
+
+- `--target <claude|agents|cursor|gemini|all>` — vendor target: `claude`→`CLAUDE.md`, `agents`→`AGENTS.md`, `cursor`→`.cursorrules`, `gemini`→`GEMINI.md`. `all` requires `--write` or `--check`.
+- `--write` — write output to the repo root, subject to the overwrite guard below
+- `--check` — diff compiled output against files on disk; exit 1 if stale
+- `--force` — with `--write`, bypass the overwrite guard entirely
+- `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
+
+Default with no `--write` or `--check` prints to stdout, single target only.
+
+**Overwrite guard.** With `--write` and no `--force`, compile writes a file only when it recognises it as Charter-owned — either compiler output (carrying the compile banner) or a Charter thin pointer. It refuses in two cases:
+
+- the file is hand-authored and carries no Charter marker
+- the file is a pointer carrying your own content under a retained heading (`## Environment` and the other headings `adf tidy` retains) that the pointer template does not have
+
+The second case matters because compiled output has no `## Environment` section and `.ai/` does not hold that content, so overwriting would lose it with no way back except git. Move such content into a `.ai/` module first, or pass `--force` to discard it.
+
+A file converted from pointer to compiled output is reported as `Written CLAUDE.md (replaced charter pointer stub)`, so the transition is visible rather than silent.
+
+### charter adf tidy
+
+Scans vendor config files for content added beyond the thin pointer, classifies it, routes it into ADF modules, and restores the pointer. Runs automatically in the generated pre-commit hook.
+
+```bash
+npx charter adf tidy                        # classify and route, restore pointers
+npx charter adf tidy --dry-run              # preview without modifying files
+npx charter adf tidy --dry-run --ci         # exit 1 if bloat found (pre-commit gating)
+npx charter adf tidy --source CLAUDE.md     # single file
+```
+
+- `--dry-run` — preview without modifying files
+- `--ci` — exit 1 if bloat is found; combine with `--dry-run` for gating
+- `--source <file>` — tidy a single file instead of scanning all vendor configs
+- `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
+
+Retained headings (`## Environment`, `## Module Index`, `## Session*`, and operational protocol headings) are kept in the vendor file verbatim rather than routed into `.ai/`.
+
+Note that the skip for compiler output lives in the generated pre-commit hook, which drops banner-carrying files before invoking tidy — not in `adf tidy` itself. Run directly against a compiled file, tidy treats it as a pointer and folds its content back into `.ai/`. See [#296](https://github.com/Stackbilt-dev/charter/issues/296).
+
+### charter adf populate
+
+Auto-fills ADF files from codebase signals — `package.json`, README, and stack detection. Populates `CONTEXT` in `core.adf`, `backend.adf` and `frontend.adf`, and `STATE` in `state.adf`.
+
+```bash
+npx charter adf populate --dry-run   # preview
+npx charter adf populate             # fill empty sections
+npx charter adf populate --force     # overwrite existing custom content
+```
+
+- `--dry-run` — preview without writing
+- `--force` — overwrite sections that already hold custom content
+- `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
+
+Files with existing custom content are skipped unless `--force` is passed.
+
+### charter adf context
+
+Resolves which ADF modules apply to a set of file paths and/or explicit keywords, deriving keywords from file extensions and directory names (for example `src/components/*.tsx` → `react`, `ui`, `frontend`).
+
+```bash
+npx charter adf context --files "src/api/routes.ts,src/db/schema.sql"
+npx charter adf context --keywords "auth,migration"
+npx charter adf context --files "src/ui/Button.tsx" --bundle
+```
+
+- `--files <paths>` — comma-separated file paths to derive keywords from
+- `--keywords <text>` — additional keywords, in addition to any derived. Accepts a comma-separated list or free text: the value is split on whitespace and `,;:()[]{}`, and single characters are dropped.
+- `--bundle` — emit the merged ADF document instead of the resolution summary
+- `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
+
+Reports the derived keywords and each resolved module as `DEFAULT` or `ON_DEMAND`.
+
+### charter adf suggest
+
+Diagnostics over `.charter/telemetry/events.ndjson`: dead modules, recurring unmatched keywords, and modules that load while a downstream command still fails. Report-only — no module attribution is guessed and nothing is applied automatically.
+
+```bash
+npx charter adf suggest
+npx charter adf suggest --min-occurrences 5
+npx charter adf suggest --emit-ops /tmp/ops.json
+```
+
+- `--min-occurrences <n>` — threshold before a signal is reported (default: `3`)
+- `--window-minutes <n>` — time-window fallback for joining a resolution to a later command outcome when no `sessionId` is set (default: `60`)
+- `--emit-ops <file>` — write non-ambiguous candidates as `REPLACE_BULLET` ops for review, then apply with `charter adf patch --ops-file <file>`
+- `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
+
+Also reports co-occurrence trigger candidates — a weaker, non-failure-backed heuristic where a keyword often appears alongside one that already triggers a module.
+
 ### charter blast
 
 Compute the blast radius of a change: which files transitively depend on the given seed files?
