@@ -83,14 +83,11 @@ const NOT_IN_GIT_REPO_WARNING =
  * immediately before the section's trailing blank line. Omit `render` for a phase
  * that draws no section at all, such as one skipped by `--mode lean`.
  *
- * #307: phases 6 (populate) and 7 (doctor) added their warnings to the summary
- * tally but never printed the text, so a default run reported a count with
- * nothing to read. #304 had already fixed the same swallow in phase 2 by copying
- * the print loop; hoisting it here is what stops a phase 8 from reintroducing it.
- *
- * Returns the number of warnings the phase recorded, for the summary tally.
+ * Nothing type-checks that return value: a `render` that claims a warning it did
+ * not draw silently swallows it. So claim strings that were actually printed,
+ * never the whole `step.warnings` array.
  */
-function completePhase(
+export function completePhase(
   result: BootstrapResult,
   options: CLIOptions,
   step: StepResult,
@@ -311,16 +308,21 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       return [];
     }
     console.log(`  Failed: ${installResult.step.details.error}`);
+    const drawn: string[] = [];
     for (const w of installResult.step.warnings) {
       if (w.startsWith('Hint:') || w.startsWith('Retry')) {
         console.log(`  ${w}`);
+        drawn.push(w);
+      } else if (w === `Install failed: ${installResult.step.details.error}`) {
+        // The `Failed:` line above is this warning, reworded.
+        drawn.push(w);
       }
     }
     console.log('  (non-fatal)');
-    // Every warning this phase records is already on screen: the `Failed:` line
-    // carries the same message as the `Install failed:` warning, and the Hint and
-    // Retry lines are printed above without the `Warning:` prefix.
-    return installResult.step.warnings;
+    // Only the lines actually drawn are claimed. Any other warning this phase
+    // grows later falls through to completePhase and prints, rather than being
+    // swallowed by a wholesale claim on step.warnings.
+    return drawn;
   });
 
   // ========================================================================

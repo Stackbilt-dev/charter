@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bootstrapCommand } from '../commands/bootstrap';
+import { bootstrapCommand, completePhase } from '../commands/bootstrap';
 import { doctorCommand } from '../commands/doctor';
 import { driftCommand } from '../commands/drift';
 import type { CLIOptions } from '../index';
@@ -659,16 +659,24 @@ describe('bootstrapCommand — every phase prints its warnings (#307)', () => {
     expect(logs).toContain('  Warning: Some health checks returned warnings.');
   });
 
-  // Bug detector, phase 6. Whatever `populate` records must reach the screen.
-  // The precondition assertion is deliberate: if populate ever stops warning in
-  // this environment this test must fail loudly rather than pass vacuously.
+  // Bug detector, phase 6, end to end. Whatever `populate` records must reach the
+  // screen. It warns here only because `runPopulatePhase` reaches `adf-populate`
+  // through a bare `require`, which Node's CJS resolver cannot satisfy against a
+  // .ts module under vitest; the built CLI resolves it and records no warning.
+  // That lever is an accident of the test environment, so the precondition below
+  // asserts it rather than assuming it. If this test ever fails on the
+  // precondition, phase 6 has simply stopped warning here -- delete it; the
+  // completePhase contract tests below cover the same path deliberately.
   it('prints the populate phase warnings in text output', async () => {
     mockIsGitRepo = false;
 
     const { steps, text } = await runBothFormats(['--preset', 'worker', '--skip-install', '--skip-doctor']);
     const populateWarnings = warningsOf(steps, 'populate');
 
-    expect(populateWarnings.length).toBeGreaterThan(0);
+    expect(
+      populateWarnings.length,
+      'phase 6 recorded no warning, so this test can no longer detect anything',
+    ).toBeGreaterThan(0);
     for (const warning of populateWarnings) {
       expect(text.some(line => line.includes(warning))).toBe(true);
     }
@@ -700,6 +708,51 @@ describe('bootstrapCommand — every phase prints its warnings (#307)', () => {
 
     expect(logs.filter(l => l.includes('Not inside a git repository'))).toHaveLength(1);
     expect(logs.filter(l => l.includes('governance files will be written'))).toHaveLength(1);
+  });
+
+  // Guard on phase 5's partial claim, end to end. Its section draws the
+  // `Install failed:` warning as a differently worded `Failed:` line and the
+  // Hint/Retry warnings unprefixed, then claims exactly those. If it ever goes
+  // back to claiming `step.warnings` wholesale while drawing less, a warning
+  // becomes invisible and this fails -- every recorded warning must be readable
+  // somewhere in the section.
+  it('leaves no install-phase warning unreadable in text output', async () => {
+    mockIsGitRepo = false;
+    execSyncOverride = () => {
+      throw new Error('ERR_PNPM_FROZEN_LOCKFILE: Lockfile is not up-to-date');
+    };
+
+    let steps: Array<{ name: string; warnings: string[] }>;
+    let text: string[];
+    try {
+      logs = [];
+      await bootstrapCommand({ ...baseOptions, format: 'json' }, ['--preset', 'worker', '--skip-doctor']);
+      steps = JSON.parse(logs[0]).steps;
+
+      logs = [];
+      await bootstrapCommand(baseOptions, ['--preset', 'worker', '--skip-doctor']);
+      text = logs;
+    } finally {
+      execSyncOverride = null;
+    }
+
+    const installWarnings = warningsOf(steps, 'install');
+    // All three shapes runInstallPhase records today.
+    expect(installWarnings).toHaveLength(3);
+
+    for (const warning of installWarnings) {
+      // Readable either verbatim (as `  <w>` or `  Warning: <w>`) or, for the
+      // install-failed warning, as the `  Failed: <msg>` line that rewords it.
+      const verbatim = text.some(l => l.includes(warning));
+      const reworded = warning.startsWith('Install failed: ')
+        && text.some(l => l.startsWith('  Failed: ') && l.includes(warning.slice('Install failed: '.length)));
+      expect(verbatim || reworded, `install warning is invisible in text output: ${warning}`).toBe(true);
+    }
+
+    // And none of them is printed twice.
+    for (const warning of installWarnings) {
+      expect(text.filter(l => l === `  Warning: ${warning}`).length).toBeLessThanOrEqual(1);
+    }
   });
 
   // Guard: lean mode never runs phases 4-6, so it must not gain their headers or
@@ -826,5 +879,146 @@ describe('bootstrapCommand — Windows absolute --ai-dir detected on a POSIX hos
     );
 
     expect(await runBootstrap()).toBeUndefined();
+  });
+});
+
+// #307: the hoist makes omission structurally impossible -- every phase reaches
+// `result.steps` through `completePhase`, so no phase can record a warning
+// without printing it. What is NOT type-checked is the other half of the deal:
+// `render` returns the warnings it claims to have drawn itself, and a claim on a
+// string it never printed swallows that warning silently. These pin that contract
+// directly, independent of any one phase's wiring.
+//
+// These are guards on the new helper, not bug detectors: `completePhase` does not
+// exist on main, so they cannot be run against it.
+describe('completePhase — the warning-printing contract (#307)', () => {
+  let logs: string[];
+
+  beforeEach(() => {
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const textOptions: CLIOptions = { configPath: '.charter', format: 'text', ciMode: false, yes: false };
+
+  function emptyResult() {
+    return { status: 'success' as const, steps: [], nextSteps: [] };
+  }
+
+  // Phase 6 and 7 shape: the section draws no warning wording of its own, so every
+  // warning must be printed by the helper.
+  it('prints a warning the section did not draw', () => {
+    const result = emptyResult();
+
+    const count = completePhase(
+      result,
+      textOptions,
+      { name: 'populate', status: 'pass', details: {}, warnings: ['Populate failed (non-fatal): boom'] },
+      () => {
+        console.log('[6/7] Auto-populating ADF modules...');
+        console.log('  No scaffold content to replace');
+        return [];
+      },
+    );
+
+    expect(count).toBe(1);
+    expect(result.steps).toHaveLength(1);
+    expect(logs).toEqual([
+      '[6/7] Auto-populating ADF modules...',
+      '  No scaffold content to replace',
+      '  Warning: Populate failed (non-fatal): boom',
+      '',
+    ]);
+  });
+
+  // Phase 1, 4 and 5 shape: a warning the section worded itself must not be
+  // printed a second time.
+  it('does not reprint a warning the section claims it drew', () => {
+    completePhase(
+      emptyResult(),
+      textOptions,
+      { name: 'detect', status: 'pass', details: {}, warnings: ['mine'] },
+      () => {
+        console.log('  ...drawn in my own wording');
+        return ['mine'];
+      },
+    );
+
+    expect(logs.filter(l => l.includes('mine'))).toHaveLength(0);
+    expect(logs).toEqual(['  ...drawn in my own wording', '']);
+  });
+
+  // The phase 5 trap this closes. Its section draws only the `Install failed:`,
+  // `Hint:` and `Retry` shapes; it used to claim the whole `step.warnings` array,
+  // so any other warning the phase grew later would have been swallowed. A partial
+  // claim must leave the rest to the helper.
+  it('prints a warning outside the shapes a section drew and claimed', () => {
+    completePhase(
+      emptyResult(),
+      textOptions,
+      {
+        name: 'install',
+        status: 'fail',
+        details: { error: 'boom' },
+        warnings: ['Install failed: boom', 'Hint: try again', 'Retry manually: pnpm install', 'Disk quota exceeded'],
+      },
+      () => {
+        console.log('  Failed: boom');
+        console.log('  Hint: try again');
+        console.log('  Retry manually: pnpm install');
+        return ['Install failed: boom', 'Hint: try again', 'Retry manually: pnpm install'];
+      },
+    );
+
+    expect(logs).toContain('  Warning: Disk quota exceeded');
+    // The three it really did draw are still not repeated.
+    expect(logs.filter(l => l.startsWith('  Warning: '))).toEqual(['  Warning: Disk quota exceeded']);
+  });
+
+  // A phase that draws no section at all (lean mode) still surfaces warnings
+  // rather than silently dropping them.
+  it('prints warnings for a phase that draws no section', () => {
+    completePhase(
+      emptyResult(),
+      textOptions,
+      { name: 'migrate', status: 'skip', details: {}, warnings: ['skipped but noteworthy'] },
+    );
+
+    expect(logs).toEqual(['  Warning: skipped but noteworthy', '']);
+  });
+
+  it('prints nothing for a silent phase that draws no section', () => {
+    completePhase(
+      emptyResult(),
+      textOptions,
+      { name: 'migrate', status: 'skip', details: {}, warnings: [] },
+    );
+
+    expect(logs).toEqual([]);
+  });
+
+  // The step still reaches the JSON payload, and nothing is printed, under --format json.
+  it('records the step without drawing anything under --format json', () => {
+    const result = emptyResult();
+
+    const count = completePhase(
+      result,
+      { ...textOptions, format: 'json' },
+      { name: 'doctor', status: 'fail', details: {}, warnings: ['Some health checks returned warnings.'] },
+      () => {
+        console.log('should not be called');
+        return [];
+      },
+    );
+
+    expect(count).toBe(1);
+    expect(result.steps).toHaveLength(1);
+    expect(logs).toEqual([]);
   });
 });
