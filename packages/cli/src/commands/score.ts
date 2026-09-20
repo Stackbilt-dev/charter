@@ -423,8 +423,29 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     commandSignals.push(...extractCommandSignals(file, content, inventory.fileSet, packageManager));
   }
 
+  // #293: a bare filename inside a fenced directory tree carries its path prefix structurally,
+  // through indentation, not textually — so `random.ts` fails a literal path check even though
+  // src/simulation/random.ts exists. Before calling a reference broken, fall back to resolving it
+  // by basename against the repo's real files. inventory.files comes from
+  // `git ls-files --cached --others --exclude-standard`, so node_modules, dist and every
+  // gitignored path are already excluded and cannot pollute the index. Matching is exact-case,
+  // matching git's own semantics, and only a UNIQUE basename resolves — zero or several matches
+  // stay broken rather than resolving arbitrarily.
+  const basenameIndex = new Map<string, string[]>();
+  for (const file of inventory.files) {
+    const basename = path.posix.basename(file);
+    const matches = basenameIndex.get(basename);
+    if (matches) {
+      matches.push(file);
+    } else {
+      basenameIndex.set(basename, [file]);
+    }
+  }
+  const resolvesByBasename = (resolved: string): boolean =>
+    basenameIndex.get(path.posix.basename(resolved))?.length === 1;
+
   const brokenPaths = [...pathReferences.values()]
-    .filter((reference) => !pathExists(reference.resolved))
+    .filter((reference) => !pathExists(reference.resolved) && !resolvesByBasename(reference.resolved))
     .map((reference) => reference.resolved);
   const validPaths = pathReferences.size - brokenPaths.length;
   const documentedTestCommands = [...new Set(

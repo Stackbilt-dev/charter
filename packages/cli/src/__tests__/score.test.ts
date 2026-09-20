@@ -283,6 +283,94 @@ Hostname with port: localhost:3000
     const broken: string[] = report.signals.grounding.pathReferences.broken;
     expect(broken).toContain('docs/runbooks');
   });
+
+  it('grounding checker resolves directory-tree filenames by unique basename', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, 'src', 'simulation'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'src', 'terminal'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'src', 'simulation', 'random.ts'), 'export const seed = 1;\n');
+    fs.writeFileSync(path.join(tmp, 'src', 'terminal', 'terminalEvents.ts'), 'export type TerminalEvent = { kind: string };\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'tree-test', version: '1.0.0' }, null, 2));
+
+    // A fenced directory tree expresses the path prefix structurally, through indentation, so the
+    // tokens are real filenames with the prefix missing. Regression for #293.
+    fs.writeFileSync(path.join(tmp, 'README.md'), [
+      '# Tree Repo',
+      '',
+      '```',
+      'src/',
+      '  terminal/    terminalEvents.ts (event protocol)',
+      '  simulation/  random.ts (seeded RNG)',
+      '```',
+      '',
+      'The queue lives in simulation/random.ts.',
+      '',
+    ].join('\n'));
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).not.toContain('terminalEvents.ts');
+    expect(broken).not.toContain('random.ts');
+    expect(broken).not.toContain('simulation/random.ts');
+  });
+
+  it('grounding checker keeps an ambiguous basename broken rather than resolving it arbitrarily', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, 'a'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'b'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'a', 'index.ts'), 'export const a = 1;\n');
+    fs.writeFileSync(path.join(tmp, 'b', 'index.ts'), 'export const b = 2;\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'ambiguous-test', version: '1.0.0' }, null, 2));
+
+    // Two files share the basename, so #293 basename resolution must not pick one.
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), 'Start reading at `index.ts` before anything else.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).toContain('index.ts');
+  });
+
+  it('grounding checker matches basenames case-sensitively', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
+    // The only README lives in docs/, so neither reference resolves as a literal root path on a
+    // case-sensitive or a case-insensitive filesystem — the basename index is what is under test.
+    fs.writeFileSync(path.join(tmp, 'docs', 'README.md'), '# Docs\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'case-test', version: '1.0.0' }, null, 2));
+
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), 'Read `README.md` first; the old `Readme.md` is gone.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).not.toContain('README.md');
+    expect(broken).toContain('Readme.md');
+  });
+
+  it('grounding checker still reports a reference that exists nowhere in the repo', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+
+    fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'src', 'index.ts'), 'export const main = 1;\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'real-broken-test', version: '1.0.0' }, null, 2));
+
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), 'Deploy config lives in `wrangler.toml` and the schema in `db/schema.sql`.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    const broken: string[] = report.signals.grounding.pathReferences.broken;
+    expect(broken).toContain('wrangler.toml');
+    expect(broken).toContain('db/schema.sql');
+  });
 });
 
 describe('badge helpers', () => {
