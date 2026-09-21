@@ -20,7 +20,7 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ### Changed
 
-- **CLI reference completeness** — added entries for `adf compile`, `adf tidy`, `adf populate`, `adf context` and `adf suggest`, which were implemented but undocumented.
+- **CLI reference completeness** — added entries for `adf compile`, `adf tidy`, `adf populate`, `adf context` and `adf suggest`, which were implemented but undocumented, and for the top-level `score`, `telemetry` and `stamp-policies` commands, which were likewise missing. The `adf tidy` entry previously stated that compiler output was skipped by the generated pre-commit hook rather than by the command, and that tidy run directly against a compiled file would fold it back into `.ai/`; both were true when written and are corrected by `#296`.
 
 ## [1.9.3] - 2026-09-08
 
