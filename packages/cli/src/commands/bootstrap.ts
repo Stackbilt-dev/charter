@@ -47,7 +47,7 @@ import {
 } from './adf';
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest, formatAdf } from '@stackbilt/adf';
-import { migrateSource, updateModuleIndex } from './adf-migrate';
+import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
 import type { SourceMigrationResult } from './adf-migrate';
 
 // ============================================================================
@@ -1021,8 +1021,9 @@ function runAdfInitPhase(
       } else if (!isAlreadyThinPointer(pointerPath)) {
         // File has custom content — don't overwrite. Name the narrow remedy rather
         // than sending the user to --force, which also re-scaffolds .ai/*.adf and
-        // overwrites custom modules (#305). --source is explicit because migrate's
-        // default discovery list spells AGENTS.md in lowercase.
+        // overwrites custom modules (#305). --source scopes migration to the one
+        // file named here; a bare `adf migrate` would also take every other agent
+        // config file it discovers.
         warnings.push(
           `${pf.name} has custom content; skipping pointer. ` +
           `Run 'charter adf migrate --source ${pf.name}' to move its rules into .ai/ and replace it with a thin pointer, ` +
@@ -1067,11 +1068,6 @@ function runAdfInitPhase(
 // Phase 4: Migrate Agent Configs
 // ============================================================================
 
-const AGENT_CONFIG_FILES = [
-  'CLAUDE.md', '.cursorrules', 'agents.md',
-  'GEMINI.md', 'copilot-instructions.md',
-];
-
 function runMigratePhase(
   options: CLIOptions,
   force: boolean,
@@ -1081,9 +1077,8 @@ function runMigratePhase(
 
   try {
     // Find agent config files that aren't already thin pointers
-    const sources = AGENT_CONFIG_FILES.filter(f => {
+    const sources = discoverAgentConfigFiles().filter(f => {
       const fullPath = path.resolve(f);
-      if (!fs.existsSync(fullPath)) return false;
       const content = fs.readFileSync(fullPath, 'utf-8');
       return !CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
     });
