@@ -51,6 +51,35 @@ describe('parseTrailersFromMessage', () => {
     expect(result.governedBy).toHaveLength(0);
     expect(result.resolvesRequest).toHaveLength(0);
   });
+
+  // #340: CI must agree with the commit-msg gate, which sees the message after
+  // `git stripspace` and requires `[ \t]*.+` after the colon.
+  it.each([
+    ['spaces', 'Governed-By:   '],
+    ['tabs', 'Governed-By:\t\t'],
+    ['nothing', 'Governed-By:'],
+    ['spaces, Resolves-Request', 'Resolves-Request:  '],
+  ])('rejects a whitespace-only trailer value (%s)', (_label, trailer) => {
+    const result = parseTrailersFromMessage('ws1', `fix: x\n\n${trailer}`);
+    expect(result.governedBy).toEqual([]);
+    expect(result.resolvesRequest).toEqual([]);
+  });
+
+  it('accepts leading whitespace before the value and trims it', () => {
+    const result = parseTrailersFromMessage('ws2', 'fix: x\n\nGoverned-By: \t  ADR-001');
+    expect(result.governedBy).toEqual([{ commitSha: 'ws2', reference: 'ADR-001' }]);
+  });
+
+  it('accepts trailing whitespace after the value and trims it', () => {
+    const result = parseTrailersFromMessage('ws3', 'fix: x\n\nResolves-Request: REQ-7  \t');
+    expect(result.resolvesRequest).toEqual([{ commitSha: 'ws3', reference: 'REQ-7' }]);
+  });
+
+  it('ends the trailer block at a whitespace-only trailer line, as the hook does', () => {
+    const message = 'fix: x\n\nGoverned-By: ADR-001\nAcked-By:   \nCo-Authored-By: A <a@example.com>';
+    const result = parseTrailersFromMessage('ws4', message);
+    expect(result.governedBy).toEqual([]);
+  });
 });
 
 describe('parseAllTrailers', () => {

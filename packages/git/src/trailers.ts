@@ -9,6 +9,16 @@
 
 import type { GitCommit } from '@stackbilt/types';
 
+// A trailer value must contain a non-whitespace character. `Governed-By:   ` is
+// not a trailer: the commit-msg gate (#299) sees it after `git stripspace` has
+// removed the trailing blanks, where its `[ \t]*.+` no longer matches, so the
+// hook neither counts it nor keeps scanning the trailer block past it.
+// `\s*\S.*` gives CI the same answer on the raw message (#340). Whitespace
+// before the value and after it are both allowed; callers get the value trimmed.
+const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*:\s*\S.*$/;
+const GOVERNED_BY = /^Governed-By:\s*(\S.*)$/i;
+const RESOLVES_REQUEST = /^Resolves-Request:\s*(\S.*)$/i;
+
 interface ParsedTrailers {
   governedBy: Array<{ commitSha: string; reference: string }>;
   resolvesRequest: Array<{ commitSha: string; reference: string }>;
@@ -26,7 +36,7 @@ export function parseTrailersFromMessage(commitSha: string, message: string): Pa
   const lines = extractTerminalTrailerBlockLines(message);
 
   for (const line of lines) {
-    const governedByMatch = line.match(/^Governed-By:\s*(.+)$/i);
+    const governedByMatch = line.match(GOVERNED_BY);
     if (governedByMatch) {
       result.governedBy.push({
         commitSha,
@@ -34,7 +44,7 @@ export function parseTrailersFromMessage(commitSha: string, message: string): Pa
       });
     }
 
-    const resolvesMatch = line.match(/^Resolves-Request:\s*(.+)$/i);
+    const resolvesMatch = line.match(RESOLVES_REQUEST);
     if (resolvesMatch) {
       result.resolvesRequest.push({
         commitSha,
@@ -61,7 +71,7 @@ function extractTerminalTrailerBlockLines(message: string): string[] {
     if (line.trim() === '') {
       break;
     }
-    if (!/^[A-Za-z][A-Za-z0-9-]*:\s*.+$/.test(line)) {
+    if (!TRAILER_LINE.test(line)) {
       break;
     }
     trailerLines.push(line);
