@@ -18,8 +18,12 @@ interface HookInstallResult {
 }
 
 const COMMIT_MSG_HOOK_MARKER = '# Managed by Charter: commit-msg trailer normalizer';
+// Second marker so doctor can tell a gating hook from the pre-#299 normalizer-only
+// hook; both carry COMMIT_MSG_HOOK_MARKER, which keeps old installs recognised as managed.
+const COMMIT_MSG_GATE_MARKER = '# Charter commit-msg trailer gate: rejects missing trailers when git.requireTrailers is on';
 const COMMIT_MSG_HOOK_CONTENT = `#!/usr/bin/env sh
 ${COMMIT_MSG_HOOK_MARKER}
+${COMMIT_MSG_GATE_MARKER}
 set -eu
 
 msg_file="$1"
@@ -33,6 +37,57 @@ fi
 
 if [ -n "$resolves_request" ]; then
   git interpret-trailers --in-place --if-exists=replace --trailer "Resolves-Request: $resolves_request" "$msg_file"
+fi
+
+# Trailer gate (#299). Mirrors what "charter validate --ci" fails on: with
+# git.requireTrailers true, a commit needs a Governed-By or Resolves-Request
+# trailer (either one, key case-insensitive) in the terminal trailer block, and
+# the policy is blocking when validation.citationStrictness is FAIL (the
+# default) or STRICT, or ci.failOnWarn is true. Advisory strictness only warns.
+# No config file, no node, requireTrailers not true, or unparseable JSON: no gate.
+gate_mode="off"
+if [ -f ".charter/config.json" ] && command -v node >/dev/null 2>&1; then
+  gate_mode="$(node -e '
+var mode = "off";
+try {
+  var c = JSON.parse(require("fs").readFileSync(".charter/config.json", "utf8"));
+  if (c && c.git && c.git.requireTrailers === true) {
+    var v = c.validation && c.validation.citationStrictness !== undefined ? c.validation.citationStrictness : "FAIL";
+    mode = (v === "FAIL" || v === "STRICT" || (c.ci && c.ci.failOnWarn)) ? "block" : "warn";
+  }
+} catch (e) {}
+process.stdout.write(mode);
+' 2>/dev/null)" || gate_mode="off"
+fi
+
+if [ "$gate_mode" = "block" ] || [ "$gate_mode" = "warn" ]; then
+  # Check the message git will record: drop a "commit -v" diff below the
+  # scissors line and comment lines, then scan the terminal trailer block.
+  trailer_state="$(sed -E '/^[^[:space:]]+ -+ >8 -+$/,$d' "$msg_file" | git stripspace --strip-comments | awk '
+    { lines[NR] = $0 }
+    END {
+      i = NR
+      while (i > 0 && lines[i] ~ /^[[:space:]]*$/) i--
+      if (i == 0) { print "empty"; exit }
+      found = "missing"
+      for (; i > 0; i--) {
+        line = lines[i]
+        if (line ~ /^[[:space:]]*$/) break
+        if (line !~ /^[A-Za-z][A-Za-z0-9-]*:[[:space:]]*.+$/) break
+        lower = tolower(line)
+        if (lower ~ /^governed-by:[[:space:]]*.+$/ || lower ~ /^resolves-request:[[:space:]]*.+$/) found = "present"
+      }
+      print found
+    }')" || trailer_state="present"
+
+  if [ "$trailer_state" = "missing" ]; then
+    if [ "$gate_mode" = "block" ]; then
+      echo "[commit-msg] Rejected: git.requireTrailers is on and the message has no Governed-By or Resolves-Request trailer." >&2
+      echo "  Add one as the last line of the message, for example: Governed-By: ADR-001" >&2
+      exit 1
+    fi
+    echo "[commit-msg] Warning: no Governed-By or Resolves-Request trailer (not blocking: validation.citationStrictness is advisory)." >&2
+  fi
 fi
 `;
 
@@ -323,7 +378,8 @@ function printHelp(): void {
   console.log('    charter hook print --mcp-config [--client claude|codex|cursor] [--ai-dir <dir>]');
   console.log('');
   console.log('  --commit-msg: Install a git commit-msg hook that normalizes Governed-By and');
-  console.log('  Resolves-Request trailers using git interpret-trailers.');
+  console.log('  Resolves-Request trailers using git interpret-trailers. When .charter/config.json');
+  console.log('  sets git.requireTrailers and blocking validation, it rejects a message with neither.');
   console.log('');
   console.log('  --pre-commit: Install a git pre-commit hook that auto-tidies vendor config files');
   console.log('  (CLAUDE.md, .cursorrules, AGENTS.md, etc.) and runs ADF evidence checks.');

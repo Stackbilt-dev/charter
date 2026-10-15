@@ -215,7 +215,7 @@ Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|b
 
 ### `charter doctor`
 
-Validate CLI installation, `.charter/` config, governance gate wiring, and ADF readiness (manifest existence, module parseability, sync lock status). Strict trailer configuration warns when no active hook or GitHub Actions workflow invokes `charter validate --ci`; the commit-msg hook alone only normalizes trailers that are already present.
+Validate CLI installation, `.charter/` config, governance gate wiring, and ADF readiness (manifest existence, module parseability, sync lock status). Strict trailer configuration warns when no active hook or GitHub Actions workflow enforces trailers: a hook or workflow that invokes `charter validate --ci`, or the commit-msg trailer gate installed by `charter hook install --commit-msg`. A commit-msg hook installed before the gate existed only normalizes trailers that are already present; re-run the install to replace it.
 Use `charter doctor --adf-only --ci` for strict ADF wiring gates in automation.
 
 ### `charter validate`
@@ -293,7 +293,7 @@ charter hook install --commit-msg
 charter hook install --pre-commit
 ```
 
-- `--commit-msg`: Install a commit-msg hook that normalizes `Governed-By` and `Resolves-Request` trailers using `git interpret-trailers`.
+- `--commit-msg`: Install a commit-msg hook that normalizes `Governed-By` and `Resolves-Request` trailers using `git interpret-trailers`, and rejects a message carrying neither when `.charter/config.json` sets `git.requireTrailers: true` and `charter validate --ci` would fail on it (`validation.citationStrictness` `FAIL` — the default — or `STRICT`, or `ci.failOnWarn: true`). Advisory strictness prints a warning instead. No config file, unparseable JSON, or `node` missing from `PATH` disables the gate.
 - `--pre-commit`: Install a pre-commit hook that enforces ADF routing with `charter doctor --adf-only --ci` and validates ceilings with `charter adf evidence --auto-measure --ci` (or `pnpm run verify:adf` when that script exists). Only gates when `.ai/manifest.adf` exists — no-op otherwise.
 - `--force` (or global `--yes`) allows overwrite when a non-Charter hook already exists.
 - Both flags can be passed together to install both hooks in one command.

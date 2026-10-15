@@ -9,6 +9,8 @@ interface GateEnforcementCheck {
 }
 
 const COMMIT_MSG_NORMALIZER_MARKER = 'Managed by Charter: commit-msg trailer normalizer';
+// Present only in commit-msg hooks generated since #299, which reject missing trailers.
+const COMMIT_MSG_GATE_MARKER = 'Charter commit-msg trailer gate';
 
 /** Check whether a strict trailer policy has a local hook or CI gate wired. */
 export function checkGateEnforcement(): GateEnforcementCheck {
@@ -30,7 +32,7 @@ export function checkGateEnforcement(): GateEnforcementCheck {
 
   const normalizer = findCommitMsgNormalizer(hooksDir);
   const normalizerNote = normalizer
-    ? ` The Charter commit-msg hook at ${normalizer} normalizes supplied trailers but does not reject missing trailers.`
+    ? ` The Charter commit-msg hook at ${normalizer} normalizes supplied trailers but does not reject missing trailers; re-run "charter hook install --commit-msg" to replace it with the trailer gate.`
     : '';
   return {
     name: 'gate enforcement',
@@ -64,7 +66,7 @@ function findValidateHook(hooksDir: string): string | undefined {
   for (const name of ['commit-msg', 'pre-commit']) {
     const hookPath = path.join(hooksDir, name);
     const content = readText(hookPath);
-    if (content && invokesCharterValidate(content)) {
+    if (content && (invokesCharterValidate(content) || (name === 'commit-msg' && content.includes(COMMIT_MSG_GATE_MARKER)))) {
       return displayPath(hookPath);
     }
   }
