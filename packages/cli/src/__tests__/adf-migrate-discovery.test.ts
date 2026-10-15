@@ -53,6 +53,20 @@ describe('adf migrate discovery — AGENTS.md casing (#343)', () => {
     expect(found[0].toLowerCase()).toBe('agents.md');
   });
 
+  it('reports two names for one file once, under AGENTS.md', (ctx) => {
+    fs.writeFileSync('AGENTS.md', customAgents);
+    try {
+      // Case-sensitive FS: a hard link makes agents.md a second name for the same
+      // file. Case-insensitive FS: the name already resolves to AGENTS.md, so
+      // linkSync throws EEXIST and that case-folding path is what gets exercised.
+      fs.linkSync('AGENTS.md', 'agents.md');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') ctx.skip();
+    }
+    expect(discoverAgentConfigFiles()).toEqual(['AGENTS.md']);
+  });
+
   it('a bare `adf migrate` picks up AGENTS.md without --source', async () => {
     fs.writeFileSync('AGENTS.md', customAgents);
 

@@ -53,9 +53,29 @@ export const AGENT_CONFIG_FILES = [
 ];
 
 /**
+ * Identify a file by device and inode (Node reports the NTFS file index as ino on
+ * Windows), so two names for one file compare equal even where realpath(3) does
+ * not canonicalise the final component's case (macOS APFS). Falls back to
+ * realpathSync.native, then the resolved path, when the filesystem reports no ino.
+ */
+function fileIdentity(fullPath: string): string {
+  try {
+    const st = fs.statSync(fullPath);
+    if (st.ino) return `${st.dev}:${st.ino}`;
+  } catch {
+    // Fall through to the path-based identities below.
+  }
+  try {
+    return fs.realpathSync.native(fullPath);
+  } catch {
+    return fullPath;
+  }
+}
+
+/**
  * Return the AGENT_CONFIG_FILES entries that exist in the current directory.
- * Names resolving to the same file (AGENTS.md and agents.md on a case-insensitive
- * filesystem) are reported once, under the first-listed name, so one file is
+ * Names that are the same file (AGENTS.md and agents.md on a case-insensitive
+ * filesystem, or a hard link) are reported once, under the first-listed name, so one file is
  * never migrated twice.
  */
 export function discoverAgentConfigFiles(): string[] {
@@ -64,12 +84,7 @@ export function discoverAgentConfigFiles(): string[] {
   for (const name of AGENT_CONFIG_FILES) {
     const fullPath = path.resolve(name);
     if (!fs.existsSync(fullPath)) continue;
-    let identity = fullPath;
-    try {
-      identity = fs.realpathSync.native(fullPath);
-    } catch {
-      // Fall back to the resolved path; existsSync already confirmed the file.
-    }
+    const identity = fileIdentity(fullPath);
     if (seen.has(identity)) continue;
     seen.add(identity);
     found.push(name);
