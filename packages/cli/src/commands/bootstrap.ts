@@ -1019,10 +1019,22 @@ function runAdfInitPhase(
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
       } else if (!isAlreadyThinPointer(pointerPath)) {
-        // File has custom content — don't overwrite, suggest migrate
-        warnings.push(`${pf.name} has custom content; skipping pointer (run 'charter adf migrate' first or use --force to overwrite)`);
+        // File has custom content — don't overwrite. Name the narrow remedy rather
+        // than sending the user to --force, which also re-scaffolds .ai/*.adf and
+        // overwrites custom modules (#305). --source is explicit because migrate's
+        // default discovery list spells AGENTS.md in lowercase.
+        warnings.push(
+          `${pf.name} has custom content; skipping pointer. ` +
+          `Run 'charter adf migrate --source ${pf.name}' to move its rules into .ai/ and replace it with a thin pointer, ` +
+          `or hand-edit or delete ${pf.name} and re-run bootstrap. ` +
+          `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
+        );
       } else {
-        warnings.push(`${pf.name} already exists; skipping (use --force to overwrite)`);
+        warnings.push(
+          `${pf.name} is already Charter-managed; leaving it as is. ` +
+          `To regenerate it from the current template, delete ${pf.name} and re-run bootstrap. ` +
+          `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
+        );
       }
     }
 
