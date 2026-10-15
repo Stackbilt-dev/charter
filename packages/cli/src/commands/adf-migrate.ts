@@ -1,7 +1,7 @@
 /**
  * charter adf migrate
  *
- * Scans existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md,
+ * Scans existing agent config files (CLAUDE.md, .cursorrules, AGENTS.md, GEMINI.md,
  * copilot-instructions.md), classifies their content using the ADX-002 decision tree,
  * and migrates structured blocks into ADF modules. Replaces originals with thin pointers.
  */
@@ -38,13 +38,59 @@ import {
 // Constants
 // ============================================================================
 
-const AGENT_CONFIG_FILES = [
+// AGENTS.md is the name bootstrap, `adf init --emit-pointers` and the `agents`
+// compile target write; lowercase agents.md stays as a legacy spelling, matching
+// tidy's VENDOR_FILES and doctor's list (#343). AGENTS.md comes first so that on a
+// case-insensitive filesystem, where both names hit the same file, it is reported
+// under the canonical name and the duplicate is dropped by discoverAgentConfigFiles.
+export const AGENT_CONFIG_FILES = [
   'CLAUDE.md',
   '.cursorrules',
+  'AGENTS.md',
   'agents.md',
   'GEMINI.md',
   'copilot-instructions.md',
 ];
+
+/**
+ * Identify a file by device and inode (Node reports the NTFS file index as ino on
+ * Windows), so two names for one file compare equal even where realpath(3) does
+ * not canonicalise the final component's case (macOS APFS). Falls back to
+ * realpathSync.native, then the resolved path, when the filesystem reports no ino.
+ */
+function fileIdentity(fullPath: string): string {
+  try {
+    const st = fs.statSync(fullPath);
+    if (st.ino) return `${st.dev}:${st.ino}`;
+  } catch {
+    // Fall through to the path-based identities below.
+  }
+  try {
+    return fs.realpathSync.native(fullPath);
+  } catch {
+    return fullPath;
+  }
+}
+
+/**
+ * Return the AGENT_CONFIG_FILES entries that exist in the current directory.
+ * Names that are the same file (AGENTS.md and agents.md on a case-insensitive
+ * filesystem, or a hard link) are reported once, under the first-listed name, so one file is
+ * never migrated twice.
+ */
+export function discoverAgentConfigFiles(): string[] {
+  const seen = new Set<string>();
+  const found: string[] = [];
+  for (const name of AGENT_CONFIG_FILES) {
+    const fullPath = path.resolve(name);
+    if (!fs.existsSync(fullPath)) continue;
+    const identity = fileIdentity(fullPath);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    found.push(name);
+  }
+  return found;
+}
 
 
 const POINTER_TEMPLATES: Record<string, string> = {
@@ -78,7 +124,7 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
   // Detect source files
   const sources = sourceFile
     ? [sourceFile]
-    : AGENT_CONFIG_FILES.filter(f => fs.existsSync(path.resolve(f)));
+    : discoverAgentConfigFiles();
 
   if (sources.length === 0) {
     if (options.format === 'json') {
