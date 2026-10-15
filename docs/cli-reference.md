@@ -70,7 +70,7 @@ npx charter hook install --commit-msg --pre-commit   # both hooks
 npx charter hook install --commit-msg --force        # overwrite existing hooks
 ```
 
-- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; when `git.requireTrailers` is `true` and `charter validate --ci` would fail on a missing trailer (`validation.citationStrictness` `FAIL`/`STRICT`, or `ci.failOnWarn`), rejects a message with neither trailer in its final trailer block. Advisory strictness warns without blocking.
+- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading `.charter/config.json` with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No `.charter/config.json` at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
 - `--pre-commit` — runs ADF evidence checks (LOC ceiling validation) before each commit. Only gates when `.ai/manifest.adf` exists.
 - `--force` — overwrite existing non-Charter hooks
 
