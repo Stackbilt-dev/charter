@@ -87,6 +87,22 @@ describe('charter doctor gate enforcement', () => {
     expect(check?.details).toContain('normalizes supplied trailers but does not reject missing trailers');
   });
 
+  it('passes with the Charter commit-msg trailer gate (#299)', async () => {
+    const repo = makeRepo();
+    execFileSync('git', ['config', 'core.hooksPath', '.githooks']);
+    fs.mkdirSync(path.join(repo, '.githooks'));
+    fs.writeFileSync(
+      path.join(repo, '.githooks', 'commit-msg'),
+      '#!/bin/sh\n# Managed by Charter: commit-msg trailer normalizer\n'
+        + '# Charter commit-msg trailer gate: rejects missing trailers when git.requireTrailers is on\n',
+    );
+
+    const check = await gateCheck();
+
+    expect(check?.status).toBe('PASS');
+    expect(check?.details).toContain('.githooks/commit-msg');
+  });
+
   it('passes with a local hook that invokes validate --ci', async () => {
     const repo = makeRepo();
     execFileSync('git', ['config', 'core.hooksPath', '.githooks']);

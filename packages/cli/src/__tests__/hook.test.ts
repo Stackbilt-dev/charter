@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { hookCommand, printClaudeHookConfig } from '../commands/hook';
+import { doctorCommand } from '../commands/doctor';
 import type { CLIOptions } from '../index';
 
 const baseOptions: CLIOptions = {
@@ -40,7 +41,159 @@ describe('hookCommand', () => {
     expect(fs.existsSync(hookPath)).toBe(true);
     const content = fs.readFileSync(hookPath, 'utf-8');
     expect(content).toContain('Managed by Charter: commit-msg trailer normalizer');
+    expect(content).toContain('Charter commit-msg trailer gate');
     expect(content).toContain('git interpret-trailers --in-place');
+    expect(content).toContain('git.requireTrailers');
+  });
+
+  describe('generated commit-msg hook as a trailer gate (#299)', () => {
+    // Drives the real hook through `git commit` so git's own sh runs it from the
+    // repo root with relative paths; no absolute Windows paths reach the shell.
+    function setupRepo(config?: string): void {
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.name', 'Test'], { stdio: 'ignore' });
+      if (config !== undefined) {
+        fs.mkdirSync('.charter', { recursive: true });
+        fs.writeFileSync(path.join('.charter', 'config.json'), config);
+      }
+    }
+
+    async function installHook(): Promise<void> {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      expect(await hookCommand(baseOptions, ['install', '--commit-msg'])).toBe(0);
+    }
+
+    function commit(message: string) {
+      return spawnSync('git', ['commit', '--allow-empty', '-q', '-m', message], { encoding: 'utf-8' });
+    }
+
+    function lastMessage(): string {
+      return execFileSync('git', ['log', '-1', '--format=%B'], { encoding: 'utf-8' });
+    }
+
+    const strict = JSON.stringify({ git: { requireTrailers: true }, validation: { citationStrictness: 'FAIL' } });
+
+    it('rejects a message with no trailer when requireTrailers is on', { timeout: 30000 }, async () => {
+      setupRepo(strict);
+      await installHook();
+
+      const result = commit('feat: no trailer here');
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('git.requireTrailers is on');
+      expect(result.stderr).toContain('Governed-By: ADR-001');
+      expect(spawnSync('git', ['rev-parse', '--verify', 'HEAD']).status).not.toBe(0);
+    });
+
+    it('rejects under the default strictness, and ignores a trailer-like line outside the trailer block', { timeout: 30000 }, async () => {
+      setupRepo(JSON.stringify({ git: { requireTrailers: true } }));
+      await installHook();
+
+      // Same rule as charter validate: only the terminal trailer block counts.
+      const result = commit('feat: thing\n\nGoverned-By:\n\nmore body text');
+
+      expect(result.status).toBe(1);
+    });
+
+    it('accepts either trailer, case-insensitively, and still normalizes it', { timeout: 30000 }, async () => {
+      setupRepo(strict);
+      await installHook();
+
+      expect(commit('feat: governed\n\ngoverned-by:   ADR-007').status).toBe(0);
+      expect(lastMessage()).toContain('Governed-By: ADR-007');
+
+      expect(commit('feat: request\n\nResolves-Request: REQ-12').status).toBe(0);
+      expect(lastMessage()).toContain('Resolves-Request: REQ-12');
+    });
+
+    it('moves a body-only Governed-By line into the trailer block and accepts it', { timeout: 30000 }, async () => {
+      setupRepo(strict);
+      await installHook();
+
+      expect(commit('feat: misplaced\n\nGoverned-By: ADR-003\n\ntrailing paragraph').status).toBe(0);
+      expect(lastMessage().trimEnd().endsWith('Governed-By: ADR-003')).toBe(true);
+    });
+
+    it('only warns when citation strictness is advisory', { timeout: 30000 }, async () => {
+      setupRepo(JSON.stringify({ git: { requireTrailers: true }, validation: { citationStrictness: 'WARN' } }));
+      await installHook();
+
+      const result = commit('chore: advisory');
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('not blocking');
+    });
+
+    it('blocks under advisory strictness when ci.failOnWarn makes CI fail', { timeout: 30000 }, async () => {
+      setupRepo(JSON.stringify({
+        git: { requireTrailers: true },
+        validation: { citationStrictness: 'WARN' },
+        ci: { failOnWarn: true },
+      }));
+      await installHook();
+
+      expect(commit('chore: fails on warn').status).toBe(1);
+    });
+
+    // loadConfig merges each section over requireTrailers: true and
+    // citationStrictness: FAIL and tests requireTrailers for truthiness, so
+    // charter validate --ci fails all of these; the hook must too.
+    it.each([
+      ['requireTrailers is absent', JSON.stringify({ git: {} })],
+      ['the git section is absent', JSON.stringify({ project: 'x' })],
+      ['requireTrailers is a truthy non-boolean', JSON.stringify({ git: { requireTrailers: 'true' } })],
+    ])('rejects when %s, as loadConfig defaults do', { timeout: 30000 }, async (_label, config) => {
+      setupRepo(config);
+      await installHook();
+
+      const result = commit('chore: ungoverned');
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Governed-By: ADR-001');
+    });
+
+    it('rejects under the defaults when the config is malformed JSON, and says why', { timeout: 30000 }, async () => {
+      setupRepo('{ "git": { "requireTrailers": false ');
+      await installHook();
+
+      const result = commit('chore: ungoverned');
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('.charter/config.json is unparseable');
+    });
+
+    it('does not block when requireTrailers is false', { timeout: 30000 }, async () => {
+      setupRepo(JSON.stringify({ git: { requireTrailers: false } }));
+      await installHook();
+
+      const result = commit('chore: ungoverned');
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).not.toContain('[commit-msg]');
+    });
+
+    it('skips the gate with a warning when there is no config file', { timeout: 30000 }, async () => {
+      setupRepo(undefined);
+      await installHook();
+
+      const result = commit('chore: ungoverned');
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('no .charter/config.json; trailer gate skipped');
+    });
+
+    it('agrees with doctor: a config doctor treats as strict is one the hook enforces', { timeout: 30000 }, async () => {
+      setupRepo(JSON.stringify({ git: {} }));
+      await installHook();
+
+      const logs: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => logs.push(args.map(String).join(' ')));
+      await doctorCommand({ ...baseOptions, format: 'json' }, []);
+      const checks = (JSON.parse(logs.join('\n')) as { checks: Array<{ name: string; status: string }> }).checks;
+
+      expect(checks.find(check => check.name === 'gate enforcement')?.status).toBe('PASS');
+      expect(commit('chore: ungoverned').status).toBe(1);
+    });
   });
 
   it('generates the same staged-vendor loop, compiled-file skip included, as the repo pre-commit hook (#320)', async () => {

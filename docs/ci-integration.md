@@ -82,7 +82,7 @@ Implements token refresh per ADR-042.
 Governed-By: ADR-042
 ```
 
-Use `charter hook install --commit-msg` to install a git hook that prompts for or normalizes trailers at commit time.
+Use `charter hook install --commit-msg` to install a git hook that normalizes trailers at commit time and, when `git.requireTrailers` is on under a blocking policy, rejects a commit missing them before it reaches CI.
 
 ## ADF Sync Check
 

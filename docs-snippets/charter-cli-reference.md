@@ -99,7 +99,7 @@ npx charter init --preset worker
 
 ### charter doctor
 
-Checks CLI installation and repository config health. Validates ADF readiness: manifest existence, manifest parse, default-load module presence, and sync lock status. Strict trailer configuration also warns when no active hook or GitHub Actions workflow invokes `charter validate --ci`; the commit-msg hook alone only normalizes trailers that are already present.
+Checks CLI installation and repository config health. Validates ADF readiness: manifest existence, manifest parse, default-load module presence, and sync lock status. Strict trailer configuration also warns when no active hook or GitHub Actions workflow enforces trailers: a hook or workflow that invokes `charter validate --ci`, or the commit-msg trailer gate installed by `charter hook install --commit-msg`. A commit-msg hook installed before the gate existed only normalizes trailers that are already present; re-run the install to replace it.
 
 ```bash
 npx charter doctor
