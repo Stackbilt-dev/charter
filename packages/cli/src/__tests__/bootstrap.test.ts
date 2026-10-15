@@ -119,6 +119,50 @@ STATE:
     expect(logs).toContain('  Backed up 2 files to .ai/.backup/');
   });
 
+  // #305: --force also re-scaffolds .ai/*.adf, so the pointer warnings must name
+  // the narrow remedy instead of sending the user to it.
+  it('names the narrow remedy, not --force, when a pointer file has custom content', async () => {
+    const customAgents = '# Agents\n\n- Always run the linter before committing.\n';
+    fs.writeFileSync('AGENTS.md', customAgents);
+
+    const exitCode = await bootstrapCommand(
+      baseOptions,
+      ['--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync('AGENTS.md', 'utf-8')).toBe(customAgents);
+
+    const warning = logs.find(l => l.includes('AGENTS.md has custom content'));
+    expect(warning).toBeDefined();
+    expect(warning).not.toContain('use --force to overwrite');
+    expect(warning).toContain("charter adf migrate --source AGENTS.md");
+    expect(warning).toContain('delete AGENTS.md');
+    expect(warning).toContain('Do not use --force');
+    expect(warning).toContain('re-scaffolds .ai/*.adf');
+
+    // The named remedy actually resolves the condition the warning fires on.
+    const { adfMigrateCommand } = await import('../commands/adf-migrate');
+    expect(await adfMigrateCommand(baseOptions, ['--source', 'AGENTS.md'])).toBe(0);
+    logs.length = 0;
+    await bootstrapCommand(baseOptions, ['--preset', 'worker', '--skip-install', '--skip-doctor']);
+    expect(logs.find(l => l.includes('AGENTS.md has custom content'))).toBeUndefined();
+  });
+
+  it('names the narrow remedy, not --force, when a pointer file is already Charter-managed', async () => {
+    const args = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
+    expect(await bootstrapCommand(baseOptions, args)).toBe(0);
+    logs.length = 0;
+    expect(await bootstrapCommand(baseOptions, args)).toBe(0);
+
+    const warning = logs.find(l => l.includes('GEMINI.md is already Charter-managed'));
+    expect(warning).toBeDefined();
+    expect(warning).not.toContain('use --force to overwrite');
+    expect(warning).toContain('delete GEMINI.md and re-run bootstrap');
+    expect(warning).toContain('Do not use --force');
+    expect(logs.some(l => l.includes('use --force to overwrite'))).toBe(false);
+  });
+
   it('detects orphaned .adf modules and auto-registers them in --yes mode', async () => {
     // Pre-create .ai/ with extra modules that won't be in the scaffold manifest
     fs.mkdirSync('.ai', { recursive: true });
