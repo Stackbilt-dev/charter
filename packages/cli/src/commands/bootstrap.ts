@@ -48,6 +48,7 @@ import {
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest, formatAdf } from '@stackbilt/adf';
 import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
+import { isRequiredDefaultLoad } from './adf-wiring';
 import type { SourceMigrationResult } from './adf-migrate';
 
 // ============================================================================
@@ -227,8 +228,8 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     if (shouldRegister) {
       const manifestFilePath = path.join('.ai', 'manifest.adf');
       // Split orphans: core.adf and state.adf belong in DEFAULT_LOAD, everything else in ON_DEMAND
-      const defaultLoadOrphans = orphans.filter(m => DEFAULT_LOAD_MODULES.has(m));
-      const onDemandOrphans = orphans.filter(m => !DEFAULT_LOAD_MODULES.has(m));
+      const defaultLoadOrphans = orphans.filter(m => isRequiredDefaultLoad(m));
+      const onDemandOrphans = orphans.filter(m => !isRequiredDefaultLoad(m));
 
       if (defaultLoadOrphans.length > 0) {
         registerModulesInDefaultLoad(manifestFilePath, defaultLoadOrphans);
@@ -1386,12 +1387,6 @@ function runDoctorPhase(
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Modules that must always appear in DEFAULT_LOAD rather than ON_DEMAND.
- * core.adf and state.adf are always loaded — they are not optional.
- */
-const DEFAULT_LOAD_MODULES = new Set(['core.adf', 'state.adf']);
 
 function isValidPreset(value: string | undefined): value is StackPreset {
   return value === 'worker' || value === 'frontend' || value === 'backend' || value === 'fullstack' || value === 'docs' || value === 'rust-wasm';

@@ -15,6 +15,7 @@ import { isGitRepo, runGit } from '../git-helpers';
 import { CHARTER_OWNED_MARKERS } from './adf';
 import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
 import { checkGateEnforcement } from './doctor-gate-enforcement';
+import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
 
 interface DoctorResult {
   status: 'PASS' | 'WARN';
@@ -247,14 +248,13 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       });
 
       // Required baseline wiring for a standard ADF repo
-      const requiredDefaultModules = ['core.adf', 'state.adf'];
-      const missingRequired = requiredDefaultModules.filter(mod => !manifest.defaultLoad.includes(mod));
+      const missingRequired = findMissingDefaultLoad(manifest);
       checks.push({
         name: 'adf required wiring',
         status: missingRequired.length === 0 ? 'PASS' : 'WARN',
         details: missingRequired.length === 0
-          ? 'Required default-load modules present (core.adf, state.adf).'
-          : `Missing from DEFAULT_LOAD: ${missingRequired.join(', ')}`,
+          ? `Required default-load modules present (${REQUIRED_DEFAULT_LOAD_MODULES.join(', ')}).`
+          : formatMissingDefaultLoad(missingRequired),
       });
 
       // Check that all defaultLoad modules exist and parse
