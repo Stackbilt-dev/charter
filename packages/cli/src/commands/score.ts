@@ -1567,7 +1567,7 @@ function buildRecommendations(input: {
   if (input.commandSignals.length === 0) {
     recommendations.push({
       priority: 7,
-      text: `Document at least one runnable setup/test command in \`README.md\`, ${claudeEditable ? '`CLAUDE.md`, ' : ''}or your ADF files.`,
+      text: `Document at least one runnable setup/test command in \`README.md\`${claudeEditable ? ', `CLAUDE.md`,' : ''} or your ADF files.`,
     });
   } else if (input.commandSignals.some((signal) => !signal.runnable)) {
     recommendations.push({

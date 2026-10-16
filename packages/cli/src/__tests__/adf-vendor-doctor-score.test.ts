@@ -255,7 +255,21 @@ describe('doctor: adf vendor mode rows', () => {
     ]);
     expect(c.status).toBe('WARN');
     expect(c.details).toContain(`VENDORS entry 'README.md: pointer' in ${manifestPath} is ignored (unknown-file). Fix or delete that line in ${manifestPath}.`);
-    expect(c.details).toContain(`VENDORS lists AGENTS.md more than once in ${manifestPath}; the last entry ('AGENTS.md: pointer') wins. Delete the others.`);
+    expect(c.details).toContain(`VENDORS lists AGENTS.md more than once in ${manifestPath}; 'AGENTS.md: pointer' is ignored because a later entry wins. Delete that line.`);
+  });
+
+  it('following the duplicate advice keeps the resolved mode', async () => {
+    scaffold(vendors('AGENTS.md: pointer', 'AGENTS.md: unmanaged'));
+    fs.writeFileSync('AGENTS.md', '# Agents I wrote\n');
+    const before = vendorCheck((await doctor()).json);
+    const resolved = before.rows?.find(x => x.file === 'AGENTS.md' && x.kind !== 'entry-problem')?.recordedMode;
+    expect(resolved).toBe('unmanaged');
+    const dup = before.rows?.find(x => x.kind === 'entry-problem');
+    expect(before.details).toContain(`'${dup?.raw}' is ignored because a later entry wins. Delete that line.`);
+    // Delete exactly the line the advice names.
+    fs.writeFileSync('.ai/manifest.adf', manifestText().replace(`  - ${dup?.raw}\n`, ''));
+    const after = vendorCheck((await doctor()).json);
+    expect(after.rows?.map(x => [x.kind, x.recordedMode])).toEqual([['recorded-ok', resolved]]);
   });
 
   it('a duplicate alone is INFO, so --ci passes (worst-row aggregation)', async () => {
@@ -433,10 +447,20 @@ describe('score: a pointer is as substantive as the compiled file it routes to',
       { name: 'hybrid pointer', setup: () => { scaffold(); fs.writeFileSync('CLAUDE.md', POINTER_CLAUDE_MD_HYBRID); fs.writeFileSync('AGENTS.md', POINTER_AGENTS_MD); } },
       { name: 'compiled', setup: async () => { scaffold(); fs.writeFileSync('CLAUDE.md', await compiledOutput('claude')); } },
       { name: 'unmanaged', setup: () => { scaffold(); fs.writeFileSync('CLAUDE.md', '# Mine\n'); } },
+      {
+        // A monorepo with per-package agent files: the basenames are not unique.
+        name: 'monorepo', setup: () => {
+          scaffold();
+          fs.writeFileSync('CLAUDE.md', THIN_CLAUDE);
+          fs.mkdirSync(path.join('packages', 'a'), { recursive: true });
+          fs.writeFileSync(path.join('packages', 'a', 'CLAUDE.md'), '# Package a\n');
+          fs.writeFileSync(path.join('packages', 'a', 'AGENTS.md'), '# Package a\n');
+        },
+      },
       { name: 'empty .ai/', setup: () => { fs.mkdirSync('.ai'); fs.writeFileSync('.ai/manifest.adf', BASE_MANIFEST); fs.writeFileSync('CLAUDE.md', THIN_CLAUDE); fs.writeFileSync('.cursorrules', POINTER_CURSORRULES); } },
     ];
     for (const fixture of fixtures) {
-      for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md']) fs.rmSync(f, { force: true });
+      for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'packages']) fs.rmSync(f, { recursive: true, force: true });
       fs.rmSync('.ai', { recursive: true, force: true });
       await fixture.setup();
       const now = await score();
@@ -563,7 +587,7 @@ describe('bootstrap: pointer decision table', () => {
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--force', '--yes', '--skip-install', '--skip-doctor', '--format', 'json'])).toBe(0);
     const payload = JSON.parse(out.join('\n')) as { steps: Array<{ name: string; warnings: string[]; details: Record<string, unknown> }> };
     const init = payload.steps.find(s => s.name === 'adf-init');
-    expect(init?.warnings).toContain("CLAUDE.md has custom content; skipping pointer even with --force, because bootstrap does not back up vendor files. Run 'charter adf migrate --source CLAUDE.md' to move its rules into .ai/ first.");
+    expect(init?.warnings).toContain("CLAUDE.md has custom content; skipping pointer even with --force, because bootstrap does not back up vendor files. Phase 4 below migrates its rules into .ai/ and then writes the pointer.");
     expect(init?.details.pointers).not.toContain('CLAUDE.md (hybrid pointer)');
     const migrate = payload.steps.find(s => s.name === 'migrate');
     expect(migrate?.details).toMatchObject({ sources: ['CLAUDE.md'], migrated: 1 });
@@ -664,7 +688,7 @@ describe('adf migrate and recorded unmanaged', () => {
 // 6. adf vendor restore
 // ============================================================================
 
-interface RestoreJson { file: string; status: string; refusal: string | null; keptSections: string[]; remedy: string | null }
+interface RestoreJson { file: string; status: string; refusal: string | null; keptSections: string[]; remedy: string | null; writeError: string | null }
 
 async function restore(file: string, extra: string[] = []): Promise<{ code: number; json: RestoreJson; err: string }> {
   const r = await run(['vendor', 'restore', file, ...extra, '--format', 'json'], JSON_OPTS);
@@ -681,7 +705,7 @@ describe('adf vendor restore', () => {
     const text = await run(['vendor', 'restore', 'CLAUDE.md']);
     expect(text.code).toBe(1);
     expect(text.err).toContain('  [warn] CLAUDE.md is compiled (recorded); restore writes a pointer. Record that intent first: charter adf vendor set CLAUDE.md pointer');
-    expect((await restore('AGENTS.md')).json).toEqual({ file: 'AGENTS.md', status: 'refused', refusal: 'mode-not-pointer', keptSections: [], remedy: 'charter adf vendor set AGENTS.md pointer' });
+    expect((await restore('AGENTS.md')).json).toEqual({ file: 'AGENTS.md', status: 'refused', refusal: 'mode-not-pointer', keptSections: [], remedy: 'charter adf vendor set AGENTS.md pointer', writeError: null });
     expect((await restore('GEMINI.md')).json.refusal).toBe('mode-not-pointer');
     expect(snapshot()).toEqual(before);
   });
@@ -757,7 +781,7 @@ describe('adf vendor restore', () => {
     scaffold();
     const r = await restore('GEMINI.md');
     expect(r.code).toBe(0);
-    expect(r.json).toEqual({ file: 'GEMINI.md', status: 'restored', refusal: null, keptSections: [], remedy: null });
+    expect(r.json).toEqual({ file: 'GEMINI.md', status: 'restored', refusal: null, keptSections: [], remedy: null, writeError: null });
     expect(read('GEMINI.md')).toBe(POINTER_GEMINI_MD);
     expect(manifestText()).toBe(vendors('GEMINI.md: pointer'));
   });
@@ -785,6 +809,11 @@ describe('adf vendor restore', () => {
       expect(text.err).toMatch(/ {2}\[warn\] Could not write CLAUDE\.md: .+\. Its new mode record was removed again\./);
       expect(manifestText()).toBe(manifest);
       expect(read('CLAUDE.md')).toBe(POINTER_CLAUDE_MD);
+      // JSON tells a failed file write apart from a skipped record (record-write).
+      const j = await restore('CLAUDE.md');
+      expect(j.json.refusal).toBe('write-failed');
+      expect(j.json.writeError).toBeTruthy();
+      expect(manifestText()).toBe(manifest);
     } finally {
       fs.chmodSync('CLAUDE.md', 0o644);
     }
@@ -816,6 +845,93 @@ describe('adf vendor restore', () => {
       expect(r.json.status).toBe('refused');
       expect(snapshot()).toEqual(before);
     }
+  });
+});
+
+describe('adf vendor restore keeps every user line (review round 1)', () => {
+  /** A bootstrapped repo whose hybrid CLAUDE.md is then edited by `edit`. */
+  async function bootstrapped(edit: (text: string) => string): Promise<string> {
+    await bootstrapCommand({ ...TEXT, yes: true }, ['--yes', '--skip-install', '--skip-doctor']);
+    const edited = edit(read('CLAUDE.md'));
+    expect(edited).not.toBe(read('CLAUDE.md'));
+    fs.writeFileSync('CLAUDE.md', edited);
+    return edited;
+  }
+
+  const repros: Array<[string, (t: string) => string, string]> = [
+    ['an edited title', t => t.replace('# CLAUDE.md', '# Acme Payments — agent notes'), '# Acme Payments — agent notes'],
+    ['an extra blockquote line', t => t.replace('> See `.ai/manifest.adf` for the module routing manifest.\n', '> See `.ai/manifest.adf` for the module routing manifest.\n> Escalate prod incidents to #oncall-payments.\n'), '> Escalate prod incidents to #oncall-payments.'],
+    ['edited Session Start text', t => t.replace(/Call `charter_context`[^\n]*\n/, 'Our CI token lives in 1Password vault Eng-Prod.\n'), 'Our CI token lives in 1Password vault Eng-Prod.'],
+    ['prose after the module-index end marker', t => t.replace('<!-- charter:module-index:end -->\n', '<!-- charter:module-index:end -->\nDeploys go through the release train on Tuesdays.\n'), 'Deploys go through the release train on Tuesdays.'],
+  ];
+
+  for (const [name, edit, line] of repros) {
+    it(`INV-P3-9: refuses a pointer with ${name}, naming the line, and writes nothing`, async () => {
+      const edited = await bootstrapped(edit);
+      const before = snapshot();
+      const text = await run(['vendor', 'restore', 'CLAUDE.md']);
+      expect(text.code).toBe(1);
+      expect(text.err).toContain(`  [warn] CLAUDE.md has 1 line(s) the pointer template would drop: '${line}'.`);
+      expect(text.out).not.toContain('Restored');
+      const j = await restore('CLAUDE.md');
+      expect(j.json).toMatchObject({ status: 'refused', refusal: 'hand-authored' });
+      expect(read('CLAUDE.md')).toBe(edited);
+      expect(snapshot()).toEqual(before);
+    });
+  }
+
+  it('never reports Module Index as kept; prose under it is refused, not dropped', async () => {
+    await bootstrapped(t => t.replace('## Module Index\n', '## Module Index\nRead payments.adf first.\n'));
+    const r = await restore('CLAUDE.md');
+    expect(r.json.refusal).toBe('hand-authored');
+    expect(r.err).toContain("'Read payments.adf first.'");
+
+    // An Environment note survives, and only Environment is listed as kept.
+    await bootstrapped(t => t.replace('<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->', '- Use WSL for builds'));
+    fs.writeFileSync('CLAUDE.md', `${POINTER_CLAUDE_MD.replace('<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->', '- Use WSL for builds')}`);
+    const ok = await restore('CLAUDE.md');
+    expect(ok.json).toMatchObject({ status: 'restored', keptSections: ['## Environment'] });
+    expect(read('CLAUDE.md')).toContain('- Use WSL for builds');
+  });
+
+  it('a successful restore keeps every non-template line of the old file', async () => {
+    scaffold();
+    const old = `${POINTER_CLAUDE_MD.replace('<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->', '- Use WSL for builds\n- Node 20 via fnm')}\n## Release Protocol\n\nTag, then push.\n`;
+    fs.writeFileSync('CLAUDE.md', old);
+    expect((await restore('CLAUDE.md')).json.status).toBe('restored');
+    const now = read('CLAUDE.md');
+    for (const l of ['- Use WSL for builds', '- Node 20 via fnm', '## Release Protocol', 'Tag, then push.']) expect(now).toContain(l);
+  });
+
+  it('a pristine pointer from an earlier template version still restores', async () => {
+    scaffold();
+    // POINTER_CLAUDE_MD as first shipped (8cbfd78), and the pre-#155 one without Session Start.
+    const v1 = '# Project Context\n\n> This project uses [ADF](https://github.com/Stackbilt-dev/charter) for AI agent context management.\n> All stack rules, constraints, and architectural guidance live in `.ai/`.\n> **Do not duplicate ADF rules here.** Only pre-ADF bootstrap content belongs in this file.\n\nSee `.ai/manifest.adf` for the module routing manifest.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n';
+    fs.writeFileSync('CLAUDE.md', v1);
+    expect((await restore('CLAUDE.md')).json).toMatchObject({ status: 'restored', refusal: null });
+    expect(read('CLAUDE.md')).toContain('<!-- charter:module-index:start -->');
+    const v2 = POINTER_CLAUDE_MD.replace(/## Session Start[\s\S]*?(?=## Environment)/, '');
+    fs.writeFileSync('CLAUDE.md', v2);
+    expect((await restore('CLAUDE.md')).json.status).toBe('restored');
+    // The old lowercase-titled agents pointer.
+    fs.writeFileSync('AGENTS.md', '# agents.md\n\n> **DO NOT add instructions to this file.**\n> All agent instructions are managed in `.ai/` by Charter.\n> See `.ai/manifest.adf` for the module routing manifest.\n');
+    expect((await restore('AGENTS.md')).json.status).toBe('restored');
+  });
+
+  it('refuses a recorded pointer whose compiled body was hand-edited (compiled-differs); a fresh compile restores', async () => {
+    scaffold(vendors('CLAUDE.md: pointer'));
+    const compiled = await compiledOutput('claude');
+    const edited = compiled.replace(/\n(?=[^\n]*$)/, '\n- HAND EDIT: call Bob before deploying\n');
+    expect(edited).not.toBe(compiled);
+    fs.writeFileSync('CLAUDE.md', edited);
+    const before = snapshot();
+    const r = await restore('CLAUDE.md');
+    expect(r.code).toBe(1);
+    expect(r.json).toMatchObject({ status: 'refused', refusal: 'compiled-differs', remedy: 'charter adf vendor set CLAUDE.md compiled' });
+    expect(r.err).toContain('charter adf compile --target claude --check');
+    expect(snapshot()).toEqual(before);
+    fs.writeFileSync('CLAUDE.md', compiled);
+    expect((await restore('CLAUDE.md')).json.status).toBe('restored');
   });
 });
 

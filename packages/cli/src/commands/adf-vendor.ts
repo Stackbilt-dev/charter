@@ -18,8 +18,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseAdf, parseManifest, COMPILE_BANNER_MARKER } from '@stackbilt/adf';
-import type { AdfDocument, ManifestVendorEntry } from '@stackbilt/adf';
+import { compileAdf, parseAdf, parseManifest, COMPILE_BANNER_MARKER, TARGET_FILENAMES } from '@stackbilt/adf';
+import type { AdfDocument, CompileTarget, ManifestVendorEntry } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -27,6 +27,7 @@ import {
   MODULE_INDEX_END,
   MODULE_INDEX_START,
   POINTER_AGENTS_MD,
+  POINTER_CLAUDE_MD,
   POINTER_CLAUDE_MD_HYBRID,
   POINTER_COPILOT_MD,
   POINTER_CURSORRULES,
@@ -151,6 +152,8 @@ export const MSG = {
   restoreHandAuthored: '  [warn] {file} has hand-authored content that .ai/ does not hold. Move it first: charter adf migrate --source {file}',
   restoreBloated: '  [warn] {file} carries {n} item(s) beyond the pointer. Fold them into .ai/ first: charter adf tidy --source {file}',
   restoreRetained: '  [warn] {file} carries your content under {headings}, which the pointer template would drop. Move it into a .ai/ module first.',
+  restoreLost: '  [warn] {file} has {n} line(s) the pointer template would drop: {lines}. Move them into a .ai/ module (or under ## Environment), or delete them, first.',
+  restoreCompiledDiffers: '  [warn] {file} differs from what .ai/ compiles to (a hand edit, or .ai/ changed since), and restoring the pointer would lose that difference. Check it with: charter adf compile --target {target} --check. To keep the file as it is: charter adf vendor set {file} compiled',
   restoreRecord: '  [warn] {file} was not restored: its mode could not be recorded as pointer in {manifestPath}. Fix the manifest or run: charter adf vendor status',
   restoreWriteFailed: '  [warn] Could not write {file}: {error}.{note}',
   restoreReverted: ' Its new mode record was removed again.',
@@ -747,7 +750,14 @@ function vendorInit(options: CLIOptions, manifestPath: string, dryRun: boolean):
 // adf vendor restore (#318)
 // ============================================================================
 
-export type RestoreRefusal = 'mode-not-pointer' | 'hand-authored' | 'pointer-bloated' | 'retained-divergent' | 'record-write';
+export type RestoreRefusal =
+  | 'mode-not-pointer'
+  | 'hand-authored'
+  | 'pointer-bloated'
+  | 'retained-divergent'
+  | 'compiled-differs'
+  | 'record-write'
+  | 'write-failed';
 
 export interface RestoreResult {
   file: VendorFile;
@@ -756,6 +766,8 @@ export interface RestoreResult {
   /** Retained headings carrying the user's own content, carried over verbatim. */
   keptSections: string[];
   remedy: string | null;
+  /** Set iff refusal is write-failed: the file write itself failed (as compile --write's writeError). */
+  writeError: string | null;
 }
 
 /** The template each vendor name is restored to (CLAUDE.md: the hybrid one bootstrap writes). */
@@ -801,6 +813,64 @@ export function restoredPointer(file: VendorFile, current: string | null, aiDir:
     : pointer;
 }
 
+/**
+ * Lines of earlier Charter pointer templates (before #25 strengthened the
+ * wording, and the old lowercase agents.md title), plus the generic pointers
+ * `adf migrate` and `adf tidy` write for a name with no template. A pointer
+ * made of these lines holds nothing of the user's, so restore may drop them.
+ */
+const LEGACY_POINTER_LINES = [
+  '# Project Context',
+  '> This project uses [ADF](https://github.com/Stackbilt-dev/charter) for AI agent context management.',
+  '> All stack rules, constraints, and architectural guidance live in `.ai/`.',
+  '> **Do not duplicate ADF rules here.** Only pre-ADF bootstrap content belongs in this file.',
+  '> **Do not duplicate ADF rules here.**',
+  'See `.ai/manifest.adf` for the module routing manifest.',
+  '# Cursor Rules',
+  'All rules and constraints are in .ai/ — see .ai/manifest.adf for routing.',
+  'Do not add stack rules here. This file exists only as a pointer.',
+  'See: .ai/core.adf for universal constraints.',
+  '# Agent Guidelines',
+  'All architectural rules, constraints, and guidance live in `.ai/`.',
+  'Module manifest: .ai/manifest.adf',
+  'Universal rules: .ai/core.adf',
+  'Current state: .ai/state.adf',
+  'Do not duplicate rules from .ai/ modules into this file or other agent config files.',
+  '> All project rules are managed in `.ai/` by Charter.',
+];
+
+/** Every line some Charter pointer template has ever held (trimmed, non-blank). */
+function charterTemplateLines(): Set<string> {
+  const templates = [
+    POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID, POINTER_AGENTS_MD, POINTER_CURSORRULES, POINTER_GEMINI_MD, POINTER_COPILOT_MD,
+    ...LEGACY_POINTER_LINES, ...VENDOR_FILES.map(name => `# ${name}`),
+  ];
+  return new Set(templates.flatMap(t => t.split('\n')).map(l => l.trim()).filter(Boolean));
+}
+
+/** The generated module index (between its markers, inclusive) is Charter's, not the user's. */
+function withoutModuleIndexBlock(content: string): string[] {
+  const out: string[] = [];
+  let inIndex = false;
+  for (const line of content.split('\n')) {
+    const t = line.trim();
+    if (t === MODULE_INDEX_START) inIndex = true;
+    if (!inIndex) out.push(t);
+    if (t === MODULE_INDEX_END) inIndex = false;
+  }
+  return out;
+}
+
+/**
+ * The non-blank lines of `current` that `next` would not keep: not in `next`,
+ * not from any Charter pointer template, and not the generated module index.
+ */
+export function linesRestoreWouldDrop(current: string, next: string): string[] {
+  const kept = new Set(next.split('\n').map(l => l.trim()));
+  const template = charterTemplateLines();
+  return withoutModuleIndexBlock(current.replace(/\r\n/g, '\n')).filter(l => l && !kept.has(l) && !template.has(l));
+}
+
 function readText(p: string): string | null {
   try {
     return fs.readFileSync(p, 'utf-8');
@@ -833,7 +903,7 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
   const handAuthored = ev.inferredMode === 'unmanaged' && (current ?? '').trim() !== '';
   const refuse = (refusal: RestoreRefusal, remedy: string | null, line: string): RestoreResult => {
     print(line, true);
-    return { file, status: 'refused', refusal, keptSections: [], remedy };
+    return { file, status: 'refused', refusal, keptSections: [], remedy, writeError: null };
   };
   const migrateRemedy = `charter adf migrate --source ${file}`;
 
@@ -852,19 +922,44 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
     if (divergent.length > 0) {
       return refuse('retained-divergent', null, fill(MSG.restoreRetained, { file, headings: divergent.join(', ') }));
     }
+    // Compiled output that .ai/ no longer reproduces holds something .ai/ does not
+    // (a hand edit, or rules since removed from .ai/). Compiled in memory; nothing is written.
+    const target = (Object.keys(TARGET_FILENAMES) as CompileTarget[]).find(t => TARGET_FILENAMES[t] === file);
+    let fresh: string | null = null;
+    try {
+      fresh = target ? compileAdf({ target, aiDir, readFile: (f: string) => fs.readFileSync(f, 'utf-8') }).output : null;
+    } catch {
+      fresh = null;
+    }
+    const norm = (t: string): string => t.replace(/\r\n/g, '\n').trimEnd();
+    if (fresh === null || norm(fresh) !== norm(current)) {
+      return refuse('compiled-differs', `charter adf vendor set ${file} compiled`,
+        fill(MSG.restoreCompiledDiffers, { file, target: target ?? 'all' }));
+    }
   }
 
   // Only a pointer's retained sections are the user's; a compiled file's come from .ai/.
-  const keptSections = ev.inferredMode === 'pointer' && current !== null ? divergentRetainedHeadings(current, file) : [];
+  // The template brings its own Module Index, so that heading is never "kept".
+  const keptSections = ev.inferredMode === 'pointer' && current !== null
+    ? divergentRetainedHeadings(current, file).filter(h => h !== '## Module Index')
+    : [];
   const kept = keptSections.length > 0 ? ` (kept ${keptSections.join(', ')})` : '';
   const next = restoredPointer(file, ev.inferredMode === 'pointer' ? current : null, aiDir);
+  // Any line of the user's that the new pointer would not carry is a loss: refuse.
+  if (ev.inferredMode === 'pointer' && current !== null) {
+    const lost = linesRestoreWouldDrop(current, next);
+    if (lost.length > 0) {
+      const shown = lost.slice(0, 3).map(l => `'${l}'`).join(', ') + (lost.length > 3 ? `, and ${lost.length - 3} more` : '');
+      return refuse('hand-authored', null, fill(MSG.restoreLost, { file, n: lost.length, lines: shown }));
+    }
+  }
   if (next === current) {
     print(fill(MSG.restoreUnchanged, { file }), false);
-    return { file, status: 'unchanged', refusal: null, keptSections, remedy: null };
+    return { file, status: 'unchanged', refusal: null, keptSections, remedy: null, writeError: null };
   }
   if (options.dryRun) {
     print(fill(MSG.restorePlanned, { file, kept }), false);
-    return { file, status: 'planned', refusal: null, keptSections, remedy: null };
+    return { file, status: 'planned', refusal: null, keptSections, remedy: null, writeError: null };
   }
 
   // Record before write (PR2 pattern). A recorded pointer needs no record write.
@@ -900,10 +995,10 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
       note = reverted ? MSG.restoreReverted : MSG.restoreNotReverted;
     }
     const error = err instanceof Error ? err.message : String(err);
-    return refuse('record-write', `charter adf vendor restore ${file}`, fill(MSG.restoreWriteFailed, { file, error, note }));
+    return { ...refuse('write-failed', `charter adf vendor restore ${file}`, fill(MSG.restoreWriteFailed, { file, error, note })), writeError: error };
   }
   print(fill(MSG.restoreOk, { file, kept }), false);
-  return { file, status: 'restored', refusal: null, keptSections, remedy: null };
+  return { file, status: 'restored', refusal: null, keptSections, remedy: null, writeError: null };
 }
 
 function vendorRestore(options: CLIOptions, aiDir: string, rest: string[], dryRun: boolean): number {

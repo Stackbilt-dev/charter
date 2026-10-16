@@ -1040,7 +1040,7 @@ function runAdfInitPhase(
       } else if (action === 'skip-custom' && force) {
         // --force no longer overwrites a hand-authored file: vendor files are not
         // backed up, so its rules would be gone before phase 4 could migrate them.
-        warnings.push(fill(BOOTSTRAP_MSG.skipCustomForce, { file: pf.name }));
+        warnings.push(fill(options.yes && recordedModeOf(aiDir, pf.name as VendorFile) === null ? BOOTSTRAP_MSG.skipCustomForceYes : BOOTSTRAP_MSG.skipCustomForce, { file: pf.name }));
       } else if (action === 'skip-custom') {
         // File has custom content — don't overwrite. Name the narrow remedy rather
         // than sending the user to --force, which also re-scaffolds .ai/*.adf and
@@ -1430,6 +1430,7 @@ function hashContent(content: string): string {
 export const BOOTSTRAP_MSG = {
   skipCompiled: '{file} is compiled output from .ai/ ({source}); bootstrap will not replace it with a pointer. To make it a pointer: charter adf vendor set {file} pointer && charter adf vendor restore {file}',
   skipCustomForce: "{file} has custom content; skipping pointer even with --force, because bootstrap does not back up vendor files. Run 'charter adf migrate --source {file}' to move its rules into .ai/ first.",
+  skipCustomForceYes: '{file} has custom content; skipping pointer even with --force, because bootstrap does not back up vendor files. Phase 4 below migrates its rules into .ai/ and then writes the pointer.',
   skipRecordedUnmanaged: '{file} is recorded as unmanaged; leaving it as is.',
   skipRecordedCompiledAbsent: '{file} is recorded as compiled but is not on disk; not writing a pointer. Generate it: charter adf compile --target {target} --write',
   migrateRecordedUnmanaged: '{file} is recorded as unmanaged; not migrating. To migrate it anyway: charter adf migrate --source {file}',

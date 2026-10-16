@@ -150,7 +150,7 @@ export const DOCTOR_MSG = {
   driftPointer: '{file} is recorded as a pointer but looks {inferred} on disk. Accept the file: charter adf vendor set {file} {inferred}  (or rewrite the pointer: charter adf vendor restore {file})',
   recordedAbsent: '{file} is recorded as {recorded} but is not on disk. Recreate it: {recreate}  (or stop tracking it: charter adf vendor set {file} unmanaged)',
   entryProblem: "VENDORS entry '{raw}' in {manifestPath} is ignored ({problem}). Fix or delete that line in {manifestPath}.",
-  entryDuplicate: "VENDORS lists {file} more than once in {manifestPath}; the last entry ('{raw}') wins. Delete the others.",
+  entryDuplicate: "VENDORS lists {file} more than once in {manifestPath}; '{raw}' is ignored because a later entry wins. Delete that line.",
   alias: 'VENDORS records both {file} and {other}, which are the same file on disk; {file} is used. Delete the {other} line.',
   legacySpelling: "VENDORS records the legacy name agents.md for the file AGENTS.md; `adf compile --target agents --mode compiled` cannot switch it. Change the line to '  - AGENTS.md: {mode}' (an automatic rename comes with #302).",
   sectionNotList: 'VENDORS in {manifestPath} does not read as a list, so every vendor mode is inferred. Every line under it must look like "  - CLAUDE.md: pointer".',

@@ -974,7 +974,7 @@ function printHelp(): void {
   console.log('');
   console.log('    charter adf vendor <status [--all] | set <file> <pointer|compiled|unmanaged> | init | restore <file>> [--ai-dir <dir>] [--dry-run]');
   console.log('      Show or record whether each vendor file is a pointer, compiled output, or unmanaged');
-  console.log('      (VENDORS in manifest.adf). restore rewrites one pointer, refusing on any content loss.');
+  console.log('      (VENDORS in manifest.adf). adf compile and adf tidy act on it. restore rewrites one pointer, refusing on any content loss.');
   console.log('');
   console.log('    charter adf suggest [--min-occurrences <n>] [--window-minutes <n>] [--ai-dir <dir>]');
   console.log('                        [--emit-ops <file>]');
