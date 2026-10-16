@@ -124,6 +124,10 @@ export const PRE_COMMIT_HOOK_MARKER = '# Managed by Charter: pre-commit evidence
 // which tidied every vendor file and re-staged all of .ai/*.adf. Both carry
 // PRE_COMMIT_HOOK_MARKER, which keeps old installs recognised as managed.
 export const PRE_COMMIT_SCOPE_MARKER = '# Charter pre-commit vendor tidy: scoped to staged files';
+// Third marker (#357): the evidence gate blocks on vendor bloat only in files the
+// commit stages (doctor --staged --tidy-skipped). A #356-era hook carries the two
+// markers above but not this one, so doctor can tell it to re-run install.
+export const PRE_COMMIT_GATE_SCOPE_MARKER = '# Charter pre-commit evidence gate: blocks on vendor bloat only in staged files';
 
 /**
  * The vendor tidy block of the pre-commit hook (#320). {CLI} is `npx charter`
@@ -137,7 +141,8 @@ export const HOOK_TIDY_BLOCK_TEMPLATE = `# Vendor file auto-tidy (#320): tidy on
 ${PRE_COMMIT_SCOPE_MARKER}
 # Skip with CHARTER_SKIP_TIDY=1
 # This block never fails the commit; the ADF evidence gate after it may.
-# TIDY_SKIPPED lists the vendor files it skipped, so the gate can say why it blocks.
+# TIDY_SKIPPED lists the vendor files it skipped; the generated hook passes it to
+# doctor --staged --tidy-skipped, so their bloat does not block the commit (#357).
 TIDY_SKIPPED=""
 if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
   VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md"
@@ -153,7 +158,7 @@ if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
       fi
       if ! git diff --quiet -- "$vf"; then
         echo "[pre-commit] $vf has unstaged changes, so auto-tidy is skipped for it in this commit."
-        echo "[pre-commit] If it carries bloat, the ADF evidence gate may still block this commit. Ways out: stage or stash the unstaged changes; or run: charter adf tidy --source $vf, then git add the result; or bypass the hooks with git commit --no-verify."
+        echo "[pre-commit] Bloat in it does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy it: stage or stash the unstaged changes and commit again; or run: charter adf tidy --source $vf, then git add the result."
         TIDY_SKIPPED="$TIDY_SKIPPED $vf"
         continue
       fi
@@ -180,7 +185,7 @@ if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
       set +f
       if [ -n "$BLOCKED" ]; then
         echo "[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work:$BLOCKED"
-        echo "[pre-commit] The ADF evidence gate may still block this commit while$NAMES carries bloat. Ways out: stage or stash that work; or run: charter adf tidy$SOURCES, then git add the result; or bypass the hooks with git commit --no-verify."
+        echo "[pre-commit] Bloat in$NAMES does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy: stage or stash that work and commit again; or run: charter adf tidy$SOURCES, then git add the result."
         TIDY_SKIPPED="$TIDY_SKIPPED$NAMES"
       else
         echo "[pre-commit] Moving content beyond the thin pointer into .ai/ ..."
@@ -228,6 +233,7 @@ set -eu
 
 ${renderHookTidyBlock('npx charter')}
 # ADF evidence gate: check LOC ceilings if manifest exists
+${PRE_COMMIT_GATE_SCOPE_MARKER}
 if [ -f ".ai/manifest.adf" ]; then
   echo '[pre-commit] Running ADF evidence check...'
   if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then
@@ -238,19 +244,17 @@ if [ -f ".ai/manifest.adf" ]; then
       exit 1
     }
   else
-    npx charter doctor --adf-only --ci --format text && npx charter adf evidence --auto-measure --ci || {
+    # --staged: vendor bloat blocks only in files this commit stages, and not in
+    # the ones the tidy block skipped (TIDY_SKIPPED); doctor reports the rest as
+    # INFO. Every other doctor check blocks as before.
+    npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text && npx charter adf evidence --auto-measure --ci || {
       echo ''
-      # Link a bloat failure to the tidy skip that caused it (#320).
-      set -f
-      for f in $TIDY_SKIPPED; do
-        n=$(npx charter adf tidy --dry-run --format json --source "$f" 2>/dev/null | sed -n 's/^  "totalExtracted": \\([0-9][0-9]*\\),*$/\\1/p') || n=""
-        if [ -n "$n" ] && [ "$n" -gt 0 ]; then
-          echo "[pre-commit] Blocked because $f still carries $n item(s) beyond its pointer: auto-tidy was skipped for it in this commit. See the [pre-commit] lines above for the ways out."
-        fi
-      done
-      set +f
       echo '[pre-commit] ADF verification FAILED.'
-      echo '  Run: npx charter doctor --adf-only --ci --format text'
+      if [ -n "$TIDY_SKIPPED" ]; then
+        echo "  Run: npx charter doctor --adf-only --ci --staged --tidy-skipped \\"\${TIDY_SKIPPED# }\\" --format text"
+      else
+        echo '  Run: npx charter doctor --adf-only --ci --staged --format text'
+      fi
       echo '   && npx charter adf evidence --auto-measure --ci'
       exit 1
     }
@@ -484,7 +488,8 @@ function printHelp(): void {
   console.log('  --pre-commit: Install a git pre-commit hook that auto-tidies the staged vendor config');
   console.log('  files (CLAUDE.md, .cursorrules, AGENTS.md, etc.) and runs ADF evidence checks.');
   console.log('  Bloat is routed to .adf modules; only the files tidy wrote are re-staged. A vendor file');
-  console.log('  with unstaged changes is skipped. Re-run this command to upgrade an older hook.');
+  console.log('  with unstaged changes is skipped. The gate (doctor --staged) blocks on vendor bloat only in');
+  console.log('  staged files tidy did not skip. Re-run this command to upgrade an older hook.');
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
   console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');

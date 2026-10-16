@@ -8,10 +8,10 @@
  * forward slashes: Node accepts C:/... on Windows and Git's sh leaves them alone.
  * Every repo and the shim live under a directory whose name contains a space.
  *
- * The ADF evidence gate that follows the tidy block (doctor --adf-only --ci)
- * is unchanged by #320 and fails on vendor bloat left in the working tree. Tests
- * that deliberately leave bloat behind (a skipped or failed tidy) therefore
- * install the tidy block alone (`tidyOnly`), and one test pins that interaction.
+ * The ADF evidence gate that follows the tidy block runs doctor --adf-only --ci
+ * --staged --tidy-skipped (#357): vendor bloat blocks only in staged files the
+ * tidy block did not skip. Tests of the tidy block alone install it without the
+ * gate (`tidyOnly`); the "full generated hook" group pins the gate's behaviour.
  */
 
 import * as fs from 'node:fs';
@@ -287,7 +287,7 @@ ${DB_BLOAT}`);
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
-    expect(result.output).toContain('Ways out: stage or stash the unstaged changes; or run: charter adf tidy --source CLAUDE.md, then git add the result; or bypass the hooks with git commit --no-verify.');
+    expect(result.output).toContain("[pre-commit] Bloat in it does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy it: stage or stash the unstaged changes and commit again; or run: charter adf tidy --source CLAUDE.md, then git add the result.");
     expect(tidyCalls(repo)).toEqual([]);
     expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(staged);
     expect(read(tmp, 'CLAUDE.md')).toBe(worktree);
@@ -313,7 +313,7 @@ ${DB_BLOAT}`);
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work: .ai/backend.adf');
-    expect(result.output).toContain('or run: charter adf tidy --source CLAUDE.md, then git add the result; or bypass the hooks with git commit --no-verify.');
+    expect(result.output).toContain("[pre-commit] Bloat in CLAUDE.md does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy: stage or stash that work and commit again; or run: charter adf tidy --source CLAUDE.md, then git add the result.");
     expect(tidyCalls(repo)).toEqual(['adf tidy --dry-run --print-paths --source CLAUDE.md']);
     expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(bloated);
     expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
@@ -430,60 +430,220 @@ ${DB_BLOAT}`);
     expect(read(tmp, 'CLAUDE.md')).toContain('## Architecture');
   });
 
-  describe('full generated hook: the evidence gate after a skipped tidy (option A)', () => {
-    const LINK = /\[pre-commit\] Blocked because CLAUDE\.md still carries [1-9]\d* item\(s\) beyond its pointer: auto-tidy was skipped for it in this commit\. See the \[pre-commit\] lines above for the ways out\./;
+  describe('full generated hook: the evidence gate is scoped to the commit (#357)', () => {
+    const NOT_BLOCKING = '[info] adf vendor bloat (not blocking):';
+    const BLOAT_WARN = '[warn] adf vendor bloat:';
 
-    it('CP-3: a partially staged bloated file is skipped, and the gate blocks with a line linking the two', { timeout: 60000 }, () => {
+    interface DoctorJson { status: string; checks: Array<{ name: string; status: string; details: string }> }
+
+    /** Plain doctor, as CI runs it: no --staged. */
+    function plainDoctor(tmp: string): { status: number | null; json: DoctorJson } {
+      const r = spawnSync('node', [CLI_BIN, 'doctor', '--adf-only', '--ci', '--format', 'json'], { cwd: tmp, encoding: 'utf-8' });
+      return { status: r.status, json: JSON.parse(r.stdout) as DoctorJson };
+    }
+
+    /** Plain doctor still fails on every bloated vendor file, and never scopes anything. */
+    function expectPlainDoctorEnforcesAll(tmp: string, bloated: string[]): void {
+      const { status, json } = plainDoctor(tmp);
+      expect(status).toBe(1);
+      const bloat = json.checks.find(c => c.name === 'adf vendor bloat');
+      expect(bloat?.status).toBe('WARN');
+      for (const f of bloated) expect(bloat?.details).toContain(`${f}: `);
+      expect(bloat?.details.endsWith('Run: charter adf tidy --dry-run')).toBe(true);
+      expect(json.checks.some(c => c.name === 'adf vendor bloat (not blocking)')).toBe(false);
+    }
+
+    const head = (tmp: string): string => git(tmp, 'rev-parse', 'HEAD');
+
+    it('B: unstaged GEMINI.md bloat does not block a clean staged CLAUDE.md edit, and is shown as INFO', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-b');
+      const tmp = repo.dir;
+      const gemini = read(tmp, 'GEMINI.md') + DB_BLOAT;
+      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), gemini);
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER.trimEnd() + '\n- pnpm 9\n');
+      git(tmp, 'add', 'CLAUDE.md');
+
+      const result = commit(tmp, 'clean claude edit');
+
+      expect(result.status).toBe(0);
+      expect(result.output).toContain(NOT_BLOCKING);
+      expect(result.output).toContain('GEMINI.md (not staged): ');
+      expect(result.output).not.toContain(BLOAT_WARN);
+      expect(repo.calls()).toContain('doctor --adf-only --ci --staged --tidy-skipped  --format text');
+      expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
+      expect(read(tmp, 'GEMINI.md')).toBe(gemini);
+      expect(porcelain(tmp)).toEqual([' M GEMINI.md']);
+      expectPlainDoctorEnforcesAll(tmp, ['GEMINI.md']);
+    });
+
+    it('B2: a staged bloated CLAUDE.md is tidied and committed while unstaged GEMINI.md bloat stays put', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-b2');
+      const tmp = repo.dir;
+      const gemini = read(tmp, 'GEMINI.md') + DB_BLOAT;
+      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), gemini);
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+
+      const result = commit(tmp, 'bloated claude, unstaged gemini');
+
+      expect(result.status).toBe(0);
+      expect(result.output).toContain('GEMINI.md (not staged): ');
+      expect(show(tmp, 'HEAD:CLAUDE.md')).not.toContain('## Database Rules');
+      expect(committedFiles(tmp)).not.toContain('GEMINI.md');
+      expect(read(tmp, 'GEMINI.md')).toBe(gemini);
+      expectPlainDoctorEnforcesAll(tmp, ['GEMINI.md']);
+    });
+
+    it('N: a commit staging no vendor file is not blocked by vendor bloat elsewhere', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-n');
+      const tmp = repo.dir;
+      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
+      fs.writeFileSync(path.join(tmp, 'notes.md'), 'hello\n');
+      git(tmp, 'add', 'notes.md');
+
+      const result = commit(tmp, 'no vendor staged');
+
+      expect(result.status).toBe(0);
+      expect(result.output).toContain('GEMINI.md (not staged): ');
+      expect(tidyCalls(repo)).toEqual([]);
+      expect(committedFiles(tmp)).toEqual(['notes.md']);
+      expectPlainDoctorEnforcesAll(tmp, ['GEMINI.md']);
+    });
+
+    it('C (CP-3): a partially staged bloated file is skipped by tidy and does not block; the skip is explained', { timeout: 60000 }, () => {
       const repo = writeHookFixtureRepo('gate-partial');
       const tmp = repo.dir;
-      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      const staged = POINTER + DB_BLOAT;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), staged);
       git(tmp, 'add', 'CLAUDE.md');
       fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '- not staged yet\n');
 
       const result = commit(tmp, 'partial with full hook');
 
-      expect(result.status).toBe(1);
+      expect(result.status).toBe(0);
       expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
-      expect(result.output).toContain('the ADF evidence gate may still block this commit');
-      // doctor's own output is not suppressed, and the linking line follows it.
-      expect(result.output).toContain('adf vendor bloat');
-      expect(result.output).toMatch(LINK);
-      expect(result.output.search(LINK)).toBeGreaterThan(result.output.indexOf('adf vendor bloat'));
-      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
-      // Only the read-only count ran; nothing was tidied.
-      expect(tidyCalls(repo)).toEqual(['adf tidy --dry-run --format json --source CLAUDE.md']);
-      expect(porcelain(tmp)).toEqual(['MM CLAUDE.md']);
+      expect(result.output).toContain("does not block this commit at the hook's doctor gate");
+      expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
+      expect(result.output).not.toContain(BLOAT_WARN);
+      expect(result.output).not.toContain('[pre-commit] Blocked because');
+      expect(repo.calls()).toContain('doctor --adf-only --ci --staged --tidy-skipped  CLAUDE.md --format text');
+      expect(tidyCalls(repo)).toEqual([]);
+      expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(staged);
+      expect(porcelain(tmp)).toEqual([' M CLAUDE.md']);
+      expectPlainDoctorEnforcesAll(tmp, ['CLAUDE.md']);
     });
 
-    it('CP-4: planned-module WIP skips tidy, and the gate blocks with a line linking the two', { timeout: 60000 }, () => {
+    it('D (CP-4): planned-module WIP skips tidy and does not block', { timeout: 60000 }, () => {
       const repo = writeHookFixtureRepo('gate-wip');
       const tmp = repo.dir;
-      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      const bloated = POINTER + DB_BLOAT;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), bloated);
       git(tmp, 'add', 'CLAUDE.md');
       fs.appendFileSync(path.join(tmp, '.ai', 'backend.adf'), '  - wip rule\n');
 
       const result = commit(tmp, 'wip with full hook');
 
-      expect(result.status).toBe(1);
+      expect(result.status).toBe(0);
       expect(result.output).toContain('[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work: .ai/backend.adf');
-      expect(result.output).toMatch(LINK);
-      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
-      expect(porcelain(tmp)).toEqual([' M .ai/backend.adf', 'M  CLAUDE.md']);
+      expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
+      expect(result.output).not.toContain(BLOAT_WARN);
+      expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(bloated);
+      expect(porcelain(tmp)).toEqual([' M .ai/backend.adf']);
+      expectPlainDoctorEnforcesAll(tmp, ['CLAUDE.md']);
     });
 
-    it('prints no linking line when the gate fails for another reason', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-other');
+    it('D3 (CP-4): an untracked planned module skips tidy and does not block', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-untracked');
       const tmp = repo.dir;
-      // GEMINI.md bloat is not staged and was not skipped by tidy; the gate fails on it alone.
-      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
-      fs.writeFileSync(path.join(tmp, 'notes.md'), 'hello\n');
-      git(tmp, 'add', 'notes.md');
+      // DB_BLOAT makes the file bloated in doctor's eyes, so the gate would block without --tidy-skipped.
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + '\n## Testing\n- Always run the test suite before pushing\n- Never skip flaky tests\n' + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+      const plan = execFileSync('node', [CLI_BIN, 'adf', 'tidy', '--dry-run', '--print-paths', '--source', 'CLAUDE.md'], { cwd: tmp, encoding: 'utf-8' });
+      const created = plan.split('\n').filter(l => l.startsWith('module ')).map(l => l.slice('module '.length))
+        .find(p => !fs.existsSync(path.join(tmp, p)));
+      expect(created).toBeDefined();
+      fs.writeFileSync(path.join(tmp, created!), 'ADF: 0.1\n\n📐 RULES:\n  - my own untracked draft\n');
+      expect(plainDoctor(tmp).status).toBe(1);
 
-      const result = commit(tmp, 'other failure');
+      const result = commit(tmp, 'untracked planned module, full hook');
+
+      expect(result.status).toBe(0);
+      expect(result.output).toContain(`unstaged or untracked work: ${created}`);
+      expect(result.output).not.toContain(BLOAT_WARN);
+      expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
+      expect(read(tmp, created!)).toContain('my own untracked draft');
+    });
+
+    it('still blocks on staged bloat that tidy ran on but could not move (keyword density in a kept section)', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-unfixable');
+      const tmp = repo.dir;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER.trimEnd() + ', the database is postgres and the database runs locally\n');
+      git(tmp, 'add', 'CLAUDE.md');
+      const before = head(tmp);
+
+      const result = commit(tmp, 'unfixable bloat');
 
       expect(result.status).toBe(1);
-      expect(result.output).not.toContain('[pre-commit] Blocked because');
-      expect(tidyCalls(repo)).toEqual([]);
+      expect(result.output).toContain('[pre-commit] Vendor config files are clean.');
+      expect(result.output).toContain(BLOAT_WARN);
+      expect(result.output).toContain('CLAUDE.md: trigger keywords [database (2x)]');
+      expect(result.output).toContain('Run: charter adf tidy --dry-run --source CLAUDE.md');
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      expect(result.output).toContain(' doctor --adf-only --ci --staged --format text');
+      expect(head(tmp)).toBe(before);
+    });
+
+    it('still blocks on a staged bloated file when tidy fails (not a deliberate skip)', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-tidy-fails');
+      const tmp = repo.dir;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+      const before = head(tmp);
+
+      const result = commit(tmp, 'tidy fails, full hook', { HOOK_TEST_FAIL_TIDY: '1' });
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('[pre-commit] adf tidy --dry-run failed; skipping auto-tidy.');
+      expect(result.output).toContain(BLOAT_WARN);
+      expect(result.output).not.toContain(NOT_BLOCKING);
+      expect(head(tmp)).toBe(before);
+    });
+
+    it('still blocks on a staged bloated file under CHARTER_SKIP_TIDY=1', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-skip-env');
+      const tmp = repo.dir;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+      const before = head(tmp);
+
+      const result = commit(tmp, 'skip tidy, full hook', { CHARTER_SKIP_TIDY: '1' });
+
+      expect(result.status).toBe(1);
+      expect(result.output).toMatch(/\[warn\] adf vendor bloat: Vendor file bloat detected:\n {4}CLAUDE\.md: /);
+      // Only the staged file blocks; the unstaged one is reported apart.
+      expect(result.output).toContain('GEMINI.md (not staged): ');
+      expect(head(tmp)).toBe(before);
+    });
+
+    it('a non-bloat doctor WARN (malformed VENDORS entry) still blocks, even alongside a skipped file', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-vendors');
+      const tmp = repo.dir;
+      fs.appendFileSync(path.join(tmp, '.ai', 'manifest.adf'), '\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: bogus\n');
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+      fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '- not staged yet\n');
+      const before = head(tmp);
+
+      const result = commit(tmp, 'malformed vendors');
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('[warn] adf vendor mode:');
+      expect(result.output).toContain("VENDORS entry 'CLAUDE.md: bogus'");
+      expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      expect(result.output).toContain(' doctor --adf-only --ci --staged --tidy-skipped "CLAUDE.md" --format text');
+      expect(head(tmp)).toBe(before);
     });
   });
 
