@@ -32,9 +32,16 @@ const GENERAL_MD = '# Project\n\n## General\n\n- Always write a changelog entry.
 
 const MANIFEST_PATH = path.join('.ai', 'manifest.adf');
 
-/** The manifest minus the VENDORS block where implicit writers record vendor modes (#318). */
-function readManifestWithoutVendors(): string {
-  return fs.readFileSync(MANIFEST_PATH, 'utf-8').replace(/\n\u{1F3F7}\u{FE0F} VENDORS:\n(?: {2}- .*\n)*/u, '');
+/**
+ * The manifest minus the VENDORS block where implicit writers record vendor modes
+ * (#318). The block must hold exactly `entries`, appended at EOF, so a module
+ * bullet misplaced into it fails the test instead of being stripped.
+ */
+function readManifestWithoutVendors(entries: readonly string[] = ['CLAUDE.md: pointer']): string {
+  const text = fs.readFileSync(MANIFEST_PATH, 'utf-8');
+  const block = `\n\u{1F3F7} VENDORS:\n${entries.map(e => `  - ${e}\n`).join('')}`;
+  expect(text.endsWith(block)).toBe(true);
+  return text.slice(0, text.length - block.length);
 }
 
 interface JsonRegistration {
@@ -210,7 +217,7 @@ describe('adf migrate — manifest registration (#239)', () => {
     fs.writeFileSync('GEMINI.md', '# Gemini\n\n## Docker deployment\n\n- Always pin base images.\n');
     const [src] = await migrateJson(['--source', 'GEMINI.md']);
     expect(src.registrations.find(r => r.module === 'infra.adf')?.status).toBe('already-registered');
-    expect(readManifestWithoutVendors()).toBe(manifestBefore);
+    expect(readManifestWithoutVendors(['CLAUDE.md: pointer', 'GEMINI.md: pointer'])).toBe(manifestBefore);
     expect(onDemand().find(m => m.path === 'infra.adf')?.triggers).toEqual(['deployment']);
   });
 
@@ -350,7 +357,9 @@ describe('bootstrap --yes — migrate registers its own modules (INV-4)', () => 
     fs.writeFileSync(path.join('.ai', 'Observability.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Old tracing notes\n');
 
     expect(await bootstrapCommand({ ...baseOptions, yes: true }, args)).toBe(0);
-    const after = readManifestWithoutVendors();
+    const after = readManifestWithoutVendors(
+      ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'].map(f => `${f}: pointer`),
+    );
     expect(after).toBe(manifest.replace('DB)\n', 'DB)\n  - Observability.adf (Triggers on: observability)\n'));
   });
 

@@ -67,9 +67,8 @@ export function parseManifest(doc: AdfDocument): Manifest {
         break;
       }
       case 'VENDORS': {
-        if (section.content.type === 'list') {
-          manifest.vendors = section.content.items.map(parseVendorEntry);
-        }
+        // The last VENDORS section wins outright: an empty or non-list one means no entries.
+        manifest.vendors = section.content.type === 'list' ? section.content.items.map(parseVendorEntry) : [];
         break;
       }
       case 'CADENCE': {

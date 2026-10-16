@@ -5,7 +5,7 @@
  * thin `pointer` to .ai/, `compiled` output of `charter adf compile`, or
  * `unmanaged`. The record is a VENDORS list in <aiDir>/manifest.adf:
  *
- *   🏷️ VENDORS:
+ *   🏷 VENDORS:
  *     - CLAUDE.md: pointer
  *     - AGENTS.md: compiled
  *
@@ -24,8 +24,8 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { POINTER_MARKERS } from './adf';
-import { discoverAgentConfigFiles } from './adf-migrate';
-import { insertManifestBullet, lastSectionIndex, replaceManifestBullet } from './adf-manifest-register';
+import { fileIdentity } from './adf-migrate';
+import { insertManifestBullet, lastSectionIndex, replaceManifestBullet, sectionHeaders } from './adf-manifest-register';
 
 // ============================================================================
 // Entities
@@ -104,7 +104,8 @@ export type VendorWriteResult =
 export type VendorWritePolicy = 'add-if-absent' | 'upsert';
 
 export const VENDORS_SECTION_KEY = 'VENDORS';
-export const VENDORS_DECORATION = '\u{1F3F7}\u{FE0F}';
+/** Bare U+1F3F7: parseAdf drops U+FE0F, so only this form survives `adf fmt` unchanged. */
+export const VENDORS_DECORATION = '\u{1F3F7}';
 
 export const MSG = {
   unknownFile: "Unknown vendor file '{file}'. Expected one of: CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md, agents.md, copilot-instructions.md",
@@ -115,8 +116,10 @@ export const MSG = {
   manifestMissingStatus: '{manifestPath} not found; showing inferred modes only.',
   manifestUnparseable: '{manifestPath} could not be parsed; vendor modes were not recorded. Fix the manifest or run: charter doctor',
   manifestUnparseableStatus: '{manifestPath} could not be parsed; showing inferred modes only. Fix the manifest or run: charter doctor',
-  sectionNotList: 'VENDORS in {manifestPath} is not a list; {file} was not recorded. Expected lines like: "  - CLAUDE.md: pointer"',
-  sectionNotListStatus: 'VENDORS in {manifestPath} is not a list; showing inferred modes only. Expected lines like: "  - CLAUDE.md: pointer"',
+  sectionNotList: 'VENDORS in {manifestPath} does not read as a list: every line under it must be an item like "  - CLAUDE.md: pointer" (ADF has no comment lines). {file} was not recorded.',
+  sectionNotListStatus: 'VENDORS in {manifestPath} does not read as a list: every line under it must be an item like "  - CLAUDE.md: pointer" (ADF has no comment lines). Showing inferred modes only.',
+  sameFile: '{file} is the same file as {recorded} on disk; recorded under {recorded}.',
+  aliasRecorded: 'VENDORS in {manifestPath} records both {file} and {other}, which are the same file on disk; {file} is used.',
   entryProblem: "Ignoring VENDORS entry '{raw}' in {manifestPath}: {problem}. {file} falls back to its inferred mode.",
   entryProblemNoFile: "Ignoring VENDORS entry '{raw}' in {manifestPath}: {problem}.",
   entryDuplicate: "Ignoring VENDORS entry '{raw}' in {manifestPath}: duplicate. The last entry for {file} wins.",
@@ -243,13 +246,41 @@ export function readVendorRecord(manifestPath: string): VendorRecord {
   if (content && content.type !== 'list' && !(content.type === 'text' && content.value === '')) {
     return { manifestPath, manifestFound: true, ...empty, readProblem: 'section-not-list' };
   }
-  // parseManifest reads the last VENDORS list; an empty last header means no entries.
-  const vendors = content?.type === 'list' ? parseManifest(doc).vendors : [];
-  return { manifestPath, manifestFound: true, ...classifyVendorEntries(vendors) };
+  // parseManifest reads the last VENDORS section; an empty one means no entries.
+  return { manifestPath, manifestFound: true, ...classifyVendorEntries(parseManifest(doc).vendors) };
 }
 
-function readVendorFile(file: VendorFile, onDisk: ReadonlySet<string>): string | null {
-  if (!onDisk.has(file)) return null;
+/**
+ * Vendor names present at the repo root, grouped by physical file (device and
+ * inode, as discoverAgentConfigFiles dedupes). On a case-insensitive filesystem
+ * AGENTS.md and agents.md are one group; so are two hard-linked names. Each
+ * group is in VENDOR_FILES order, so AGENTS.md comes before agents.md.
+ */
+export function vendorFileGroups(): VendorFile[][] {
+  const groups = new Map<string, VendorFile[]>();
+  for (const name of VENDOR_FILES) {
+    const full = path.resolve(name);
+    if (!fs.existsSync(full)) continue;
+    const id = fileIdentity(full);
+    groups.set(id, [...(groups.get(id) ?? []), name]);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * The spelling under which `file` is (or should be) recorded: a recorded name
+ * for the same physical file wins, so one file never gets two entries.
+ */
+export function recordedSpelling(
+  file: VendorFile,
+  recorded: ReadonlyMap<VendorFile, unknown>,
+  groups: readonly VendorFile[][] = vendorFileGroups(),
+): VendorFile {
+  if (recorded.has(file)) return file;
+  return groups.find(g => g.includes(file))?.find(n => recorded.has(n)) ?? file;
+}
+
+function readVendorFile(file: VendorFile): string | null {
   try {
     return fs.readFileSync(path.resolve(file), 'utf-8');
   } catch {
@@ -257,13 +288,8 @@ function readVendorFile(file: VendorFile, onDisk: ReadonlySet<string>): string |
   }
 }
 
-/** The vendor names present at the repo root, deduped by inode (AGENTS.md wins over agents.md). */
-export function vendorFilesOnDisk(): Set<VendorFile> {
-  return new Set(discoverAgentConfigFiles().filter(isVendorFile));
-}
-
-function resolveOne(file: VendorFile, record: VendorRecord, onDisk: ReadonlySet<string>): ResolvedVendorMode {
-  const evidence = inferVendorMode(file, readVendorFile(file, onDisk));
+function resolveOne(file: VendorFile, record: VendorRecord, exists: boolean): ResolvedVendorMode {
+  const evidence = inferVendorMode(file, exists ? readVendorFile(file) : null);
   const recorded = record.recorded.get(file);
   if (recorded) {
     const disagrees = evidence.exists && evidence.inferredMode !== recorded.mode;
@@ -273,21 +299,73 @@ function resolveOne(file: VendorFile, record: VendorRecord, onDisk: ReadonlySet<
 }
 
 /**
+ * One row per physical file: each on-disk group is shown under its recorded
+ * spelling (else its first name), then recorded names with no file on disk,
+ * then (with `all`) the remaining absent names. `aliases` lists the extra
+ * recorded spellings of a file already shown.
+ */
+function resolveAll(record: VendorRecord, all: boolean): { files: ResolvedVendorMode[]; aliases: Array<{ file: VendorFile; other: VendorFile }> } {
+  const groups = vendorFileGroups();
+  const shown = new Map<VendorFile, boolean>();
+  const aliases: Array<{ file: VendorFile; other: VendorFile }> = [];
+  for (const group of groups) {
+    const file = group.find(n => record.recorded.has(n)) ?? group[0];
+    shown.set(file, true);
+    for (const other of group) if (other !== file && record.recorded.has(other)) aliases.push({ file, other });
+  }
+  const onDisk = new Set(groups.flat());
+  for (const name of VENDOR_FILES) {
+    if (!onDisk.has(name) && (all || record.recorded.has(name))) shown.set(name, false);
+  }
+  const files = VENDOR_FILES.filter(n => shown.has(n)).map(n => resolveOne(n, record, shown.get(n) === true));
+  return { files, aliases };
+}
+
+/**
  * Resolve every vendor file's mode: the recorded mode when a valid entry exists,
  * else the inferred one. Vendor paths are repo-root (cwd) relative; the record
  * is <aiDir>/manifest.adf. `all` also lists absent, unrecorded names.
  */
 export function resolveVendorModes(aiDir: string, options: { all?: boolean } = {}): ResolvedVendorMode[] {
-  const record = readVendorRecord(path.join(aiDir, 'manifest.adf'));
-  const onDisk = vendorFilesOnDisk();
-  return VENDOR_FILES
-    .filter(file => options.all || onDisk.has(file) || record.recorded.has(file))
-    .map(file => resolveOne(file, record, onDisk));
+  return resolveAll(readVendorRecord(path.join(aiDir, 'manifest.adf')), options.all === true).files;
 }
 
-/** Resolve one vendor file's mode (see resolveVendorModes). */
+/** Resolve one vendor file's mode, under the spelling its physical file is shown as. */
 export function resolveVendorMode(aiDir: string, file: VendorFile): ResolvedVendorMode {
-  return resolveOne(file, readVendorRecord(path.join(aiDir, 'manifest.adf')), vendorFilesOnDisk());
+  const record = readVendorRecord(path.join(aiDir, 'manifest.adf'));
+  const { files } = resolveAll(record, true);
+  const group = vendorFileGroups().find(g => g.includes(file)) ?? [file];
+  return files.find(r => group.includes(r.file)) ?? resolveOne(file, record, false);
+}
+
+/**
+ * The manifest text with every VENDORS section removed, for consumers that scan
+ * the manifest as text (score's path grounding). Sections are found with the
+ * parser's header grammar, and the result must re-parse to the same sections
+ * minus VENDORS; otherwise, or with no VENDORS section, the text is returned as is.
+ */
+export function withoutVendorsSection(text: string): string {
+  let doc: AdfDocument;
+  try {
+    doc = parseAdf(text);
+  } catch {
+    return text;
+  }
+  if (lastSectionIndex(doc, VENDORS_SECTION_KEY) === -1) return text;
+  const lines = text.split('\n');
+  const { headers, own } = sectionHeaders(lines, VENDORS_SECTION_KEY);
+  const drop = new Set<number>();
+  for (const header of own) {
+    const next = headers.find(i => i > header) ?? lines.length;
+    for (let i = header; i < next; i++) drop.add(i);
+  }
+  const stripped = lines.filter((_, i) => !drop.has(i)).join('\n');
+  try {
+    const rest = JSON.stringify(doc.sections.filter(s => s.key !== VENDORS_SECTION_KEY));
+    return JSON.stringify(parseAdf(stripped).sections) === rest ? stripped : text;
+  } catch {
+    return text;
+  }
 }
 
 // ============================================================================
@@ -350,19 +428,28 @@ export function recordVendorModes(
   }
 
   const expected: AdfDocument = JSON.parse(JSON.stringify(doc));
+  const groups = vendorFileGroups();
   let next = text;
 
-  for (const { file, mode } of allowed) {
+  for (const entry of allowed) {
+    const { mode } = entry;
     const idx = lastSectionIndex(expected, VENDORS_SECTION_KEY);
     const section = idx === -1 ? undefined : expected.sections[idx];
     const emptyText = section?.content.type === 'text' && section.content.value === '';
     if (section && section.content.type !== 'list' && !emptyText) {
-      warn(fill(MSG.sectionNotList, { manifestPath, file }));
-      results.push(skip(file, mode, 'section-not-list'));
+      warn(fill(MSG.sectionNotList, { manifestPath, file: entry.file }));
+      results.push(skip(entry.file, mode, 'section-not-list'));
       continue;
     }
     const items = section?.content.type === 'list' ? section.content.items : [];
-    const { recorded, malformedFor } = classifyVendorEntries(items.length > 0 ? parseManifest(expected).vendors : []);
+    const { recorded, malformedFor } = classifyVendorEntries(parseManifest(expected).vendors);
+    // One physical file, one entry: record under the spelling already recorded for it.
+    const file = recordedSpelling(entry.file, recorded, groups);
+    if (!isModeAllowed(file, mode)) {
+      warn(fill(MSG.modeNotAllowed, { file }));
+      results.push(skip(file, mode, 'mode-not-allowed'));
+      continue;
+    }
     const current = recorded.get(file);
     const bullet = `${file}: ${mode}`;
 
@@ -399,8 +486,7 @@ export function recordVendorModes(
 
     next = insertManifestBullet(next, VENDORS_SECTION_KEY, bullet, VENDORS_DECORATION);
     if (!section) {
-      // parseAdf keeps the base emoji and drops the variation selector.
-      expected.sections.push({ key: VENDORS_SECTION_KEY, decoration: '\u{1F3F7}', content: { type: 'list', items: [bullet] } });
+      expected.sections.push({ key: VENDORS_SECTION_KEY, decoration: VENDORS_DECORATION, content: { type: 'list', items: [bullet] } });
     } else if (section.content.type === 'list') {
       section.content.items.push(bullet);
     } else {
@@ -512,10 +598,7 @@ function sourceNote(r: ResolvedVendorMode): string {
 
 function vendorStatus(options: CLIOptions, manifestPath: string, all: boolean): number {
   const record = readVendorRecord(manifestPath);
-  const onDisk = vendorFilesOnDisk();
-  const files = VENDOR_FILES
-    .filter(file => all || onDisk.has(file) || record.recorded.has(file))
-    .map(file => resolveOne(file, record, onDisk));
+  const { files, aliases } = resolveAll(record, all);
   const unrecorded = files.filter(f => f.source === 'inferred' && f.evidence.exists).map(f => f.file);
   const entryProblems = record.problems.map(p => ({ raw: p.raw, problem: p.problem }));
 
@@ -527,6 +610,7 @@ function vendorStatus(options: CLIOptions, manifestPath: string, all: boolean): 
     const template = p.problem === 'duplicate' ? MSG.entryDuplicate : p.file ? MSG.entryProblem : MSG.entryProblemNoFile;
     warnings.push(fill(template, { raw: p.raw, manifestPath, problem: p.problem, file: p.file ?? '' }));
   }
+  for (const a of aliases) warnings.push(fill(MSG.aliasRecorded, { manifestPath, file: a.file, other: a.other }));
 
   const nextActions: string[] = [];
   if (!record.manifestFound) nextActions.push('charter adf init');
@@ -567,14 +651,16 @@ function vendorSet(options: CLIOptions, manifestPath: string, rest: string[], dr
     console.log(JSON.stringify({ manifestPath, written: outcome.written, result }, null, 2));
   } else {
     for (const w of warnings) console.error(`  Warning: ${w}`);
-    if (result.status !== 'skipped' && !vendorFilesOnDisk().has(file)) {
-      console.log(`  ${fill(MSG.fileAbsentSet, { file, mode })}`);
+    const target = result.file;
+    if (target !== file) console.log(`  ${fill(MSG.sameFile, { file, recorded: target })}`);
+    if (result.status !== 'skipped' && !fs.existsSync(path.resolve(target))) {
+      console.log(`  ${fill(MSG.fileAbsentSet, { file: target, mode })}`);
     }
-    if (result.status === 'unchanged') console.log(fill(MSG.setUnchanged, { file, mode }));
-    if (result.status === 'updated') console.log(fill(MSG.setOk, { file, previous: result.previous, mode }));
-    if (result.status === 'added') console.log(fill(MSG.setOk, { file, previous: 'unrecorded', mode }));
+    if (result.status === 'unchanged') console.log(fill(MSG.setUnchanged, { file: target, mode }));
+    if (result.status === 'updated') console.log(fill(MSG.setOk, { file: target, previous: result.previous, mode }));
+    if (result.status === 'added') console.log(fill(MSG.setOk, { file: target, previous: 'unrecorded', mode }));
     if (result.status === 'planned') {
-      console.log(`  [dry-run] Would record ${file}: ${result.previous ?? 'unrecorded'} -> ${mode} in ${manifestPath}`);
+      console.log(`  [dry-run] Would record ${target}: ${result.previous ?? 'unrecorded'} -> ${mode} in ${manifestPath}`);
     }
   }
   return result.status === 'skipped' ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
@@ -585,17 +671,15 @@ function vendorInit(options: CLIOptions, manifestPath: string, dryRun: boolean):
   if (!fs.existsSync(manifestPath)) throw new CLIError(fill(MSG.manifestMissing, { manifestPath }));
 
   const record = readVendorRecord(manifestPath);
-  const onDisk = vendorFilesOnDisk();
   const warnings: string[] = [];
   const entries: Array<{ file: VendorFile; mode: VendorMode }> = [];
   const absent: VendorWriteResult[] = [];
-  for (const file of VENDOR_FILES) {
-    const evidence = inferVendorMode(file, readVendorFile(file, onDisk));
-    if (evidence.inferredMode) {
-      entries.push({ file, mode: evidence.inferredMode });
-    } else {
-      const recorded = record.recorded.get(file);
-      if (recorded) absent.push({ status: 'skipped', file, mode: recorded.mode, skipReason: 'file-absent' });
+  // One entry per physical file, under its recorded spelling (else its first name).
+  for (const r of resolveAll(record, false).files) {
+    if (r.evidence.inferredMode) {
+      entries.push({ file: r.file, mode: r.evidence.inferredMode });
+    } else if (r.source === 'recorded') {
+      absent.push({ status: 'skipped', file: r.file, mode: r.mode, skipReason: 'file-absent' });
     }
   }
 

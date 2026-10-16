@@ -61,7 +61,7 @@ export const AGENT_CONFIG_FILES = [
  * not canonicalise the final component's case (macOS APFS). Falls back to
  * realpathSync.native, then the resolved path, when the filesystem reports no ino.
  */
-function fileIdentity(fullPath: string): string {
+export function fileIdentity(fullPath: string): string {
   try {
     const st = fs.statSync(fullPath);
     if (st.ino) return `${st.dev}:${st.ino}`;

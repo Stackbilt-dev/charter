@@ -11,7 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { COMPILE_BANNER_MARKER, parseAdf } from '@stackbilt/adf';
+import { COMPILE_BANNER_MARKER, formatAdf, parseAdf, parseManifest } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import {
   adfCommand,
@@ -28,7 +28,9 @@ import {
   resolveVendorMode,
   resolveVendorModes,
   VENDOR_FILES,
+  withoutVendorsSection,
 } from '../commands/adf-vendor';
+import { scoreCommand } from '../commands/score';
 import type { VendorFile } from '../commands/adf-vendor';
 import { insertManifestBullet } from '../commands/adf-manifest-register';
 import { bootstrapCommand } from '../commands/bootstrap';
@@ -51,7 +53,7 @@ const BASE_MANIFEST = [
   '',
 ].join('\n');
 
-const VENDORS_BLOCK = '\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: pointer\n';
+const VENDORS_BLOCK = '\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: pointer\n';
 
 const originalCwd = process.cwd();
 let tmp = '';
@@ -111,11 +113,14 @@ function addedLines(before: string, after: string): string[] {
   return added;
 }
 
-function isCaseInsensitiveFs(): boolean {
-  fs.writeFileSync('case-probe.tmp', '');
-  const insensitive = fs.existsSync('CASE-PROBE.TMP');
-  fs.rmSync('case-probe.tmp');
-  return insensitive;
+/**
+ * Make agents.md and AGENTS.md one physical file. On a case-insensitive
+ * filesystem one write already gives both names; on a case-sensitive one a hard
+ * link does (the #344 trick), so the identity paths run on every host.
+ */
+function aliasedAgents(content: string): void {
+  fs.writeFileSync('agents.md', content);
+  if (!fs.existsSync('AGENTS.md')) fs.linkSync('agents.md', 'AGENTS.md');
 }
 
 // ============================================================================
@@ -208,7 +213,7 @@ describe('recordVendorModes', () => {
     const result = recordVendorModes(manifestPath, [{ file: 'CLAUDE.md', mode: 'pointer' }], 'add-if-absent', { onWarning });
     expect(result.written).toBe(true);
     expect(result.results).toEqual([{ status: 'added', file: 'CLAUDE.md', mode: 'pointer' }]);
-    expect(manifestText()).toBe(`${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: pointer\n`);
+    expect(manifestText()).toBe(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: pointer\n`);
     expect(warnings).toEqual([]);
   });
 
@@ -233,7 +238,7 @@ describe('recordVendorModes', () => {
   it('keeps a missing trailing newline', () => {
     const manifestPath = scaffold(BASE_MANIFEST.trimEnd());
     recordVendorModes(manifestPath, [{ file: 'CLAUDE.md', mode: 'pointer' }], 'add-if-absent');
-    expect(manifestText()).toBe(`${BASE_MANIFEST.trimEnd()}\n\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: pointer`);
+    expect(manifestText()).toBe(`${BASE_MANIFEST.trimEnd()}\n\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: pointer`);
     const manifestPath2 = manifestPath;
     recordVendorModes(manifestPath2, [{ file: 'AGENTS.md', mode: 'pointer' }], 'add-if-absent');
     expect(manifestText().endsWith('  - CLAUDE.md: pointer\n  - AGENTS.md: pointer')).toBe(true);
@@ -254,14 +259,14 @@ describe('recordVendorModes', () => {
     const after = manifestText();
     expect(after.startsWith(original)).toBe(true);
     expect(addedLines(original, after).filter(l => l !== '')).toEqual([
-      '\u{1F3F7}\u{FE0F} VENDORS:', '  - CLAUDE.md: pointer', '  - AGENTS.md: pointer',
+      '\u{1F3F7} VENDORS:', '  - CLAUDE.md: pointer', '  - AGENTS.md: pointer',
     ]);
   });
 
   it('refuses to write when the re-parse guard sees any other change (INV-2)', () => {
     // Lone-CR line endings: the parser splits them, a line edit cannot place the
     // bullet, and the re-parse check catches the mismatch.
-    const original = 'ADF: 0.1\r\r\u{1F3F7}\u{FE0F} VENDORS:\r  - CLAUDE.md: pointer\r';
+    const original = 'ADF: 0.1\r\r\u{1F3F7} VENDORS:\r  - CLAUDE.md: pointer\r';
     const manifestPath = scaffold(original);
     const add = recordVendorModes(manifestPath, [{ file: 'AGENTS.md', mode: 'pointer' }], 'add-if-absent', { onWarning });
     const upsert = recordVendorModes(manifestPath, [{ file: 'CLAUDE.md', mode: 'compiled' }], 'upsert', { onWarning });
@@ -307,12 +312,12 @@ describe('recordVendorModes', () => {
   });
 
   it('never rewrites a malformed entry for the file, or a non-list section', () => {
-    const malformed = scaffold(`${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md pointr\n`);
+    const malformed = scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - CLAUDE.md pointr\n`);
     expect(recordVendorModes(malformed, [{ file: 'CLAUDE.md', mode: 'pointer' }], 'upsert', { onWarning }).results[0])
       .toMatchObject({ status: 'skipped', skipReason: 'entry-malformed' });
     expect(warnings.pop()).toBe(`VENDORS in ${malformed} has an unreadable entry for CLAUDE.md ('CLAUDE.md pointr'); not rewritten. Fix that line by hand.`);
 
-    const text = scaffold(`${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS: CLAUDE.md is a pointer\n`);
+    const text = scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS: CLAUDE.md is a pointer\n`);
     const before = manifestText();
     expect(recordVendorModes(text, [{ file: 'CLAUDE.md', mode: 'pointer' }], 'upsert', { onWarning }).results[0])
       .toMatchObject({ status: 'skipped', skipReason: 'section-not-list' });
@@ -346,8 +351,8 @@ describe('insertManifestBullet (INV-11)', () => {
   });
 
   it('takes the decoration as a parameter for other keys', () => {
-    expect(insertManifestBullet('ADF: 0.1\n', 'VENDORS', 'CLAUDE.md: pointer', '\u{1F3F7}\u{FE0F}'))
-      .toBe('ADF: 0.1\n\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: pointer\n');
+    expect(insertManifestBullet('ADF: 0.1\n', 'VENDORS', 'CLAUDE.md: pointer', '\u{1F3F7}'))
+      .toBe('ADF: 0.1\n\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: pointer\n');
   });
 });
 
@@ -472,15 +477,10 @@ describe('adf vendor init', () => {
 
   it('records AGENTS.md once when agents.md is the same file', async () => {
     scaffold();
-    fs.writeFileSync('AGENTS.md', POINTER_AGENTS_MD);
+    aliasedAgents(POINTER_AGENTS_MD);
     const r = await runJson<{ results: Array<{ file: string }> }>(['vendor', 'init']);
-    const files = r.json.results.map(x => x.file);
-    if (isCaseInsensitiveFs()) {
-      expect(files).toEqual(['AGENTS.md']);
-      expect(manifestText()).not.toContain('agents.md');
-    } else {
-      expect(files).toEqual(['AGENTS.md']);
-    }
+    expect(r.json.results.map(x => x.file)).toEqual(['AGENTS.md']);
+    expect(manifestText()).not.toContain('agents.md');
   });
 
   it('exits 2 when the manifest is missing, and writes nothing under --dry-run', async () => {
@@ -617,7 +617,7 @@ describe('implicit writers', () => {
     const r = await runJson<{ written: string[] }>(['compile', '--target', 'claude', '--write']);
     expect(r.code).toBe(0);
     expect(r.json.written).toEqual(['CLAUDE.md']);
-    expect(manifestText()).toBe(`${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: compiled\n`);
+    expect(manifestText()).toBe(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: compiled\n`);
   });
 
   it('adf compile --write keeps an existing entry and only warns', async () => {
@@ -634,12 +634,13 @@ describe('implicit writers', () => {
     scaffold();
     const baseline = await runJson(['compile', '--target', 'agents', '--write']);
     fs.rmSync('AGENTS.md');
-    scaffold(`${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS: not a list\n`);
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS: not a list\n`);
     const broken = await runJson(['compile', '--target', 'agents', '--write']);
     expect(broken.code).toBe(baseline.code);
     expect(broken.json).toEqual(baseline.json);
     expect(broken.err).toContain('VENDORS in');
-    expect(broken.err).toContain('is not a list; AGENTS.md was not recorded.');
+    expect(broken.err).toContain('does not read as a list');
+    expect(broken.err).toContain('AGENTS.md was not recorded.');
   });
 
   it('adf migrate records pointer after a real migration, not under --dry-run', async () => {
@@ -663,20 +664,20 @@ describe('implicit writers', () => {
     // A record that cannot be written: the warning joins the adf-init step's JSON
     // warnings, and bootstrap's exit code is unchanged.
     for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md']) fs.rmSync(f);
-    const broken = `${text.slice(0, text.indexOf('\n\u{1F3F7}\u{FE0F} VENDORS:'))}\n\n\u{1F3F7}\u{FE0F} VENDORS: hand-written\n`;
+    const broken = `${text.slice(0, text.indexOf('\n\u{1F3F7} VENDORS:'))}\n\n\u{1F3F7} VENDORS: hand-written\n`;
     fs.writeFileSync(path.join('.ai', 'manifest.adf'), broken);
     out = [];
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, [...args, '--format', 'json'])).toBe(0);
     const payload = JSON.parse(out.join('\n')) as { steps: Array<{ name: string; warnings: string[] }> };
     const step = payload.steps.find(s => s.name === 'adf-init');
-    expect(step?.warnings).toContain(`VENDORS in ${path.join('.ai', 'manifest.adf')} is not a list; CLAUDE.md was not recorded. Expected lines like: "  - CLAUDE.md: pointer"`);
+    expect(step?.warnings).toContain(`VENDORS in ${path.join('.ai', 'manifest.adf')} does not read as a list: every line under it must be an item like "  - CLAUDE.md: pointer" (ADF has no comment lines). CLAUDE.md was not recorded.`);
     expect(fs.existsSync('CLAUDE.md')).toBe(true);
     expect(manifestText()).toBe(broken);
   });
 
   it('bootstrap keeps an existing entry for a pointer it writes', async () => {
     const args = ['--yes', '--skip-install', '--skip-doctor'];
-    scaffold(`${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS:\n  - GEMINI.md: compiled\n`);
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - GEMINI.md: compiled\n`);
     out = [];
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, [...args, '--format', 'json'])).toBe(0);
     const payload = JSON.parse(out.join('\n')) as { steps: Array<{ name: string; warnings: string[] }> };
@@ -702,7 +703,8 @@ describe('consumers ignore the record (INV-1)', () => {
       process.chdir(dir);
       try {
         scaffold(withVendors
-          ? `${BASE_MANIFEST}\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: pointer\n  - AGENTS.md: compiled\n  - GEMINI.md: unmanaged\n  - .cursorrules: compiled\n`
+          // copilot-instructions.md is recorded but never created: a recorded-but-absent file.
+          ? `${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: pointer\n  - AGENTS.md: compiled\n  - GEMINI.md: unmanaged\n  - .cursorrules: compiled\n  - copilot-instructions.md: pointer\n`
           : BASE_MANIFEST);
         setup();
         const runs: Run[] = [];
@@ -710,7 +712,9 @@ describe('consumers ignore the record (INV-1)', () => {
           const r = await step();
           // The only allowed difference: the implicit writers' record warnings.
           const errLines = r.err.split('\n').filter(l => !/record kept|VENDORS|vendor modes/.test(l)).join('\n');
-          runs.push({ ...r, out: r.out.split(dir).join('<tmp>'), err: errLines.split(dir).join('<tmp>') });
+          const norm = (s: string) => s.split(dir).join('<tmp>').split(path.basename(dir)).join('<tmp>')
+            .replace(/"generatedAt": "[^"]+"/g, '"generatedAt": "<t>"');
+          runs.push({ ...r, out: norm(r.out), err: norm(errLines) });
         }
         // Vendor files on disk end up byte-identical too.
         runs.push({ code: 0, out: ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules'].map(f => fs.existsSync(f) ? fs.readFileSync(f, 'utf-8') : '<absent>').join('\n---\n'), err: '' });
@@ -763,5 +767,136 @@ describe('consumers ignore the record (INV-1)', () => {
       () => doctor(TEXT, []),
       () => doctor(JSON_OPTS, []),
     ]);
+  });
+
+  it('score is unchanged, including non-unique vendor basenames', async () => {
+    const score = async (options: CLIOptions): Promise<Run> => {
+      out = [];
+      err = [];
+      const code = await scoreCommand(options, []);
+      return { code, out: out.join('\n'), err: err.join('\n') };
+    };
+    await compare(() => {
+      setupVendorFiles();
+      // A monorepo with per-package agent files: the basenames are not unique.
+      fs.mkdirSync(path.join('packages', 'a'), { recursive: true });
+      fs.writeFileSync(path.join('packages', 'a', 'CLAUDE.md'), '# Package a\n');
+      fs.writeFileSync(path.join('packages', 'a', 'AGENTS.md'), '# Package a\n');
+    }, [
+      () => score(JSON_OPTS),
+      () => score(TEXT),
+    ]);
+  });
+});
+
+describe('withoutVendorsSection', () => {
+  it('returns a manifest without VENDORS unchanged', () => {
+    expect(withoutVendorsSection(BASE_MANIFEST)).toBe(BASE_MANIFEST);
+  });
+
+  it('removes VENDORS at EOF or mid-file and keeps every other section', () => {
+    expect(withoutVendorsSection(`${BASE_MANIFEST}${VENDORS_BLOCK}`)).toBe(BASE_MANIFEST);
+    const mid = `${BASE_MANIFEST}${VENDORS_BLOCK}\n\u{1F4D0} RULES:\n  - Keep it small.\n`;
+    const stripped = withoutVendorsSection(mid);
+    expect(stripped).not.toContain('VENDORS');
+    expect(parseAdf(stripped).sections).toEqual(parseAdf(mid).sections.filter(s => s.key !== 'VENDORS'));
+  });
+});
+
+// ============================================================================
+// 8. adf fmt round-trip: the writer's output is canonical
+// ============================================================================
+
+describe('VENDORS survives adf fmt', () => {
+  const canonical = formatAdf(parseAdf(BASE_MANIFEST));
+  const roundTrips = (): void => {
+    const text = manifestText();
+    expect(formatAdf(parseAdf(text))).toBe(text);
+  };
+
+  it('stays canonical when the writer creates, extends and upserts the section', () => {
+    const manifestPath = scaffold(canonical);
+    recordVendorModes(manifestPath, [{ file: 'CLAUDE.md', mode: 'pointer' }], 'add-if-absent');
+    expect(manifestText()).toContain('\u{1F3F7} VENDORS:\n');
+    roundTrips();
+    recordVendorModes(manifestPath, [{ file: 'AGENTS.md', mode: 'compiled' }], 'add-if-absent');
+    roundTrips();
+    recordVendorModes(manifestPath, [{ file: 'CLAUDE.md', mode: 'unmanaged' }], 'upsert');
+    roundTrips();
+  });
+
+  it('adf fmt --check passes after vendor set', async () => {
+    scaffold(canonical);
+    expect((await run(['fmt', path.join('.ai', 'manifest.adf'), '--check'])).code).toBe(0);
+    expect((await run(['vendor', 'set', 'CLAUDE.md', 'pointer'])).code).toBe(0);
+    expect((await run(['fmt', path.join('.ai', 'manifest.adf'), '--check'])).code).toBe(0);
+  });
+});
+
+// ============================================================================
+// 9. One physical file, one record (AGENTS.md / agents.md)
+// ============================================================================
+
+describe('vendor file identity', () => {
+  it('vendor set maps another spelling of a recorded file to the recorded one', async () => {
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - AGENTS.md: unmanaged\n`);
+    aliasedAgents('# legacy agents\n');
+    const r = await run(['vendor', 'set', 'agents.md', 'pointer']);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('agents.md is the same file as AGENTS.md on disk; recorded under AGENTS.md.');
+    expect(r.out).not.toContain('does not exist yet');
+    expect(r.out).toContain('  [ok] AGENTS.md: unmanaged -> pointer');
+    expect(manifestText()).toBe(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - AGENTS.md: pointer\n`);
+  });
+
+  it('keeps the legacy spelling when that is the one recorded', async () => {
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - agents.md: pointer\n`);
+    aliasedAgents(POINTER_AGENTS_MD);
+    const before = manifestText();
+    const init = await runJson<{ results: unknown[] }>(['vendor', 'init']);
+    expect(init.json.results).toEqual([{ status: 'unchanged', file: 'agents.md', mode: 'pointer' }]);
+    expect(manifestText()).toBe(before);
+    const status = await runJson<{ files: Array<{ file: string; source: string; evidence: { exists: boolean } }>; unrecorded: string[] }>(['vendor', 'status']);
+    expect(status.json.files.map(f => [f.file, f.source, f.evidence.exists])).toEqual([['agents.md', 'recorded', true]]);
+    expect(status.json.unrecorded).toEqual([]);
+  });
+
+  it('adf migrate --source agents.md does not split the record', async () => {
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - AGENTS.md: unmanaged\n`);
+    aliasedAgents('# Agents\n\n## Rules\n\n- Always use pnpm for installs.\n');
+    const r = await run(['migrate', '--source', 'agents.md', '--no-backup']);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('AGENTS.md is recorded as unmanaged but adf migrate wrote it as pointer; record kept.');
+    const vendors = parseAdf(manifestText()).sections.find(s => s.key === 'VENDORS');
+    expect(vendors?.content).toEqual({ type: 'list', items: ['AGENTS.md: unmanaged'] });
+  });
+
+  it('status shows one row when both spellings are recorded, and says which is used', async () => {
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - AGENTS.md: unmanaged\n  - agents.md: pointer\n`);
+    aliasedAgents(POINTER_AGENTS_MD);
+    const r = await runJson<{ files: Array<{ file: string; mode: string }> }>(['vendor', 'status']);
+    expect(r.json.files).toEqual([expect.objectContaining({ file: 'AGENTS.md', mode: 'unmanaged', disagrees: true })]);
+    expect(r.err).toContain('records both AGENTS.md and agents.md, which are the same file on disk; AGENTS.md is used.');
+    expect(resolveVendorMode('.ai', 'agents.md')).toMatchObject({ file: 'AGENTS.md', mode: 'unmanaged' });
+  });
+});
+
+// ============================================================================
+// 10. Last VENDORS section wins; comment lines
+// ============================================================================
+
+describe('VENDORS edge cases', () => {
+  it('an empty last VENDORS section means no entries, for the library and the CLI alike', async () => {
+    scaffold(`${BASE_MANIFEST}${VENDORS_BLOCK}\n\u{1F3F7} VENDORS:\n`);
+    fs.writeFileSync('CLAUDE.md', `<!-- ${COMPILE_BANNER_MARKER} -->\n`);
+    expect(parseManifest(parseAdf(manifestText())).vendors).toEqual([]);
+    expect(resolveVendorMode('.ai', 'CLAUDE.md')).toMatchObject({ mode: 'compiled', source: 'inferred' });
+  });
+
+  it('names the real problem when VENDORS holds a non-item line', async () => {
+    scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  # recorded by bootstrap\n  - CLAUDE.md: pointer\n`);
+    const r = await run(['vendor', 'set', 'AGENTS.md', 'pointer']);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('does not read as a list: every line under it must be an item like "  - CLAUDE.md: pointer" (ADF has no comment lines). AGENTS.md was not recorded.');
   });
 });

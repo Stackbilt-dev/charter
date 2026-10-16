@@ -17,14 +17,14 @@ const MANIFEST = `ADF: 0.1
 📦 DEFAULT_LOAD:
   - core.adf
 
-🏷️ VENDORS:
+🏷 VENDORS:
   - CLAUDE.md: pointer
   - AGENTS.md: compiled
   - .cursorrules:unmanaged
 `;
 
 describe('parseManifest VENDORS', () => {
-  it('parses a 🏷️ VENDORS list into raw file/mode entries', () => {
+  it('parses a 🏷 VENDORS list into raw file/mode entries', () => {
     const doc = parseAdf(MANIFEST);
     const section = doc.sections.find(s => s.key === 'VENDORS');
     expect(section?.decoration).toBe('\u{1F3F7}');
@@ -41,7 +41,7 @@ describe('parseManifest VENDORS', () => {
 
   it('keeps malformed, unknown-file, mode-not-allowed and duplicate entries without throwing (INV-12)', () => {
     const text = `ADF: 0.1
-🏷️ VENDORS:
+🏷 VENDORS:
   - CLAUDE.md pointer
   - CLAUDE.md: pointr
   - README.md: pointer
@@ -65,14 +65,32 @@ describe('parseManifest VENDORS', () => {
   });
 
   it('ignores a VENDORS section that is not a list, without throwing (INV-12)', () => {
-    for (const body of ['🏷️ VENDORS: CLAUDE.md pointer\n', '🏷️ VENDORS:\n  CLAUDE: pointer\n', '🏷️ VENDORS:\n']) {
+    for (const body of ['🏷 VENDORS: CLAUDE.md pointer\n', '🏷 VENDORS:\n  CLAUDE: pointer\n', '🏷 VENDORS:\n']) {
       expect(() => parseManifest(parseAdf(`ADF: 0.1\n${body}`))).not.toThrow();
       expect(parseManifest(parseAdf(`ADF: 0.1\n${body}`)).vendors).toEqual([]);
     }
   });
 
+  it('accepts a hand-written header with the U+FE0F variation selector', () => {
+    const doc = parseAdf('ADF: 0.1\n\u{1F3F7}\u{FE0F} VENDORS:\n  - CLAUDE.md: pointer\n');
+    expect(parseManifest(doc).vendors).toEqual([{ raw: 'CLAUDE.md: pointer', file: 'CLAUDE.md', mode: 'pointer' }]);
+  });
+
+  it('lets the last VENDORS section win outright, so an empty one means no entries', () => {
+    const base = 'ADF: 0.1\n🏷 VENDORS:\n  - CLAUDE.md: pointer\n\n';
+    expect(parseManifest(parseAdf(`${base}🏷 VENDORS:\n`)).vendors).toEqual([]);
+    expect(parseManifest(parseAdf(`${base}🏷 VENDORS: prose\n`)).vendors).toEqual([]);
+    expect(parseManifest(parseAdf(`${base}🏷 VENDORS:\n  - AGENTS.md: compiled\n`)).vendors)
+      .toEqual([{ raw: 'AGENTS.md: compiled', file: 'AGENTS.md', mode: 'compiled' }]);
+  });
+
+  it('round-trips a canonical VENDORS block through formatAdf byte for byte', () => {
+    const text = 'ADF: 0.1\n\n🔄 SYNC:\n  - core.adf -> CLAUDE.md\n\n🏷 VENDORS:\n  - CLAUDE.md: pointer\n';
+    expect(formatAdf(parseAdf(text))).toBe(text);
+  });
+
   it('leaves every other manifest field unchanged', () => {
-    const without = parseManifest(parseAdf(MANIFEST.replace(/🏷️ VENDORS:[\s\S]*$/, '')));
+    const without = parseManifest(parseAdf(MANIFEST.replace(/🏷 VENDORS:[\s\S]*$/, '')));
     const withVendors = parseManifest(parseAdf(MANIFEST));
     expect({ ...withVendors, vendors: [] }).toEqual(without);
   });
@@ -80,9 +98,9 @@ describe('parseManifest VENDORS', () => {
 
 describe('VENDORS decoration and ordering', () => {
   it('has the label decoration and sorts right after SYNC', () => {
-    expect(STANDARD_DECORATIONS.VENDORS).toBe('\u{1F3F7}\u{FE0F}');
+    expect(STANDARD_DECORATIONS.VENDORS).toBe('\u{1F3F7}');
     expect(CANONICAL_KEY_ORDER.indexOf('VENDORS')).toBe(CANONICAL_KEY_ORDER.indexOf('SYNC') + 1);
-    const formatted = formatAdf(parseAdf('ADF: 0.1\n🏷️ VENDORS:\n  - CLAUDE.md: pointer\n🔄 SYNC:\n  - core.adf -> CLAUDE.md\n'));
+    const formatted = formatAdf(parseAdf('ADF: 0.1\n🏷 VENDORS:\n  - CLAUDE.md: pointer\n🔄 SYNC:\n  - core.adf -> CLAUDE.md\n'));
     expect(formatted.indexOf('SYNC:')).toBeLessThan(formatted.indexOf('VENDORS:'));
   });
 });
@@ -91,7 +109,7 @@ describe('compileAdf never renders VENDORS (INV-4)', () => {
   const files: Record<string, string> = {
     '/ai/manifest.adf': MANIFEST,
     // A module that declares VENDORS itself: MANIFEST_PLUMBING_KEYS keeps it out.
-    '/ai/core.adf': 'ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n🏷️ VENDORS:\n  - GEMINI.md: compiled\n',
+    '/ai/core.adf': 'ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n🏷 VENDORS:\n  - GEMINI.md: compiled\n',
   };
   const readFile = (p: string): string => {
     const content = files[p];

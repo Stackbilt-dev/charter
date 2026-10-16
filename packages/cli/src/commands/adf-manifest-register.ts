@@ -243,7 +243,7 @@ const LIST_ITEM_PREFIX_RE = /^(\s*-\s+)\S/;
 const cleanLine = (line: string) => line.replace(/\r$/, '').trimEnd();
 
 /** Line indexes of every section header, and of the `key` headers among them. */
-function sectionHeaders(lines: readonly string[], key: string): { headers: number[]; own: number[] } {
+export function sectionHeaders(lines: readonly string[], key: string): { headers: number[]; own: number[] } {
   const start = lines.length > 0 && VERSION_RE.test(cleanLine(lines[0])) ? 1 : 0;
   const headers: number[] = [];
   for (let i = start; i < lines.length; i++) {
