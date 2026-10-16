@@ -18,7 +18,7 @@ import type { CompileTarget } from '@stackbilt/adf';
 import { countExtractable } from './adf-tidy';
 import { readVendorRecord, resolveVendorModes, vendorFileGroups } from './adf-vendor';
 import type { ModeSource, VendorEntryProblem, VendorFile, VendorMode } from './adf-vendor';
-import { checkGateEnforcement } from './doctor-gate-enforcement';
+import { checkGateEnforcement, checkPreCommitScope } from './doctor-gate-enforcement';
 import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
 
 interface DoctorResult {
@@ -401,6 +401,12 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
           : 'Security-sensitive repo has no **/security* or **/l4* test file. Add L4/security regression tests.',
       });
     }
+  }
+
+  // An old Charter pre-commit hook over-stages .ai/ (#320). No row unless found.
+  if (inGitRepo) {
+    const preCommitCheck = checkPreCommitScope();
+    if (preCommitCheck) checks.push(preCommitCheck);
   }
 
   // ADF readiness checks

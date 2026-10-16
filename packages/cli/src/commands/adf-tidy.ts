@@ -21,10 +21,10 @@ import {
 } from '@stackbilt/adf';
 import type { AdfDocument, PatchOperation, MigrationItem, TriggerMap } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
-import { EXIT_CODE } from '../index';
-import { getFlag } from '../flags';
+import { CLIError, EXIT_CODE } from '../index';
+import { getFlag, getFlagValues } from '../flags';
 import { POINTER_MARKERS, POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD, POINTER_GEMINI_MD, POINTER_COPILOT_MD } from './adf';
-import { discoverAgentConfigFiles } from './adf-migrate';
+import { discoverAgentConfigFiles, fileIdentity } from './adf-migrate';
 import { isVendorFile, resolveVendorMode } from './adf-vendor';
 import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 
@@ -53,6 +53,8 @@ export const TIDY_MSG = {
   recordedCompiledHand: '{file} is recorded as compiled but has no compile banner — skipping. If it is hand-authored: charter adf vendor set {file} unmanaged. To regenerate it as compiled output instead (discards its hand-authored content): charter adf compile --target {target} --write --force',
   unmanaged: '{file} is unmanaged ({source}) — skipping. To move its rules into {aiDir}/: charter adf migrate --source {file}',
   pointerNoMarker: '{file} is recorded as a pointer but has no Charter pointer marker — skipping rather than guessing. See: charter adf vendor status',
+  sourceMissingValue: '--source needs a file path, e.g. --source CLAUDE.md. Repeat it to tidy several files.',
+  printPathsWithJson: '--print-paths prints plain paths; it cannot be combined with --format json.',
 } as const;
 
 function fill(template: string, values: Record<string, string>): string {
@@ -178,6 +180,36 @@ interface TidyResult {
   warnings: string[];
   /** Populated when --verbose: per-item routing trace for each migrated item. */
   itemRoutes?: ItemRoute[];
+  /** The files tidy wrote (or would write under --dry-run), repo-relative POSIX (#320). Additive. */
+  paths: TidyPaths;
+}
+
+interface TidyPaths {
+  /** Vendor files with status 'tidied', in source order. */
+  vendor: string[];
+  /** `${aiDir}/${module}` for each modulesModified entry, in that order. */
+  modules: string[];
+}
+
+/** A path relative to the working directory, with forward slashes. */
+function repoRelative(p: string): string {
+  return path.relative(process.cwd(), path.resolve(p)).split(path.sep).join('/');
+}
+
+/**
+ * The --source values with names for the same physical file dropped, keeping
+ * the first spelling: AGENTS.md and agents.md on a case-insensitive mount, or a
+ * hard link (#320). A missing path is keyed by its resolved path.
+ */
+function dedupeSources(sources: string[]): string[] {
+  const seen = new Set<string>();
+  return sources.filter(source => {
+    const full = path.resolve(source);
+    const key = fs.existsSync(full) ? `id:${fileIdentity(full)}` : `path:${full}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ============================================================================
@@ -188,18 +220,21 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
   const dryRun = args.includes('--dry-run');
   const ciMode = args.includes('--ci');
   const verbose = args.includes('--verbose');
-  const sourceFile = getFlag(args, '--source');
+  const printPaths = args.includes('--print-paths');
+  const sources = dedupeSources(getFlagValues(args, '--source', TIDY_MSG.sourceMissingValue));
+  const named = sources.length > 0;
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
+  if (printPaths && options.format === 'json') throw new CLIError(TIDY_MSG.printPathsWithJson);
 
   // Determine which files to scan. discoverAgentConfigFiles reports one physical
   // file once, so AGENTS.md and agents.md on a case-insensitive mount are not
   // walked twice (#302).
-  const targets = sourceFile ? [sourceFile] : discoverAgentConfigFiles();
+  const targets = named ? sources : discoverAgentConfigFiles();
 
   if (targets.length === 0) {
     if (options.format === 'json') {
-      console.log(JSON.stringify({ dryRun, files: [], totalExtracted: 0, modulesModified: [], moduleWarnings: [], warnings: [] }, null, 2));
-    } else {
+      console.log(JSON.stringify({ dryRun, files: [], totalExtracted: 0, modulesModified: [], moduleWarnings: [], warnings: [], paths: { vendor: [], modules: [] } }, null, 2));
+    } else if (!printPaths) {
       console.log('  No vendor config files found.');
     }
     return EXIT_CODE.SUCCESS;
@@ -217,7 +252,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     const content = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : null;
     const gate = content === null
       ? { vendorFile: vendorNameOf(file), mode: null, source: null }
-      : tidyGate(file, content, aiDir, Boolean(sourceFile));
+      : tidyGate(file, content, aiDir, named);
     const base = { file, vendorFile: gate.vendorFile, mode: gate.mode, source: gate.source, skipReason: null };
 
     if (gate.skip) {
@@ -309,11 +344,20 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     }
   }
 
-  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings, warnings, itemRoutes };
+  const paths: TidyPaths = {
+    vendor: fileResults.filter(f => f.status === 'tidied').map(f => repoRelative(f.file)),
+    modules: modulesModified.map(m => repoRelative(path.join(aiDir, m))),
+  };
+  const result: TidyResult = { dryRun, files: fileResults, totalExtracted, modulesModified, moduleWarnings, warnings, itemRoutes, paths };
 
   // Output
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
+  } else if (printPaths) {
+    // stdout is exactly one typed line per file written, for the pre-commit hook.
+    for (const warning of warnings) console.error(`  ⚠ ${warning}`);
+    for (const p of paths.vendor) console.log(`vendor ${p}`);
+    for (const p of paths.modules) console.log(`module ${p}`);
   } else {
     printTextResult(result);
   }

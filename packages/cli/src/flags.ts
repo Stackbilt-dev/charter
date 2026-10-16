@@ -21,6 +21,22 @@ export function getFlag(args: string[], flag: string): string | undefined {
 }
 
 /**
+ * Every value of a repeatable flag, in argument order. An occurrence with no
+ * value (the last argument, or followed by another `--flag`) throws CLIError
+ * (exit 2) with `missingMessage`, rather than being silently dropped.
+ */
+export function getFlagValues(args: string[], flag: string, missingMessage: string): string[] {
+  const values: string[] = [];
+  args.forEach((arg, i) => {
+    if (arg !== flag) return;
+    const value = args[i + 1];
+    if (value === undefined || value.startsWith('--')) throw new CLIError(missingMessage);
+    values.push(value);
+  });
+  return values;
+}
+
+/**
  * Read a file referenced by a flag value, throwing CLIError if missing.
  */
 export function readFlagFile(filePath: string, flagName: string): string {
