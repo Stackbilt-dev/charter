@@ -75,8 +75,9 @@ npx charter hook install --commit-msg --force        # overwrite existing hooks
   - Tidy covers only staged vendor files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`, `agents.md`, `GEMINI.md`, `copilot-instructions.md`), each passed with `adf tidy --source`. A file carrying the compile banner is skipped without calling the CLI.
   - A staged vendor file that also has unstaged changes is skipped, with a message.
   - If tidy would write into a `.ai/` module that has unstaged changes or is untracked, nothing is tidied for that commit, with a message.
-  - Only the files tidy wrote are re-staged, never `.ai/*.adf` as a whole. A tidy failure prints one line and the commit proceeds. Skip tidy with `CHARTER_SKIP_TIDY=1`.
-  - The evidence gate after tidy still fails on vendor bloat left in the working tree.
+  - Only the files tidy wrote that its dry run planned are re-staged, never `.ai/*.adf` as a whole. A gitignored module is written but not staged, and the hook says so. A file the hook cannot stage, or one the real run wrote beyond the plan, is named and left unstaged. Skip tidy with `CHARTER_SKIP_TIDY=1`.
+  - The tidy block never fails the commit: a tidy failure prints one line and the hook carries on.
+  - The evidence gate after it can. In the generated hook it runs `charter doctor --adf-only --ci`, which fails on vendor bloat left in the working tree, for example in a file whose tidy was skipped. The skip message names the ways out: stage or stash the unstaged work; run `charter adf tidy --source <file>` and `git add` the result; or `git commit --no-verify`. If the gate then fails, one line names each skipped file that still carries items beyond its pointer.
   - A hook installed before [#320](https://github.com/Stackbilt-dev/charter/issues/320) re-stages all of `.ai/*.adf`. Re-run `charter hook install --pre-commit` to replace it (no `--force` needed for a Charter-managed hook). `charter doctor` reports an old hook as INFO.
 - `--force` — overwrite existing non-Charter hooks
 

@@ -7,6 +7,9 @@ pnpm exec tsc --noEmit
 # Vendor file auto-tidy (#320): tidy only the staged vendor files, then re-stage only the files tidy wrote.
 # Charter pre-commit vendor tidy: scoped to staged files
 # Skip with CHARTER_SKIP_TIDY=1
+# This block never fails the commit; the ADF evidence gate after it may.
+# TIDY_SKIPPED lists the vendor files it skipped, so the gate can say why it blocks.
+TIDY_SKIPPED=""
 if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
   VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md"
   STAGED=$(git diff --cached --name-only --diff-filter=d)
@@ -20,7 +23,9 @@ if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
         continue
       fi
       if ! git diff --quiet -- "$vf"; then
-        echo "[pre-commit] $vf has unstaged changes; not auto-tidying it. Stage or stash them, or run: charter adf tidy --source $vf"
+        echo "[pre-commit] $vf has unstaged changes, so auto-tidy is skipped for it in this commit."
+        echo "[pre-commit] If it carries bloat, the ADF evidence gate may still block this commit. Ways out: stage or stash the unstaged changes; or run: charter adf tidy --source $vf, then git add the result; or bypass the hooks with git commit --no-verify."
+        TIDY_SKIPPED="$TIDY_SKIPPED $vf"
         continue
       fi
       SOURCES="$SOURCES --source $vf"
@@ -33,23 +38,48 @@ if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
     PLAN=$(node packages/cli/dist/bin.js adf tidy --dry-run --print-paths $SOURCES 2>/dev/null) || { echo "[pre-commit] adf tidy --dry-run failed; skipping auto-tidy."; PLAN=""; }
     if printf '%s\n' "$PLAN" | grep -E '^(vendor|module) ' >/dev/null; then
       BLOCKED=""
+      IGNORED=""
+      set -f
       for p in $(printf '%s\n' "$PLAN" | sed -n 's/^module //p'); do
-        if ! git diff --quiet -- "$p" || { [ -e "$p" ] && ! git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; }; then
+        # A gitignored module (say, an .ai/ kept out of git) is never staged, so it is not WIP.
+        if git check-ignore -q -- "$p"; then
+          IGNORED="$IGNORED $p"
+        elif ! git diff --quiet -- "$p" || { [ -e "$p" ] && ! git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; }; then
           BLOCKED="$BLOCKED $p"
         fi
       done
+      set +f
       if [ -n "$BLOCKED" ]; then
-        echo "[pre-commit] Not auto-tidying: tidy would write into files with unstaged work:$BLOCKED"
-        echo "[pre-commit] Stage or stash them and commit again, or run: charter adf tidy$SOURCES"
+        echo "[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work:$BLOCKED"
+        echo "[pre-commit] The ADF evidence gate may still block this commit while$NAMES carries bloat. Ways out: stage or stash that work; or run: charter adf tidy$SOURCES, then git add the result; or bypass the hooks with git commit --no-verify."
+        TIDY_SKIPPED="$TIDY_SKIPPED$NAMES"
       else
         echo "[pre-commit] Moving content beyond the thin pointer into .ai/ ..."
         WROTE=$(node packages/cli/dist/bin.js adf tidy --print-paths $SOURCES 2>/dev/null) || { echo "[pre-commit] adf tidy failed; nothing re-staged."; WROTE=""; }
+        EXTRA=""
+        UNSTAGED=""
+        set -f
         for line in $(printf '%s\n' "$WROTE" | sed 's/ /:/'); do
-          if printf '%s\n' "$PLAN" | sed 's/ /:/' | grep -xF "$line" >/dev/null; then
-            git add -- "${line#*:}"
+          f="${line#*:}"
+          if ! printf '%s\n' "$PLAN" | sed 's/ /:/' | grep -xF "$line" >/dev/null; then
+            EXTRA="$EXTRA $f"
+          elif git check-ignore -q -- "$f"; then
+            :
+          elif ! git add -- "$f" 2>/dev/null; then
+            UNSTAGED="$UNSTAGED $f"
           fi
         done
-        echo "[pre-commit] Vendor files tidied; re-staged only the files tidy wrote."
+        set +f
+        if [ -n "$IGNORED" ]; then
+          echo "[pre-commit] Gitignored, so left as-is and not staged:$IGNORED"
+        fi
+        if [ -n "$EXTRA" ]; then
+          echo "[pre-commit] Tidy also wrote files its dry run did not plan; left unstaged, review and stage them yourself:$EXTRA"
+        fi
+        if [ -n "$UNSTAGED" ]; then
+          echo "[pre-commit] Could not stage, left in the working tree; stage them yourself:$UNSTAGED"
+        fi
+        echo "[pre-commit] Vendor files tidied; re-staged only the planned files tidy wrote."
       fi
     else
       echo "[pre-commit] Vendor config files are clean."

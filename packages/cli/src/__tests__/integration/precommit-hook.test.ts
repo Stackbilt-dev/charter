@@ -99,6 +99,13 @@ function writeHookFixtureRepo(label: string, opts: { tidyOnly?: boolean } = {}):
     `const args = process.argv.slice(2);`,
     `require('fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');`,
     `if (process.env.HOOK_TEST_FAIL_TIDY === '1' && args[0] === 'adf' && args[1] === 'tidy') process.exit(3);`,
+    // Test hooks for paths tidy reports: a ghost path in both runs, or an extra write in the real run only.
+    `if (args[0] === 'adf' && args[1] === 'tidy' && args.includes('--print-paths')) process.on('exit', () => {`,
+    `  const fs = require('fs');`,
+    `  if (process.env.HOOK_TEST_GHOST) fs.writeSync(1, 'module ' + process.env.HOOK_TEST_GHOST + String.fromCharCode(10));`,
+    `  const extra = process.env.HOOK_TEST_EXTRA_WRITE;`,
+    `  if (extra && !args.includes('--dry-run')) { fs.writeFileSync(extra, 'ADF: 0.1' + String.fromCharCode(10)); fs.writeSync(1, 'module ' + extra + String.fromCharCode(10)); }`,
+    `});`,
     `require(${JSON.stringify(CLI_BIN)});`,
     '',
   ].join('\n'));
@@ -184,7 +191,7 @@ ${DB_BLOAT}`);
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('[pre-commit] Checking staged vendor files: CLAUDE.md');
-    expect(result.output).toContain('re-staged only the files tidy wrote');
+    expect(result.output).toContain('re-staged only the planned files tidy wrote');
     // Real tidy ran, scoped to the staged file.
     expect(tidyCalls(repo)).toEqual([
       'adf tidy --dry-run --print-paths --source CLAUDE.md',
@@ -279,7 +286,8 @@ ${DB_BLOAT}`);
     const result = commit(tmp, 'partially staged');
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes; not auto-tidying it.');
+    expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
+    expect(result.output).toContain('Ways out: stage or stash the unstaged changes; or run: charter adf tidy --source CLAUDE.md, then git add the result; or bypass the hooks with git commit --no-verify.');
     expect(tidyCalls(repo)).toEqual([]);
     expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(staged);
     expect(read(tmp, 'CLAUDE.md')).toBe(worktree);
@@ -289,7 +297,7 @@ ${DB_BLOAT}`);
   it.each([
     ['unstaged edits to a planned module', (tmp: string) => fs.appendFileSync(path.join(tmp, '.ai', 'backend.adf'), '  - wip rule\n'), ' M .ai/backend.adf'],
     ['a planned module deleted but not staged', (tmp: string) => fs.rmSync(path.join(tmp, '.ai', 'backend.adf')), ' D .ai/backend.adf'],
-  ])('CP-4: %s blocks tidy for this commit, and the commit still succeeds', { timeout: 60000 }, (_label, makeWip, wipStatus) => {
+  ])('CP-4: %s skips tidy for this commit; the tidy block alone does not fail the commit', { timeout: 60000 }, (_label, makeWip, wipStatus) => {
     const repo = writeHookFixtureRepo('wip-planned', { tidyOnly: true });
     const tmp = repo.dir;
     const bloated = POINTER + DB_BLOAT;
@@ -304,7 +312,8 @@ ${DB_BLOAT}`);
     const result = commit(tmp, 'planned module wip');
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain('[pre-commit] Not auto-tidying: tidy would write into files with unstaged work: .ai/backend.adf');
+    expect(result.output).toContain('[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work: .ai/backend.adf');
+    expect(result.output).toContain('or run: charter adf tidy --source CLAUDE.md, then git add the result; or bypass the hooks with git commit --no-verify.');
     expect(tidyCalls(repo)).toEqual(['adf tidy --dry-run --print-paths --source CLAUDE.md']);
     expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(bloated);
     expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
@@ -312,7 +321,7 @@ ${DB_BLOAT}`);
     expect(porcelain(tmp)).toEqual([wipStatus]);
   });
 
-  it('CP-4: an untracked file at a planned module path blocks tidy', { timeout: 60000 }, () => {
+  it('CP-4: an untracked file at a planned module path skips tidy; the tidy block alone does not fail the commit', { timeout: 60000 }, () => {
     const repo = writeHookFixtureRepo('wip-untracked', { tidyOnly: true });
     const tmp = repo.dir;
     fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + '\n## Testing\n- Always run the test suite before pushing\n- Never skip flaky tests\n');
@@ -326,7 +335,7 @@ ${DB_BLOAT}`);
     const result = commit(tmp, 'untracked planned module');
 
     expect(result.status).toBe(0);
-    expect(result.output).toContain(`unstaged work: ${created}`);
+    expect(result.output).toContain(`unstaged or untracked work: ${created}`);
     expect(read(tmp, created!)).toContain('my own untracked draft');
     expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
   });
@@ -421,20 +430,133 @@ ${DB_BLOAT}`);
     expect(read(tmp, 'CLAUDE.md')).toContain('## Architecture');
   });
 
-  it('H6 boundary: the unchanged evidence gate still fails on bloat a skipped tidy left behind', { timeout: 60000 }, () => {
-    const repo = writeHookFixtureRepo('gate');
+  describe('full generated hook: the evidence gate after a skipped tidy (option A)', () => {
+    const LINK = /\[pre-commit\] Blocked because CLAUDE\.md still carries [1-9]\d* item\(s\) beyond its pointer: auto-tidy was skipped for it in this commit\. See the \[pre-commit\] lines above for the ways out\./;
+
+    it('CP-3: a partially staged bloated file is skipped, and the gate blocks with a line linking the two', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-partial');
+      const tmp = repo.dir;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+      fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '- not staged yet\n');
+
+      const result = commit(tmp, 'partial with full hook');
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
+      expect(result.output).toContain('the ADF evidence gate may still block this commit');
+      // doctor's own output is not suppressed, and the linking line follows it.
+      expect(result.output).toContain('adf vendor bloat');
+      expect(result.output).toMatch(LINK);
+      expect(result.output.search(LINK)).toBeGreaterThan(result.output.indexOf('adf vendor bloat'));
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      // Only the read-only count ran; nothing was tidied.
+      expect(tidyCalls(repo)).toEqual(['adf tidy --dry-run --format json --source CLAUDE.md']);
+      expect(porcelain(tmp)).toEqual(['MM CLAUDE.md']);
+    });
+
+    it('CP-4: planned-module WIP skips tidy, and the gate blocks with a line linking the two', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-wip');
+      const tmp = repo.dir;
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+      git(tmp, 'add', 'CLAUDE.md');
+      fs.appendFileSync(path.join(tmp, '.ai', 'backend.adf'), '  - wip rule\n');
+
+      const result = commit(tmp, 'wip with full hook');
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work: .ai/backend.adf');
+      expect(result.output).toMatch(LINK);
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      expect(porcelain(tmp)).toEqual([' M .ai/backend.adf', 'M  CLAUDE.md']);
+    });
+
+    it('prints no linking line when the gate fails for another reason', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('gate-other');
+      const tmp = repo.dir;
+      // GEMINI.md bloat is not staged and was not skipped by tidy; the gate fails on it alone.
+      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
+      fs.writeFileSync(path.join(tmp, 'notes.md'), 'hello\n');
+      git(tmp, 'add', 'notes.md');
+
+      const result = commit(tmp, 'other failure');
+
+      expect(result.status).toBe(1);
+      expect(result.output).not.toContain('[pre-commit] Blocked because');
+      expect(tidyCalls(repo)).toEqual([]);
+    });
+  });
+
+  it('a gitignored .ai/ (local-only setup) is not WIP: tidy runs, ignored modules are reported and never staged', { timeout: 60000 }, () => {
+    const repo = writeHookFixtureRepo('ignored-ai');
+    const tmp = repo.dir;
+    git(tmp, 'rm', '-r', '-q', '--cached', '.ai');
+    fs.appendFileSync(path.join(tmp, '.gitignore'), '.ai/\n');
+    git(tmp, 'add', '.gitignore');
+    git(tmp, 'commit', '-q', '--no-verify', '-m', 'local-only .ai');
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+    git(tmp, 'add', 'CLAUDE.md');
+
+    const result = commit(tmp, 'tidy with ignored .ai');
+
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain('Auto-tidy skipped');
+    expect(result.output).toContain('[pre-commit] Gitignored, so left as-is and not staged: .ai/backend.adf');
+    expect(show(tmp, 'HEAD:CLAUDE.md')).not.toContain('## Database Rules');
+    expect(read(tmp, '.ai/backend.adf')).toContain('All database migrations must be reversible');
+    expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
+    expect(porcelain(tmp)).toEqual([]);
+  });
+
+  it('a single ignored module that tidy creates is reported, not staged, and never aborts the hook', { timeout: 60000 }, () => {
+    const repo = writeHookFixtureRepo('ignored-module');
+    const tmp = repo.dir;
+    git(tmp, 'rm', '-q', '--cached', '.ai/backend.adf');
+    fs.rmSync(path.join(tmp, '.ai', 'backend.adf'));
+    fs.appendFileSync(path.join(tmp, '.gitignore'), '.ai/backend.adf\n');
+    git(tmp, 'add', '.gitignore');
+    git(tmp, 'commit', '-q', '--no-verify', '-m', 'ignore backend.adf');
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+    git(tmp, 'add', 'CLAUDE.md');
+
+    const result = commit(tmp, 'tidy creates an ignored module');
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('[pre-commit] Gitignored, so left as-is and not staged: .ai/backend.adf');
+    expect(result.output).not.toContain('paths are ignored');
+    expect(fs.existsSync(path.join(tmp, '.ai', 'backend.adf'))).toBe(true);
+    expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
+    expect(porcelain(tmp)).toEqual([]);
+  });
+
+  it('a git add failure is collected into one line and the tidy block carries on (H6)', { timeout: 60000 }, () => {
+    const repo = writeHookFixtureRepo('add-fails', { tidyOnly: true });
     const tmp = repo.dir;
     fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
     git(tmp, 'add', 'CLAUDE.md');
-    fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '- not staged yet\n');
+    // Stand in for any git add failure: the shim adds a planned path that does not
+    // exist to both runs, so git add fails on it ("pathspec did not match").
+    const result = commit(tmp, 'add fails', { HOOK_TEST_GHOST: '.ai/ghost.adf' });
 
-    const result = commit(tmp, 'partial with full hook');
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('[pre-commit] Could not stage, left in the working tree; stage them yourself: .ai/ghost.adf');
+    expect(result.output).not.toContain('fatal:');
+    expect(show(tmp, 'HEAD:CLAUDE.md')).not.toContain('## Database Rules');
+    expect(result.output).toContain('[pre-commit] Vendor files tidied; re-staged only the planned files tidy wrote.');
+  });
 
-    // The tidy block skipped the file without failing; the gate after it fails.
-    expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes; not auto-tidying it.');
-    expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
-    expect(result.status).toBe(1);
-    expect(tidyCalls(repo)).toEqual([]);
+  it('paths the real run wrote beyond the dry-run plan are named and left unstaged', { timeout: 60000 }, () => {
+    const repo = writeHookFixtureRepo('diverge', { tidyOnly: true });
+    const tmp = repo.dir;
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
+    git(tmp, 'add', 'CLAUDE.md');
+
+    const result = commit(tmp, 'diverging run', { HOOK_TEST_EXTRA_WRITE: '.ai/extra.adf' });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('[pre-commit] Tidy also wrote files its dry run did not plan; left unstaged, review and stage them yourself: .ai/extra.adf');
+    expect(committedFiles(tmp)).not.toContain('.ai/extra.adf');
+    expect(porcelain(tmp)).toEqual(['?? .ai/extra.adf']);
   });
 
   it('handles a staged file whose name contains a space alongside a vendor file', { timeout: 60000 }, () => {

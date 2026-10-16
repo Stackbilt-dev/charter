@@ -243,8 +243,10 @@ describe('hookCommand', () => {
         expect(block).toContain('VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md"');
         // CP-1: only files tidy wrote are staged; the .ai/ sweep is gone for good.
         expect(block).not.toMatch(/git add[^\n]*\.ai\/\*/);
-        expect(block.match(/git add/g)).toEqual(['git add']);
-        expect(block).toContain('git add -- "${line#*:}"');
+        expect(block.match(/git add --/g)).toEqual(['git add --']);
+        expect(block).toContain('elif ! git add -- "$f" 2>/dev/null; then');
+        expect(block).toContain('git check-ignore -q -- "$p"');
+        expect(block).toContain('f="${line#*:}"');
         // #320 note: the whole-tree totalExtracted grep is gone deliberately.
         expect(block).not.toContain('totalExtracted');
       }
