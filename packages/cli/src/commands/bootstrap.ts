@@ -46,9 +46,11 @@ import {
   manifestForPreset,
 } from './adf';
 import { loadPatterns } from '../config';
-import { parseAdf, parseManifest } from '@stackbilt/adf';
+import { parseAdf, parseManifest, TARGET_FILENAMES } from '@stackbilt/adf';
+import type { CompileTarget } from '@stackbilt/adf';
 import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
-import { recordWrittenVendorModes } from './adf-vendor';
+import { inferVendorMode, readVendorRecord, recordedModeOf, recordVendorModes, recordWrittenVendorModes, resolveVendorMode } from './adf-vendor';
+import type { VendorFile } from './adf-vendor';
 import { registerModules } from './adf-manifest-register';
 import type { SourceMigrationResult } from './adf-migrate';
 
@@ -975,9 +977,17 @@ function runAdfInitPhase(
 
   try {
     const aiDir = '.ai';
+    // --force re-scaffolds manifest.adf (backing it up), which would drop the
+    // VENDORS record the pointer and migrate phases act on (#318). Carry its valid
+    // entries over through the shared writer, add-if-absent.
+    const priorRecord = readVendorRecord(path.join(aiDir, 'manifest.adf')).recorded;
     const scaffoldResult = writeAdfScaffolds(aiDir, force, preset);
     files.push(...scaffoldResult.files);
     warnings.push(...scaffoldResult.warnings);
+    if (priorRecord.size > 0) {
+      const entries = [...priorRecord].sort((a, b) => a[1].index - b[1].index).map(([file, { mode }]) => ({ file, mode }));
+      recordVendorModes(path.join(aiDir, 'manifest.adf'), entries, 'add-if-absent', { onWarning: w => warnings.push(w) });
+    }
 
     // Detect orphaned ADF modules not registered in manifest (#65)
     const manifestPath2 = path.join(aiDir, 'manifest.adf');
@@ -1014,12 +1024,24 @@ function runAdfInitPhase(
     const writtenPointers: string[] = [];
     for (const pf of pointerFiles) {
       const pointerPath = path.resolve(pf.name);
-      const exists = fs.existsSync(pointerPath);
-      if (!exists || force) {
+      const action = pointerAction(aiDir, pf.name as VendorFile, force);
+      if (action === 'write-pointer') {
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
         writtenPointers.push(pf.name);
-      } else if (!isAlreadyThinPointer(pointerPath)) {
+      } else if (action === 'skip-compiled' || action === 'skip-recorded-compiled-absent') {
+        const target = (Object.keys(TARGET_FILENAMES) as CompileTarget[]).find(t => TARGET_FILENAMES[t] === pf.name) ?? 'all';
+        const source = recordedModeOf(aiDir, pf.name as VendorFile) === 'compiled' ? 'recorded' : 'compile banner';
+        warnings.push(action === 'skip-compiled'
+          ? fill(BOOTSTRAP_MSG.skipCompiled, { file: pf.name, source })
+          : fill(BOOTSTRAP_MSG.skipRecordedCompiledAbsent, { file: pf.name, target }));
+      } else if (action === 'skip-recorded-unmanaged') {
+        warnings.push(fill(BOOTSTRAP_MSG.skipRecordedUnmanaged, { file: pf.name }));
+      } else if (action === 'skip-custom' && force) {
+        // --force no longer overwrites a hand-authored file: vendor files are not
+        // backed up, so its rules would be gone before phase 4 could migrate them.
+        warnings.push(fill(BOOTSTRAP_MSG.skipCustomForce, { file: pf.name }));
+      } else if (action === 'skip-custom') {
         // File has custom content — don't overwrite. Name the narrow remedy rather
         // than sending the user to --force, which also re-scaffolds .ai/*.adf and
         // overwrites custom modules (#305). --source scopes migration to the one
@@ -1080,11 +1102,17 @@ function runMigratePhase(
   const aiDir = '.ai';
 
   try {
-    // Find agent config files that aren't already thin pointers
+    // Migrate hand-authored files with no recorded mode (#318). A file recorded
+    // unmanaged is left alone with a note; any other recorded file is not a source.
     const sources = discoverAgentConfigFiles().filter(f => {
       const fullPath = path.resolve(f);
       const content = fs.readFileSync(fullPath, 'utf-8');
-      return !CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
+      if (CHARTER_OWNED_MARKERS.some(marker => content.includes(marker))) return false;
+      const resolved = resolveVendorMode(aiDir, f as VendorFile);
+      if (resolved.source === 'recorded' && resolved.mode === 'unmanaged') {
+        warnings.push(fill(BOOTSTRAP_MSG.migrateRecordedUnmanaged, { file: f }));
+      }
+      return resolved.source === 'inferred';
     });
 
     if (sources.length === 0) {
@@ -1399,16 +1427,52 @@ function hashContent(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
 
+export const BOOTSTRAP_MSG = {
+  skipCompiled: '{file} is compiled output from .ai/ ({source}); bootstrap will not replace it with a pointer. To make it a pointer: charter adf vendor set {file} pointer && charter adf vendor restore {file}',
+  skipCustomForce: "{file} has custom content; skipping pointer even with --force, because bootstrap does not back up vendor files. Run 'charter adf migrate --source {file}' to move its rules into .ai/ first.",
+  skipRecordedUnmanaged: '{file} is recorded as unmanaged; leaving it as is.',
+  skipRecordedCompiledAbsent: '{file} is recorded as compiled but is not on disk; not writing a pointer. Generate it: charter adf compile --target {target} --write',
+  migrateRecordedUnmanaged: '{file} is recorded as unmanaged; not migrating. To migrate it anyway: charter adf migrate --source {file}',
+} as const;
+
+function fill(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole);
+}
+
+export type BootstrapPointerAction =
+  | 'write-pointer'
+  | 'keep-managed'
+  | 'skip-compiled'
+  | 'skip-custom'
+  | 'skip-recorded-unmanaged'
+  | 'skip-recorded-compiled-absent';
+
 /**
- * Check if a file is already a thin ADF pointer.
+ * Phase 3's decision for one pointer file (#318). `record` is the valid VENDORS
+ * entry for the file's physical file; the evidence is the file at the repo root.
+ * The first matching row wins:
+ *   recorded compiled            → skip-compiled (absent: skip-recorded-compiled-absent)
+ *   compile banner on disk       → skip-compiled
+ *   recorded unmanaged           → skip-recorded-unmanaged
+ *   absent                       → write-pointer
+ *   no Charter marker (custom)   → skip-custom, with or without --force
+ *   pointer markers              → keep-managed, or write-pointer under --force
  */
-function isAlreadyThinPointer(filePath: string): boolean {
+export function pointerAction(aiDir: string, file: VendorFile, force: boolean): BootstrapPointerAction {
+  const record = recordedModeOf(aiDir, file);
+  let content: string | null = null;
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    return CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
+    content = fs.readFileSync(path.resolve(file), 'utf-8');
   } catch {
-    return false;
+    content = null;
   }
+  const ev = inferVendorMode(file, content);
+  if (record === 'compiled') return ev.exists ? 'skip-compiled' : 'skip-recorded-compiled-absent';
+  if (ev.banner) return 'skip-compiled';
+  if (record === 'unmanaged') return 'skip-recorded-unmanaged';
+  if (!ev.exists) return 'write-pointer';
+  if (ev.pointerMarkers.length === 0) return 'skip-custom';
+  return force ? 'write-pointer' : 'keep-managed';
 }
 
 /**

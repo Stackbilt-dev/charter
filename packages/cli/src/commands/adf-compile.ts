@@ -71,7 +71,7 @@ export const MSG = {
   checkSkippedUnmanaged: '  [skip] {file} is unmanaged ({source}); not checked',
   checkStale: '  [stale] {file} — out of date with {aiDir}/ source.\n          Run: charter adf compile --target {target} --write',
   checkMissingCompiled: '  [missing] {file} — not found on disk.\n          Run: charter adf compile --target {target} --write',
-  checkMissingPointer: '  [missing] {file} — recorded as a pointer but not found on disk.\n          Restore it (git checkout -- {file}), or stop tracking it: charter adf vendor set {file} unmanaged',
+  checkMissingPointer: '  [missing] {file} — recorded as a pointer but not found on disk.\n          Restore it (charter adf vendor restore {file}), or stop tracking it: charter adf vendor set {file} unmanaged',
   checkPointerBloated: '  [bloated] {file} — thin pointer carries {n} item(s) that belong in {aiDir}/.\n          Run: charter adf tidy --source {file}',
   checkModeDrift: '  [drift] {file} — recorded as {recorded} but looks {inferred} on disk.\n          Keep the file as it is: {keep}\n          Or make it match the record: {restore}',
 } as const;
@@ -273,7 +273,7 @@ function retainedSectionMap(content: string): Map<string, string> {
  * destroy content no `.ai/` module holds. The guard refuses instead; `--force`
  * remains the way through.
  */
-function divergentRetainedHeadings(existing: string, filename: string): string[] {
+export function divergentRetainedHeadings(existing: string, filename: string): string[] {
   const templates = pointerTemplatesFor(filename);
   const pristine = new Set<string>();
   for (const template of templates) {
@@ -559,7 +559,7 @@ function runCheckMode(
       print(fill(MSG.checkMissingCompiled, { file, target }));
     } else if (!ts.exists && ts.state === 'pointer') {
       row.status = 'missing';
-      row.remedy = `git checkout -- ${file}`;
+      row.remedy = `charter adf vendor restore ${file}`;
       nextActions.push(row.remedy, `charter adf vendor set ${file} unmanaged`);
       print(fill(MSG.checkMissingPointer, { file }));
     } else if (ts.disagrees && ts.state !== 'unmanaged' && ts.inferredMode) {
@@ -572,7 +572,7 @@ function runCheckMode(
       const keep = [`charter adf vendor set ${file} ${ts.inferredMode}`, ...(n > 0 ? [`charter adf tidy --source ${file}`] : [])];
       const restore = ts.state === 'compiled'
         ? `${compileRemedy}${ts.inferredMode === 'unmanaged' ? ' --force' : ''}`
-        : `git checkout -- ${file}`;
+        : `charter adf vendor restore ${file}`;
       const discards = ts.state !== 'compiled' ? ''
         : ts.inferredMode === 'unmanaged' ? '  (discards its hand-authored content)'
           : n > 0 ? `  (discards ${n} item(s) not in ${displayAiDir}/)` : '';

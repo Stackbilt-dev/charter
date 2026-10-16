@@ -30,11 +30,9 @@ import {
   VENDOR_FILES,
   withoutVendorsSection,
 } from '../commands/adf-vendor';
-import { scoreCommand } from '../commands/score';
 import type { VendorFile } from '../commands/adf-vendor';
 import { insertManifestBullet } from '../commands/adf-manifest-register';
 import { bootstrapCommand } from '../commands/bootstrap';
-import { doctorCommand } from '../commands/doctor';
 
 const TEXT: CLIOptions = { configPath: '.charter', format: 'text', ciMode: false, yes: false };
 const JSON_OPTS: CLIOptions = { ...TEXT, format: 'json' };
@@ -681,15 +679,16 @@ describe('implicit writers', () => {
     expect(manifestText()).toBe(broken);
   });
 
-  it('bootstrap keeps an existing entry for a pointer it writes', async () => {
+  it('bootstrap keeps an existing entry, and writes no pointer where compiled is recorded (#318 PR3)', async () => {
     const args = ['--yes', '--skip-install', '--skip-doctor'];
     scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - GEMINI.md: compiled\n`);
     out = [];
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, [...args, '--format', 'json'])).toBe(0);
     const payload = JSON.parse(out.join('\n')) as { steps: Array<{ name: string; warnings: string[] }> };
     expect(payload.steps.find(s => s.name === 'adf-init')?.warnings).toContain(
-      'GEMINI.md is recorded as compiled but bootstrap wrote it as pointer; record kept. To change it: charter adf vendor set GEMINI.md pointer',
+      'GEMINI.md is recorded as compiled but is not on disk; not writing a pointer. Generate it: charter adf compile --target gemini --write',
     );
+    expect(fs.existsSync('GEMINI.md')).toBe(false);
     expect(manifestText()).toContain('  - GEMINI.md: compiled\n  - CLAUDE.md: pointer\n');
   });
 });
@@ -698,7 +697,8 @@ describe('implicit writers', () => {
 // 7. Consumers that do not read the record yet (INV-1)
 // ============================================================================
 
-describe('doctor, score and compile stdout ignore the record (INV-1, until PR3)', () => {
+// doctor and score read the record since #318 PR3 (adf-vendor-doctor-score.test.ts).
+describe('compile stdout ignores the record (INV-1)', () => {
   type Run = { code: number; out: string; err: string };
 
   /** Run `steps` in two fresh repos, identical except for a VENDORS section. */
@@ -749,38 +749,6 @@ describe('doctor, score and compile stdout ignore the record (INV-1, until PR3)'
     scaffold(`${BASE_MANIFEST}${VENDORS_BLOCK}`);
     const r = await run(['compile', '--target', 'claude']);
     expect(r.out).not.toContain('VENDORS');
-  });
-
-  it('doctor is unchanged', async () => {
-    const doctor = async (options: CLIOptions, args: string[]): Promise<Run> => {
-      out = [];
-      err = [];
-      const code = await doctorCommand(options, args);
-      return { code, out: out.join('\n'), err: err.join('\n') };
-    };
-    await compare(setupVendorFiles, [
-      () => doctor(TEXT, []),
-      () => doctor(JSON_OPTS, []),
-    ]);
-  });
-
-  it('score is unchanged, including non-unique vendor basenames', async () => {
-    const score = async (options: CLIOptions): Promise<Run> => {
-      out = [];
-      err = [];
-      const code = await scoreCommand(options, []);
-      return { code, out: out.join('\n'), err: err.join('\n') };
-    };
-    await compare(() => {
-      setupVendorFiles();
-      // A monorepo with per-package agent files: the basenames are not unique.
-      fs.mkdirSync(path.join('packages', 'a'), { recursive: true });
-      fs.writeFileSync(path.join('packages', 'a', 'CLAUDE.md'), '# Package a\n');
-      fs.writeFileSync(path.join('packages', 'a', 'AGENTS.md'), '# Package a\n');
-    }, [
-      () => score(JSON_OPTS),
-      () => score(TEXT),
-    ]);
   });
 });
 
@@ -861,9 +829,11 @@ describe('vendor file identity', () => {
     aliasedAgents('# Agents\n\n## Rules\n\n- Always use pnpm for installs.\n');
     const r = await run(['migrate', '--source', 'agents.md', '--no-backup']);
     expect(r.code).toBe(0);
-    expect(r.out).toContain('AGENTS.md is recorded as unmanaged but adf migrate wrote it as pointer; record kept.');
+    // An explicit --source on a recorded-unmanaged file switches it to pointer
+    // (#318 PR3, CP-6), under the spelling already recorded.
+    expect(r.out).not.toContain('record kept');
     const vendors = parseAdf(manifestText()).sections.find(s => s.key === 'VENDORS');
-    expect(vendors?.content).toEqual({ type: 'list', items: ['AGENTS.md: unmanaged'] });
+    expect(vendors?.content).toEqual({ type: 'list', items: ['AGENTS.md: pointer'] });
   });
 
   it('status shows one row when both spellings are recorded, and says which is used', async () => {

@@ -13,7 +13,11 @@ import { parseAdf, parseManifest, stripCharterSentinels, evaluateLocBudgets, mat
 import type { LocBudgetRule } from '@stackbilt/adf';
 import { isGitRepo, runGit } from '../git-helpers';
 import { CHARTER_OWNED_MARKERS } from './adf';
-import { COMPILE_BANNER_MARKER } from '@stackbilt/adf';
+import { TARGET_FILENAMES } from '@stackbilt/adf';
+import type { CompileTarget } from '@stackbilt/adf';
+import { countExtractable } from './adf-tidy';
+import { readVendorRecord, resolveVendorModes, vendorFileGroups } from './adf-vendor';
+import type { ModeSource, VendorEntryProblem, VendorFile, VendorMode } from './adf-vendor';
 import { checkGateEnforcement } from './doctor-gate-enforcement';
 import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
 
@@ -23,6 +27,8 @@ interface DoctorResult {
     name: string;
     status: 'PASS' | 'WARN' | 'INFO';
     details: string;
+    /** Only on the `adf vendor mode` check (#318). */
+    rows?: VendorModeRow[];
   }>;
 }
 
@@ -127,6 +133,180 @@ function checkTelemetryTracking(configPath: string): DoctorResult['checks'][numb
       + `\n       already covering it — or step 2 is undone by the next "git add -A".`
       + `\n    2. Run: git rm -r --cached "${telemetryDir}"`
       + `\n    The file stays on disk, so "charter telemetry report" keeps working.`,
+  };
+}
+
+// ============================================================================
+// adf vendor mode (#318)
+// ============================================================================
+
+export const DOCTOR_MSG = {
+  allRecorded: 'All {n} vendor file(s) have a recorded mode that matches the file on disk.',
+  inferred: '{n} vendor file(s) have no recorded mode ({files}); modes are inferred from file content. Record them with: charter adf vendor init',
+  // The content-preserving fix comes first, as in `adf compile --check`: regenerating
+  // a recorded-compiled file that now looks like a pointer or hand-authored file
+  // discards what it holds, and an unmanaged one also needs --force.
+  driftCompiled: '{file} is recorded as compiled but looks {inferred} on disk. Accept the file: charter adf vendor set {file} {inferred}  (or regenerate it: charter adf compile --target {target} --write{force}{discards})',
+  driftPointer: '{file} is recorded as a pointer but looks {inferred} on disk. Accept the file: charter adf vendor set {file} {inferred}  (or rewrite the pointer: charter adf vendor restore {file})',
+  recordedAbsent: '{file} is recorded as {recorded} but is not on disk. Recreate it: {recreate}  (or stop tracking it: charter adf vendor set {file} unmanaged)',
+  entryProblem: "VENDORS entry '{raw}' in {manifestPath} is ignored ({problem}). Fix or delete that line in {manifestPath}.",
+  entryDuplicate: "VENDORS lists {file} more than once in {manifestPath}; the last entry ('{raw}') wins. Delete the others.",
+  alias: 'VENDORS records both {file} and {other}, which are the same file on disk; {file} is used. Delete the {other} line.',
+  legacySpelling: "VENDORS records the legacy name agents.md for the file AGENTS.md; `adf compile --target agents --mode compiled` cannot switch it. Change the line to '  - AGENTS.md: {mode}' (an automatic rename comes with #302).",
+  sectionNotList: 'VENDORS in {manifestPath} does not read as a list, so every vendor mode is inferred. Every line under it must look like "  - CLAUDE.md: pointer".',
+  agentConfigPass: '{pointers} thin pointer(s) and {compiled} compiled file(s) route to .ai/{unmanagedNote}.',
+  unmanagedNote: '; {n} file(s) recorded unmanaged are left alone',
+} as const;
+
+/** The order `adf agent config` has always listed vendor files in. */
+const AGENT_CONFIG_ORDER: readonly string[] = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
+
+export type VendorModeRowKind =
+  | 'recorded-ok'
+  | 'recorded-drift'
+  | 'recorded-absent'
+  | 'recorded-unmanaged-absent'
+  | 'inferred'
+  | 'entry-problem'
+  | 'alias-recorded'
+  | 'legacy-spelling'
+  | 'section-not-list';
+
+type CheckStatus = 'PASS' | 'WARN' | 'INFO';
+
+export const ROW_STATUS: Record<VendorModeRowKind, CheckStatus> = {
+  'recorded-ok': 'PASS',
+  'recorded-drift': 'WARN',
+  'recorded-absent': 'WARN',
+  'recorded-unmanaged-absent': 'PASS',
+  inferred: 'INFO',
+  'entry-problem': 'WARN',
+  'alias-recorded': 'INFO',
+  'legacy-spelling': 'INFO',
+  'section-not-list': 'WARN',
+};
+
+/** An explicit entry being ignored WARNs; a duplicate resolves deterministically (last wins). */
+const ENTRY_PROBLEM_STATUS: Record<VendorEntryProblem, CheckStatus> = {
+  malformed: 'WARN',
+  'unknown-file': 'WARN',
+  'mode-not-allowed': 'WARN',
+  duplicate: 'INFO',
+};
+
+export interface VendorModeRow {
+  kind: VendorModeRowKind;
+  status: CheckStatus;
+  file: VendorFile | null;
+  recordedMode: VendorMode | null;
+  /** null iff the file is absent. */
+  inferredMode: VendorMode | null;
+  source: ModeSource | null;
+  /** The VENDORS item text, for entry problems. */
+  raw: string | null;
+  remedy: string | null;
+}
+
+function fill(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => (key in values ? String(values[key]) : whole));
+}
+
+const WORST: CheckStatus[] = ['WARN', 'INFO', 'PASS'];
+
+function compileTargetOf(file: VendorFile): string {
+  return (Object.keys(TARGET_FILENAMES) as CompileTarget[]).find(t => TARGET_FILENAMES[t] === file) ?? 'all';
+}
+
+/**
+ * One row per vendor file (per physical file) plus one per record problem.
+ * Read-only: doctor never writes the record or a vendor file (INV-P3-1). WARN
+ * only where an explicit record is contradicted or ignored (INV-P3-3).
+ */
+export function vendorModeRows(aiDir: string, manifestPath: string): Array<{ row: VendorModeRow; detail: string | null }> {
+  const record = readVendorRecord(manifestPath);
+  // Key order follows the row schema: kind, status, file, recordedMode, inferredMode, source, raw, remedy.
+  const base: VendorModeRow = { kind: 'recorded-ok', status: 'PASS', file: null, recordedMode: null, inferredMode: null, source: null, raw: null, remedy: null };
+  if (record.readProblem === 'section-not-list') {
+    return [{ row: { ...base, kind: 'section-not-list', status: 'WARN' }, detail: fill(DOCTOR_MSG.sectionNotList, { manifestPath }) }];
+  }
+  const out: Array<{ row: VendorModeRow; detail: string | null }> = [];
+  for (const r of resolveVendorModes(aiDir)) {
+    const ev = r.evidence;
+    const row: VendorModeRow = {
+      ...base, kind: 'recorded-ok', status: 'PASS', file: r.file, inferredMode: ev.inferredMode, source: r.source,
+      recordedMode: r.source === 'recorded' ? r.mode : null,
+    };
+    let detail: string | null = null;
+    const target = compileTargetOf(r.file);
+    if (r.source === 'inferred') {
+      row.kind = 'inferred';
+      row.remedy = 'charter adf vendor init';
+    } else if (r.mode === 'unmanaged') {
+      row.kind = ev.exists ? 'recorded-ok' : 'recorded-unmanaged-absent';
+    } else if (!ev.exists) {
+      row.kind = 'recorded-absent';
+      row.remedy = r.mode === 'compiled' ? `charter adf compile --target ${target} --write` : `charter adf vendor restore ${r.file}`;
+      detail = fill(DOCTOR_MSG.recordedAbsent, { file: r.file, recorded: r.mode, recreate: row.remedy });
+    } else if (r.disagrees && ev.inferredMode) {
+      row.kind = 'recorded-drift';
+      row.remedy = `charter adf vendor set ${r.file} ${ev.inferredMode}`;
+      if (r.mode === 'compiled') {
+        const n = ev.inferredMode === 'pointer' ? countExtractable(r.file, aiDir) : 0;
+        const discards = ev.inferredMode === 'unmanaged' ? '; discards its hand-authored content'
+          : n > 0 ? `; discards ${n} item(s) not in ${aiDir}/` : '';
+        detail = fill(DOCTOR_MSG.driftCompiled, {
+          file: r.file, inferred: ev.inferredMode, target, force: ev.inferredMode === 'unmanaged' ? ' --force' : '', discards,
+        });
+      } else {
+        detail = fill(DOCTOR_MSG.driftPointer, { file: r.file, inferred: ev.inferredMode });
+      }
+    }
+    row.status = ROW_STATUS[row.kind];
+    out.push({ row, detail });
+  }
+
+  const inferred = out.filter(o => o.row.kind === 'inferred');
+  if (inferred.length > 0) {
+    // One line for every inferred file: they share one remedy.
+    inferred[0].detail = fill(DOCTOR_MSG.inferred, { n: inferred.length, files: inferred.map(o => o.row.file).join(', ') });
+  }
+
+  for (const p of record.problems) {
+    const status = ENTRY_PROBLEM_STATUS[p.problem];
+    const detail = p.problem === 'duplicate'
+      ? fill(DOCTOR_MSG.entryDuplicate, { file: p.file ?? '', manifestPath, raw: p.raw })
+      : fill(DOCTOR_MSG.entryProblem, { raw: p.raw, manifestPath, problem: p.problem });
+    out.push({ row: { ...base, kind: 'entry-problem', status, file: p.file, raw: p.raw }, detail });
+  }
+
+  for (const group of vendorFileGroups()) {
+    const names = group.filter(n => record.recorded.has(n));
+    if (names.length > 1) {
+      for (const other of names.slice(1)) {
+        const row: VendorModeRow = { ...base, kind: 'alias-recorded', status: 'INFO', file: other, recordedMode: record.recorded.get(other)?.mode ?? null, source: 'recorded' };
+        out.push({ row, detail: fill(DOCTOR_MSG.alias, { file: names[0], other }) });
+      }
+    } else if (names[0] === 'agents.md' && group.includes('AGENTS.md')) {
+      const mode = record.recorded.get('agents.md')?.mode ?? 'pointer';
+      const row: VendorModeRow = { ...base, kind: 'legacy-spelling', status: 'INFO', file: 'agents.md', recordedMode: mode, source: 'recorded' };
+      out.push({ row, detail: fill(DOCTOR_MSG.legacySpelling, { mode }) });
+    }
+  }
+  return out;
+}
+
+/** The `adf vendor mode` check: worst row status, one detail line per non-PASS row. */
+function checkVendorModes(aiDir: string, manifestPath: string): DoctorResult['checks'][number] | undefined {
+  const entries = vendorModeRows(aiDir, manifestPath);
+  if (entries.length === 0) return undefined;
+  const rows = entries.map(e => e.row);
+  const status = WORST.find(s => rows.some(r => r.status === s)) ?? 'PASS';
+  const lines = entries.filter(e => e.row.status !== 'PASS' && e.detail).map(e => e.detail as string);
+  return {
+    name: 'adf vendor mode',
+    status,
+    details: lines.length > 0 ? lines.join('\n    ') : fill(DOCTOR_MSG.allRecorded, { n: rows.length }),
+    rows,
   };
 }
 
@@ -303,36 +483,42 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
           : `Missing or unparseable: ${onDemandIssues.join(', ')}`,
       });
 
-      // Agent config pointer check: flag files with stack rules that should be in .ai/
-      const AGENT_CONFIG_FILES = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
-      const nonPointerFiles: string[] = [];
-      const pointerFiles: Array<{ file: string; content: string }> = [];
-      for (const file of AGENT_CONFIG_FILES) {
-        if (fs.existsSync(file)) {
-          const content = fs.readFileSync(file, 'utf-8');
-          const isPointer = CHARTER_OWNED_MARKERS.some(marker => content.includes(marker));
-          if (!isPointer) {
-            nonPointerFiles.push(file);
-          } else {
-            pointerFiles.push({ file, content });
-          }
-        }
-      }
+      // Vendor file modes: the VENDORS record against the markers on disk (#318).
+      const vendorModeCheck = checkVendorModes(aiDir, manifestPath);
+      if (vendorModeCheck) checks.push(vendorModeCheck);
+
+      // Agent config pointer check: flag files with stack rules that should be in .ai/.
+      // One entry per physical file (AGENTS.md and agents.md can be one file), in
+      // the order this check has always listed them. A file recorded unmanaged is
+      // the user's own and is left alone (#318).
+      const vendorFiles = resolveVendorModes(aiDir)
+        .filter(r => r.evidence.exists)
+        .sort((a, b) => AGENT_CONFIG_ORDER.indexOf(a.file) - AGENT_CONFIG_ORDER.indexOf(b.file));
+      const recordedUnmanaged = vendorFiles.filter(r => r.source === 'recorded' && r.mode === 'unmanaged');
+      const managed = vendorFiles.filter(r => !recordedUnmanaged.includes(r));
+      // Same ownership test as before the record: no banner and no pointer marker.
+      const nonPointerFiles = managed.filter(r => !r.evidence.banner && r.evidence.pointerMarkers.length === 0).map(r => r.file);
+      // Bloat and cold start look at pointers only: resolved pointer, and pointer-shaped on disk.
+      const pointerFiles = managed
+        .filter(r => r.mode === 'pointer' && r.evidence.inferredMode === 'pointer')
+        .map(r => ({ file: r.file, content: fs.readFileSync(r.file, 'utf-8') }));
       if (nonPointerFiles.length > 0) {
         checks.push({
           name: 'adf agent config',
           status: 'WARN',
           details: `${nonPointerFiles.join(', ')} contain${nonPointerFiles.length === 1 ? 's' : ''} stack rules that should live in .ai/. Run: charter adf migrate --dry-run`,
         });
-      } else {
-        const pointerCount = pointerFiles.length;
-        if (pointerCount > 0) {
-          checks.push({
-            name: 'adf agent config',
-            status: 'PASS',
-            details: `${pointerCount} agent config file(s) are thin pointers to .ai/.`,
-          });
-        }
+      } else if (vendorFiles.length > 0) {
+        const compiled = managed.filter(r => r.evidence.banner).length;
+        checks.push({
+          name: 'adf agent config',
+          status: 'PASS',
+          details: fill(DOCTOR_MSG.agentConfigPass, {
+            pointers: managed.length - compiled,
+            compiled,
+            unmanagedNote: recordedUnmanaged.length > 0 ? fill(DOCTOR_MSG.unmanagedNote, { n: recordedUnmanaged.length }) : '',
+          }),
+        });
       }
 
       // Vendor file bloat detection: line count, section overlap, keyword density
@@ -363,8 +549,8 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       }
 
       for (const { file, content } of pointerFiles) {
-        // Compile-output files contain ADF content by design — skip bloat scan.
-        if (content.includes(COMPILE_BANNER_MARKER)) continue;
+        // Compile output never reaches here (pointerFiles is pointers only); a
+        // record that contradicts the file is `adf vendor mode`'s to report.
 
         // Strip charter-managed sentinel blocks before scanning for bloat/keywords.
         const strippedContent = stripCharterSentinels(content);

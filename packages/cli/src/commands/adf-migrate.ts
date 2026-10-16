@@ -35,7 +35,9 @@ import {
 } from './adf';
 import { registerModules, toRegisterAction, dedupePlannedRegistrations } from './adf-manifest-register';
 import type { ModuleRegistration, RegisterAction } from './adf-manifest-register';
-import { recordWrittenVendorModes } from './adf-vendor';
+import { isVendorFile, recordedModeOf, recordVendorModes, recordWrittenVendorModes } from './adf-vendor';
+
+export const MIGRATE_RECORDED_UNMANAGED = '{file} is recorded as unmanaged; skipped. Name it explicitly to migrate it: charter adf migrate --source {file}';
 
 // ============================================================================
 // Constants
@@ -125,10 +127,12 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
     throw new CLIError(`Invalid --merge-strategy: ${mergeStrategy}. Use append, dedupe, or replace.`);
   }
 
-  // Detect source files
+  // Detect source files. Bare discovery leaves a file recorded unmanaged alone;
+  // naming it with --source migrates it (#318).
   const sources = sourceFile
     ? [sourceFile]
     : discoverAgentConfigFiles();
+  const leftAlone = new Set(sourceFile ? [] : sources.filter(f => isVendorFile(f) && recordedModeOf(aiDir, f) === 'unmanaged'));
 
   if (sources.length === 0) {
     if (options.format === 'json') {
@@ -144,6 +148,12 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
   const plannedModules = new Set<string>();
 
   for (const source of sources) {
+    if (leftAlone.has(source)) {
+      const detail = MIGRATE_RECORDED_UNMANAGED.replace(/\{file\}/g, source);
+      const lineCount = fs.readFileSync(source, 'utf-8').split('\n').length;
+      results.push({ source, skipped: true, skipReason: detail, lineCount, sectionCount: 0, actions: [{ type: 'SKIP', target: source, detail }], registrations: [] });
+      continue;
+    }
     const result = migrateSource(source, aiDir, mergeStrategy, dryRun, noBackup, keepSummary, options, coexist);
     if (dryRun) dedupePlannedRegistrations(result, plannedModules);
     results.push(result);
@@ -362,31 +372,50 @@ export function migrateSource(
   const register = () => registerModules(manifestPath, plan.targetModules, plan.migrateItems, { dryRun, onWarning: warn });
   let registration = dryRun ? register() : undefined;
 
+  // Callers drop recorded-unmanaged files from discovery, so reaching one here is
+  // an explicit --source: an intent change. Record pointer first (upsert), and
+  // restore the unmanaged entry if the migration then fails (#318, CP-6).
+  const vendorName = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+  const switchMode = !dryRun && isVendorFile(vendorName) && recordedModeOf(aiDir, vendorName) === 'unmanaged';
+  const upsert = (mode: 'pointer' | 'unmanaged') => isVendorFile(vendorName)
+    && recordVendorModes(manifestPath, [{ file: vendorName, mode }], 'upsert', { onWarning: warn }).results.every(r => r.status !== 'skipped');
+  if (switchMode && !upsert('pointer')) {
+    const detail = 'Its mode could not be recorded as pointer; nothing was migrated. Run: charter adf vendor status';
+    return { source: sourcePath, skipped: true, skipReason: detail, lineCount: lines.length, sectionCount: 0, actions: [{ type: 'SKIP', target: sourcePath, detail }], registrations: [] };
+  }
+
   // Apply if not dry-run
+  let pointerWritten = false;
   if (!dryRun) {
-    // Backup
-    if (!noBackup) {
-      fs.writeFileSync(`${fullPath}.pre-adf-migrate.bak`, content);
-    }
+    try {
+      // Backup
+      if (!noBackup) {
+        fs.writeFileSync(`${fullPath}.pre-adf-migrate.bak`, content);
+      }
 
-    // Ensure .ai/ exists
-    fs.mkdirSync(aiDir, { recursive: true });
+      // Ensure .ai/ exists
+      fs.mkdirSync(aiDir, { recursive: true });
 
-    // Merge into ADF modules
-    for (const [module, sectionGroups] of Object.entries(moduleGroups)) {
-      const modulePath = path.join(aiDir, module);
-      applyMigrationToModule(modulePath, sectionGroups, mergeStrategy);
-    }
+      // Merge into ADF modules
+      for (const [module, sectionGroups] of Object.entries(moduleGroups)) {
+        const modulePath = path.join(aiDir, module);
+        applyMigrationToModule(modulePath, sectionGroups, mergeStrategy);
+      }
 
-    registration = register();
+      registration = register();
 
-    // Write pointer with retained STAY items (and optional architecture summary)
-    writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined, coexist, aiDir);
-    recordWrittenVendorModes(aiDir, [sourcePath], 'pointer', 'adf migrate', warn);
+      // Write pointer with retained STAY items (and optional architecture summary)
+      writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined, coexist, aiDir);
+      pointerWritten = true;
+      recordWrittenVendorModes(aiDir, [sourcePath], 'pointer', 'adf migrate', warn);
 
-    // A non-CLAUDE.md source can add modules after CLAUDE.md's pointer was written.
-    if (path.basename(sourcePath) !== 'CLAUDE.md' && registration.registrations.some(r => r.status === 'added')) {
-      updateModuleIndex('CLAUDE.md', aiDir);
+      // A non-CLAUDE.md source can add modules after CLAUDE.md's pointer was written.
+      if (path.basename(sourcePath) !== 'CLAUDE.md' && registration.registrations.some(r => r.status === 'added')) {
+        updateModuleIndex('CLAUDE.md', aiDir);
+      }
+    } catch (err: unknown) {
+      if (switchMode && !pointerWritten && !upsert('unmanaged')) warn(`${vendorName} is still recorded as pointer; restore it with: charter adf vendor set ${vendorName} unmanaged`);
+      throw err;
     }
   }
 

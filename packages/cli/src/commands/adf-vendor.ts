@@ -23,8 +23,19 @@ import type { AdfDocument, ManifestVendorEntry } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { POINTER_MARKERS } from './adf';
-import { fileIdentity } from './adf-migrate';
+import {
+  MODULE_INDEX_END,
+  MODULE_INDEX_START,
+  POINTER_AGENTS_MD,
+  POINTER_CLAUDE_MD_HYBRID,
+  POINTER_COPILOT_MD,
+  POINTER_CURSORRULES,
+  POINTER_GEMINI_MD,
+  POINTER_MARKERS,
+} from './adf';
+import { fileIdentity, generateModuleIndex } from './adf-migrate';
+import { divergentRetainedHeadings } from './adf-compile';
+import { countExtractable, readRetainedSections } from './adf-tidy';
 import { insertManifestBullet, lastSectionIndex, replaceManifestBullet, sectionHeaders } from './adf-manifest-register';
 
 // ============================================================================
@@ -132,6 +143,18 @@ export const MSG = {
   setUnchanged: '  [ok] {file} already recorded as {mode}',
   initOk: '  [ok] Recorded {n} vendor mode(s) in {manifestPath}',
   initNothing: '  [ok] All vendor files on disk already have a recorded mode.',
+  usageRestore: 'Usage: charter adf vendor restore <file> [--dry-run] [--ai-dir <dir>] [--format json]',
+  restoreOk: '  [ok] Restored {file} as a thin pointer{kept}',
+  restorePlanned: '  [dry-run] Would restore {file} as a thin pointer{kept}',
+  restoreUnchanged: '  [ok] {file} is already the thin pointer template',
+  restoreModeNotPointer: '  [warn] {file} is {mode} ({source}); restore writes a pointer. Record that intent first: charter adf vendor set {file} pointer',
+  restoreHandAuthored: '  [warn] {file} has hand-authored content that .ai/ does not hold. Move it first: charter adf migrate --source {file}',
+  restoreBloated: '  [warn] {file} carries {n} item(s) beyond the pointer. Fold them into .ai/ first: charter adf tidy --source {file}',
+  restoreRetained: '  [warn] {file} carries your content under {headings}, which the pointer template would drop. Move it into a .ai/ module first.',
+  restoreRecord: '  [warn] {file} was not restored: its mode could not be recorded as pointer in {manifestPath}. Fix the manifest or run: charter adf vendor status',
+  restoreWriteFailed: '  [warn] Could not write {file}: {error}.{note}',
+  restoreReverted: ' Its new mode record was removed again.',
+  restoreNotReverted: ' Its new mode record (pointer) was kept; delete that VENDORS line by hand if you do not want it.',
 } as const;
 
 function fill(template: string, values: Record<string, string | number>): string {
@@ -278,6 +301,15 @@ export function recordedSpelling(
 ): VendorFile {
   if (recorded.has(file)) return file;
   return groups.find(g => g.includes(file))?.find(n => recorded.has(n)) ?? file;
+}
+
+/**
+ * The mode of the valid VENDORS entry for `file`'s physical file (under any of
+ * its spellings), or null when there is none. Never writes.
+ */
+export function recordedModeOf(aiDir: string, file: VendorFile): VendorMode | null {
+  const { recorded } = readVendorRecord(path.join(aiDir, 'manifest.adf'));
+  return recorded.get(recordedSpelling(file, recorded))?.mode ?? null;
 }
 
 function readVendorFile(file: VendorFile): string | null {
@@ -575,9 +607,11 @@ export function adfVendorCommand(options: CLIOptions, args: string[]): number {
       return vendorSet(options, manifestPath, rest, dryRun);
     case 'init':
       return vendorInit(options, manifestPath, dryRun);
+    case 'restore':
+      return vendorRestore(options, aiDir, rest, dryRun);
     default:
       throw new CLIError(
-        `${sub ? `Unknown adf vendor subcommand: ${sub}. ` : ''}Usage: charter adf vendor <status|set|init> [--ai-dir <dir>] [--format json]`,
+        `${sub ? `Unknown adf vendor subcommand: ${sub}. ` : ''}Usage: charter adf vendor <status|set|init|restore> [--ai-dir <dir>] [--format json]`,
       );
   }
 }
@@ -707,4 +741,184 @@ function vendorInit(options: CLIOptions, manifestPath: string, dryRun: boolean):
 
   const failed = results.some(r => r.status === 'skipped' && r.skipReason !== 'already-recorded' && r.skipReason !== 'file-absent');
   return failed ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+}
+
+// ============================================================================
+// adf vendor restore (#318)
+// ============================================================================
+
+export type RestoreRefusal = 'mode-not-pointer' | 'hand-authored' | 'pointer-bloated' | 'retained-divergent' | 'record-write';
+
+export interface RestoreResult {
+  file: VendorFile;
+  status: 'restored' | 'planned' | 'unchanged' | 'refused';
+  refusal: RestoreRefusal | null;
+  /** Retained headings carrying the user's own content, carried over verbatim. */
+  keptSections: string[];
+  remedy: string | null;
+}
+
+/** The template each vendor name is restored to (CLAUDE.md: the hybrid one bootstrap writes). */
+function restoreTemplate(file: VendorFile): string {
+  switch (file) {
+    case 'CLAUDE.md': return POINTER_CLAUDE_MD_HYBRID;
+    case 'AGENTS.md':
+    case 'agents.md': return POINTER_AGENTS_MD;
+    case '.cursorrules': return POINTER_CURSORRULES;
+    case 'GEMINI.md': return POINTER_GEMINI_MD;
+    default: return POINTER_COPILOT_MD;
+  }
+}
+
+/** A retained-sections block without its `## Module Index` section (the template carries its own). */
+function withoutModuleIndexSection(block: string): string {
+  const out: string[] = [];
+  let skipping = false;
+  for (const line of block.split('\n')) {
+    if (line.trim().startsWith('## ')) skipping = line.trim() === '## Module Index';
+    if (!skipping) out.push(line);
+  }
+  while (out.length > 0 && out[out.length - 1].trim() === '') out.pop();
+  while (out.length > 0 && out[0].trim() === '') out.shift();
+  return out.length > 0 ? `\n\n${out.join('\n')}\n` : '';
+}
+
+/**
+ * The pointer `restore` writes: the template, with the current file's retained
+ * sections re-appended verbatim (as tidy's restorePointer does) and, for
+ * CLAUDE.md, the module index filled in (as bootstrap's updateModuleIndex does).
+ * A clean bootstrap pointer therefore comes back byte-equal. Pure: never writes.
+ */
+export function restoredPointer(file: VendorFile, current: string | null, aiDir: string): string {
+  let pointer = restoreTemplate(file);
+  const hasIndex = pointer.includes(MODULE_INDEX_START);
+  let retained = current === null ? '' : readRetainedSections(current);
+  if (hasIndex) retained = withoutModuleIndexSection(retained);
+  if (retained) pointer = pointer.replace(/\n## Environment[\s\S]*$/, '').trimEnd() + retained;
+  const index = hasIndex ? generateModuleIndex(aiDir) : '';
+  return index
+    ? pointer.replace(`${MODULE_INDEX_START}\n${MODULE_INDEX_END}`, `${MODULE_INDEX_START}\n${index}${MODULE_INDEX_END}`)
+    : pointer;
+}
+
+function readText(p: string): string | null {
+  try {
+    return fs.readFileSync(p, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+export interface RestoreOptions {
+  dryRun?: boolean;
+  /** Receives each result line; isWarning marks a refusal or failure. */
+  print?: (line: string, isWarning: boolean) => void;
+  onWarning?: (message: string) => void;
+}
+
+/**
+ * Rewrite one vendor file as its pointer template, refusing whenever content
+ * would be lost (INV-P3-9). Allowed iff the resolved mode is pointer, or the
+ * file is absent with no valid entry. A file with no valid entry gets `pointer`
+ * recorded (add-if-absent, through recordVendorModes) BEFORE the file is
+ * written: a skipped record means no file write, and a failed file write puts
+ * the manifest's previous bytes back.
+ */
+export function restoreVendorFile(aiDir: string, file: VendorFile, options: RestoreOptions = {}): RestoreResult {
+  const print = options.print ?? (() => undefined);
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  const r = resolveVendorMode(aiDir, file);
+  const ev = r.evidence;
+  const current = ev.exists ? readText(path.resolve(file)) : null;
+  const handAuthored = ev.inferredMode === 'unmanaged' && (current ?? '').trim() !== '';
+  const refuse = (refusal: RestoreRefusal, remedy: string | null, line: string): RestoreResult => {
+    print(line, true);
+    return { file, status: 'refused', refusal, keptSections: [], remedy };
+  };
+  const migrateRemedy = `charter adf migrate --source ${file}`;
+
+  if (r.mode !== 'pointer' && !(!ev.exists && r.source === 'inferred')) {
+    if (r.source === 'inferred' && handAuthored) return refuse('hand-authored', migrateRemedy, fill(MSG.restoreHandAuthored, { file }));
+    return refuse('mode-not-pointer', `charter adf vendor set ${file} pointer`,
+      fill(MSG.restoreModeNotPointer, { file, mode: r.mode, source: r.source }));
+  }
+  if (handAuthored) return refuse('hand-authored', migrateRemedy, fill(MSG.restoreHandAuthored, { file }));
+  if (ev.inferredMode === 'pointer') {
+    const n = countExtractable(file, aiDir);
+    if (n > 0) return refuse('pointer-bloated', `charter adf tidy --source ${file}`, fill(MSG.restoreBloated, { file, n }));
+  }
+  if (ev.inferredMode === 'compiled' && current !== null) {
+    const divergent = divergentRetainedHeadings(current, file);
+    if (divergent.length > 0) {
+      return refuse('retained-divergent', null, fill(MSG.restoreRetained, { file, headings: divergent.join(', ') }));
+    }
+  }
+
+  // Only a pointer's retained sections are the user's; a compiled file's come from .ai/.
+  const keptSections = ev.inferredMode === 'pointer' && current !== null ? divergentRetainedHeadings(current, file) : [];
+  const kept = keptSections.length > 0 ? ` (kept ${keptSections.join(', ')})` : '';
+  const next = restoredPointer(file, ev.inferredMode === 'pointer' ? current : null, aiDir);
+  if (next === current) {
+    print(fill(MSG.restoreUnchanged, { file }), false);
+    return { file, status: 'unchanged', refusal: null, keptSections, remedy: null };
+  }
+  if (options.dryRun) {
+    print(fill(MSG.restorePlanned, { file, kept }), false);
+    return { file, status: 'planned', refusal: null, keptSections, remedy: null };
+  }
+
+  // Record before write (PR2 pattern). A recorded pointer needs no record write.
+  const before = readText(manifestPath);
+  let after: string | null = null;
+  if (r.source === 'inferred') {
+    let recorded = false;
+    try {
+      const outcome = recordVendorModes(manifestPath, [{ file, mode: 'pointer' }], 'add-if-absent', { onWarning: options.onWarning });
+      recorded = outcome.results.every(x => x.status !== 'skipped');
+      if (outcome.written) after = readText(manifestPath);
+    } catch (err: unknown) {
+      options.onWarning?.(`Vendor modes were not recorded: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!recorded) return refuse('record-write', 'charter adf vendor status', fill(MSG.restoreRecord, { file, manifestPath }));
+  }
+  try {
+    fs.writeFileSync(path.resolve(file), next);
+  } catch (err: unknown) {
+    // Revert the entry just added by putting the manifest's previous bytes back,
+    // only if nothing else has touched it since.
+    let note = '';
+    if (after !== null && before !== null) {
+      let reverted = false;
+      try {
+        if (readText(manifestPath) === after) {
+          fs.writeFileSync(manifestPath, before);
+          reverted = true;
+        }
+      } catch {
+        reverted = false;
+      }
+      note = reverted ? MSG.restoreReverted : MSG.restoreNotReverted;
+    }
+    const error = err instanceof Error ? err.message : String(err);
+    return refuse('record-write', `charter adf vendor restore ${file}`, fill(MSG.restoreWriteFailed, { file, error, note }));
+  }
+  print(fill(MSG.restoreOk, { file, kept }), false);
+  return { file, status: 'restored', refusal: null, keptSections, remedy: null };
+}
+
+function vendorRestore(options: CLIOptions, aiDir: string, rest: string[], dryRun: boolean): number {
+  if (rest.length !== 1) throw new CLIError(MSG.usageRestore);
+  const [file] = rest;
+  if (!isVendorFile(file)) throw new CLIError(fill(MSG.unknownFile, { file }));
+  const json = options.format === 'json';
+  const warnings: string[] = [];
+  const result = restoreVendorFile(aiDir, file, {
+    dryRun,
+    onWarning: w => warnings.push(w),
+    // JSON stdout stays one document: text lines go to stderr there.
+    print: (line, isWarning) => (json || isWarning ? console.error(line) : console.log(line)),
+  });
+  for (const w of warnings) console.error(json ? `Warning: ${w}` : `  Warning: ${w}`);
+  if (json) console.log(JSON.stringify(result, null, 2));
+  return result.status === 'refused' ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
 }
