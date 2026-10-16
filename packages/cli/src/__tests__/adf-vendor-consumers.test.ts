@@ -110,9 +110,9 @@ async function compiledOutput(target: string): Promise<string> {
   return r.out;
 }
 
-interface CheckRow { target: string; file: string; mode: string | null; source: string | null; status: string; extractable: number | null; remedy: string | null }
+interface CheckRow { target: string; file: string; mode: string | null; source: string | null; status: string; extractable: number | null; remedy: string | null; staleReason?: string | null }
 interface CheckJson { stale: string[]; current: string[]; missing: string[]; skipped: string[]; upToDate: boolean; targets: CheckRow[]; nextActions: string[] }
-interface WriteRow { target: string; file: string; state: string; source: string | null; status: string; recordedMode: string | null; previousMode: string | null; remedy: string | null }
+interface WriteRow { target: string; file: string; state: string; source: string | null; status: string; recordedMode: string | null; previousMode: string | null; remedy: string | null; retainedSections?: string[]; retainedSource?: string }
 interface WriteJson { written: string[]; refused: string[]; skipped: string[]; targets: WriteRow[]; nextActions: string[] }
 interface TidyJson { files: Array<{ file: string; vendorFile: string | null; mode: string | null; source: string | null; status: string; skipReason: string | null; itemsExtracted: number }>; totalExtracted: number; warnings: string[] }
 
@@ -142,7 +142,7 @@ describe('compile --check is mode-aware', () => {
     const byFile = Object.fromEntries(r.json.targets.map(t => [t.file, t]));
     expect(byFile['CLAUDE.md']).toMatchObject({ status: 'pointer-bloated', mode: 'pointer', source: 'inferred', remedy: 'charter adf tidy --source CLAUDE.md' });
     expect(byFile['CLAUDE.md'].extractable).toBeGreaterThan(0);
-    expect(byFile['AGENTS.md']).toEqual({ target: 'agents', file: 'AGENTS.md', mode: 'pointer', source: 'inferred', status: 'pointer-ok', extractable: null, remedy: null });
+    expect(byFile['AGENTS.md']).toEqual({ target: 'agents', file: 'AGENTS.md', mode: 'pointer', source: 'inferred', status: 'pointer-ok', extractable: null, remedy: null, staleReason: null });
     expect(byFile['GEMINI.md']).toMatchObject({ status: 'mode-drift', mode: 'compiled', source: 'recorded', remedy: 'charter adf vendor set GEMINI.md pointer' });
     expect(byFile['.cursorrules']).toMatchObject({ status: 'missing', mode: 'compiled', remedy: 'charter adf compile --target cursor --write' });
     // Legacy keys keep their names and types (INV-P2-9).
@@ -380,15 +380,17 @@ describe('compile --write decision table', () => {
     expect(manifestText()).toBe(vendors('CLAUDE.md: compiled'));
   });
 
-  it('--mode compiled keeps the retained-section guard for pointers (#295) and records nothing on refusal', async () => {
+  it('--mode compiled carries a pointer\'s retained sections instead of refusing (#303), and records the switch', async () => {
     scaffold();
     const withProtocol = `${POINTER_AGENTS_MD}\n## Release Protocol\n\n- Tag before publishing.\n`;
     fs.writeFileSync('AGENTS.md', withProtocol);
     const r = await runJson<WriteJson>(['compile', '--target', 'agents', '--write', '--mode', 'compiled']);
-    expect(r.code).toBe(1);
-    expect(r.json.targets[0].status).toBe('refused-retained');
-    expect(manifestText()).toBe(BASE_MANIFEST);
-    expect(read('AGENTS.md')).toBe(withProtocol);
+    expect(r.code).toBe(0);
+    expect(r.json.targets[0]).toMatchObject({
+      status: 'written', previousMode: 'pointer', retainedSections: ['## Release Protocol'], retainedSource: 'pointer',
+    });
+    expect(manifestText()).toBe(vendors('AGENTS.md: compiled'));
+    expect(read('AGENTS.md')).toContain('## Release Protocol\n\n- Tag before publishing.\n<!-- charter:retained:end -->\n');
   });
 
   it('--mode compiled over a compiled or absent target writes as usual', async () => {

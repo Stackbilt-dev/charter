@@ -542,29 +542,64 @@ Default with no `--write` or `--check` prints to stdout, single target only.
 | pointer | skipped (its `[skip]` line names the command), exit 0 | refused, exit 1 | record set to compiled, then written as `Written CLAUDE.md (mode: pointer -> compiled)` |
 | unmanaged | skipped, exit 0 | refused, exit 1 | as pointer, but an existing hand-authored file also needs `--force` |
 
-When every target is skipped, compile says that nothing was written and how to switch. JSON output keeps `written`, `refused` and `nextActions`, and adds `skipped` and `targets` (one row per target: `state`, `source`, `status`, `recordedMode`, `previousMode`, `remedy`, `writeError`).
+When every target is skipped, compile says that nothing was written and how to switch. JSON output keeps `written`, `refused` and `nextActions`, and adds `skipped` and `targets` (one row per target: `state`, `source`, `status`, `recordedMode`, `previousMode`, `remedy`, `writeError`, `retainedSections`, `retainedSource`, `retainedSkipped`, `retainedAmbiguous`). `previousMode` (`pointer` or `unmanaged`) is how a JSON consumer tells a conversion from a re-compile.
+
+**Retained sections.** Compiled output keeps your own `## Environment` section and the other sections `adf tidy` retains (`## Session ...` other than `## Session Start`, and headings containing Protocol, Receipt, Provenance or Registration). They live in a block at the very end of the file, after the module index:
+
+```markdown
+<!-- charter:retained:start -->
+<!-- Kept verbatim by charter adf compile. Edit freely between the retained markers. -->
+
+## Environment
+- Use WSL for builds
+<!-- charter:retained:end -->
+```
+
+`--write` carries them from wherever they are:
+
+- An existing block is copied as it stands, so an edit inside it survives every re-compile, and a section you delete from it stays deleted. Delete the whole block (both markers) to stop carrying anything.
+- A compiled file with retained sections outside the block (for example a hand-added `## Environment`) gets them moved into the block. An all-caps heading the compiler could have produced (`## PROTOCOL`, a section since removed from `.ai/`) is never carried, and neither is `## Module Index`.
+- A pointer converted with `--mode compiled` carries the retained sections that differ from its template.
+- A hand-authored file converted with `--mode compiled --force` carries its retained sections; the rest is discarded.
+
+A file with nothing to carry gets no block, so its output is byte-identical to the plain render. The block uses the HTML markers in every target, `.cursorrules` included. Sections keep their source order, and the output is LF. A carried section whose heading matches a compiled one (say `## CONTEXT`) is kept, with a warning on stderr. The written line names what was kept: `Written CLAUDE.md (kept ## Environment)`. `adf compile` without `--write` prints the plain render, with no block. `adf tidy`, `doctor` and `adf migrate` ignore the block, because it is a Charter sentinel.
+
+A retained-looking section can really be rendered `.ai/` text: a `## Session notes` or `## Environment` line inside a `.ai/` text value, left in the compiled file after you edited or removed that value. Compile handles such sections as follows:
+
+- If its heading appears in a current `.ai/` module, it is compiler output. It is not carried. Compile prints `<file>: <heading> was not carried: it looks like compiler output from .ai/. If it is yours, move it into the retained block.` and lists it in the row's `retainedSkipped`.
+- If it sits inside a generated section's span (from a `## KEY` heading to the next generated heading or the module index) that no longer matches the current render, and no `.ai/` module holds its heading, it could be stale output or your own text. `--write` will not drop it. That target is refused as `refused-ambiguous` (exit 1, nothing written, `VENDORS` unchanged), named in `retainedAmbiguous`. The first remedy keeps it: wrap it in place between `<!-- charter:retained:start -->` and `<!-- charter:retained:end -->` (the two lines are printed), then re-run `--write`. The second, `--write --force`, discards it and lists it in `retainedSkipped`. `--check` reads such a file as `stale` with `staleReason: "retained-ambiguous"` and gives the same two remedies.
+- A section appended after the last rendered section is still carried when that section matches the current render.
+
+Parsing follows Markdown. A `## ` line, a module index fence or a retained marker inside a ```` ``` ```` or `~~~` code fence is text, and an indented `    ## x` is code, not a heading. Marker lines match with the same loose whitespace that `stripCharterSentinels` accepts (`<!--charter:retained:start-->` works). A marker line that the render itself contains, quoted in a `.ai/` text value, never starts the block.
+
+Converting a pointer refuses (exit 1, nothing written, `VENDORS` unchanged) when content the output would not carry would be lost. This also applies to a file recorded `compiled` that still looks like a pointer, under plain `--write`:
+
+- `refused-bloated`: the pointer carries items `adf tidy` would extract. The first remedy is `charter adf tidy --source <file>` (moves them into `.ai/`, then re-run). The second is `--mode compiled --force`, which discards N item(s).
+- `refused-would-drop`: other lines of yours (an extra note, an edited title, edited `## Session Start` text) would be lost. Charter pointer-template lines and the module index do not count. Move them under `## Environment` or into a `.ai/` module, or pass `--force`, which discards N line(s).
+
+`--force` skips these refusals but never drops retained sections. `refused-retained` is retired: a pointer with notes under a retained heading is now written, with the notes carried.
+
+Limitations:
+- Outside the block, only retained-heading sections are kept. A non-retained section after the block, or the non-retained content of a second `charter:retained` block, is dropped, as before.
+- Edits to a compiled file's own `## Session Start`, `## Module Index` or preamble are not kept. The banner says DO NOT EDIT, and that is by design.
+- `--check` still compares bytes, so a CRLF checkout of a compiled file reads stale.
 
 `--check` per target:
 
 | Status | When | Exit |
 |---|---|---|
-| `fresh` / `stale` | compiled: bytes equal / differ (remedy: `compile --target <t> --write`) | 0 / 1 |
+| `fresh` / `stale` | compiled: the file equals / differs from what `--write` would write, which is the render plus the file's own retained block (remedy: `compile --target <t> --write`). `staleReason` is `retained-ambiguous` when a legacy section may be stale `.ai/` output or yours (see retained sections), `retained-unfenced` when retained sections sit outside the block (the remedy keeps them), else `content` | 0 / 1 |
 | `missing` | no file on disk (a recorded pointer suggests `adf vendor restore <file>` or `adf vendor set <file> unmanaged`) | 1 |
 | `pointer-ok` | pointer with nothing `adf tidy` would extract | 0 |
 | `pointer-bloated` | pointer carrying content that belongs in `.ai/` (remedy: `adf tidy --source <file>`) | 1 |
 | `mode-drift` | recorded `compiled` or `pointer`, but the file looks like another mode. Both fixes are printed, the content-preserving one first; regenerating says how many items it would discard | 1 |
 | `skipped-unmanaged` | unmanaged: not checked | 0 |
 
-No `--check` remedy suggests `compile --write` for a pointer or unmanaged file. JSON output keeps `stale` (stale, bloated and drifted files), `current`, `missing`, `upToDate` and `nextActions`, and adds `skipped` and `targets`.
+No `--check` remedy suggests `compile --write` for a pointer or unmanaged file. An edit inside the retained block never makes a file stale. A compiled file with a hand-added `## Environment` outside the block reads `stale` (`retained-unfenced`) until one `--write` moves it into the block. The comparison is still byte for byte, so a CRLF checkout of a compiled file reads stale. JSON output keeps `stale` (stale, bloated and drifted files), `current`, `missing`, `upToDate` and `nextActions`, and adds `skipped` and `targets` (each row has `staleReason`, null unless stale).
 
-**Overwrite guard.** With `--write` and no `--force`, compile writes an existing file only when it recognises it as Charter-owned — either compiler output (carrying the compile banner) or a Charter thin pointer. It refuses in two cases:
+**Overwrite guard.** With `--write` and no `--force`, compile writes an existing file only when it recognises it as Charter-owned — either compiler output (carrying the compile banner) or a Charter thin pointer. A hand-authored file with no Charter marker is refused (`refused-hand-authored`). A pointer is refused only over content the output would not carry (`refused-bloated`, `refused-would-drop`; see retained sections above).
 
-- the file is hand-authored and carries no Charter marker
-- the file is a pointer carrying your own content under a retained heading (`## Environment` and the other headings `adf tidy` retains) that the pointer template does not have
-
-The second case matters because compiled output has no `## Environment` section and `.ai/` does not hold that content, so overwriting would lose it with no way back except git. Move such content into a `.ai/` module first, or pass `--force` to discard it.
-
-Both refusals happen before the record is touched, so a refused target never changes `VENDORS`.
+These refusals happen before the record is touched, so a refused target never changes `VENDORS`.
 
 ### charter adf tidy
 
@@ -660,7 +695,7 @@ npx charter adf vendor restore CLAUDE.md            # rewrite one pointer from i
 - `status`: read-only. A file with a valid entry shows its recorded mode, plus `(recorded; file looks compiled)` when the markers on disk disagree. A file without one shows the mode inferred from its markers, the way `adf tidy` classifies it: the compile banner means `compiled`, a pointer marker means `pointer`, and anything else is `unmanaged`. Malformed, duplicate (the last entry wins), unknown-file and not-allowed entries are reported and ignored. A missing manifest exits 0 with a warning.
 - `set <file> <mode>`: records or replaces one entry, editing only that line. Only `CLAUDE.md`, `AGENTS.md`, `.cursorrules` and `GEMINI.md` may be `compiled`. `agents.md` and `copilot-instructions.md` have no compile target, so `compiled` is refused with exit 1. An unknown file or mode, or a missing manifest, exits 2. The file does not have to exist yet.
 - `init`: records the inferred mode of every vendor file on disk that has no entry. It never changes an existing entry, and a second run writes nothing.
-- `restore <file>`: rewrites one file as its thin pointer template (`CLAUDE.md` gets the hybrid template with the module index filled in, as bootstrap writes it). It runs only when the file's mode is `pointer` (recorded or inferred), or the file is absent with no entry, and it refuses (exit 1, file untouched) whenever content would be lost: `mode-not-pointer` (record the intent first with `vendor set <file> pointer`), `hand-authored` (run `adf migrate --source <file>`), `pointer-bloated` (run `adf tidy --source <file>`), `retained-divergent` (a compiled file carrying your own `## Environment` or protocol section), and `compiled-differs` (a compiled file that differs from what `.ai/` compiles to now, checked in memory; keep it with `vendor set <file> compiled`). For a pointer, every non-blank line must survive: a line that is not from a Charter pointer template (current or earlier) or the generated module index, and that the new pointer would not carry, is refused as `hand-authored` with the first few lines named. Retained sections of a pointer are carried over verbatim and listed. It is the fix for a recorded pointer that now holds compiled output. A file with no entry gets `pointer` recorded before the file is written; if that cannot be recorded, nothing is written (`record-write`), and if the file write fails, the manifest is put back byte for byte (`write-failed`, with `writeError`). A result identical to the file on disk is `unchanged` and writes nothing. `--dry-run` reports `planned`. An unknown file name exits 2. JSON output: `file`, `status` (`restored`, `planned`, `unchanged`, `refused`), `refusal`, `keptSections`, `remedy`, `writeError`; text lines go to stderr under `--format json`.
+- `restore <file>`: rewrites one file as its thin pointer template (`CLAUDE.md` gets the hybrid template with the module index filled in, as bootstrap writes it). It runs only when the file's mode is `pointer` (recorded or inferred), or the file is absent with no entry, and it refuses (exit 1, file untouched) whenever content would be lost: `mode-not-pointer` (record the intent first with `vendor set <file> pointer`), `hand-authored` (run `adf migrate --source <file>`), `pointer-bloated` (run `adf tidy --source <file>`), and `compiled-differs` (a compiled file that differs from what `.ai/` compiles to now, checked in memory; keep it with `vendor set <file> compiled`). A compiled file's retained block, and retained sections outside one, are not a difference: they are carried into the pointer as plain sections and listed in `keptSections`. The `retained-divergent` refusal is retired. A block holding anything a pointer cannot keep as a retained section is refused as `would-drop`, naming it, and the file is left as it is. That covers a non-retained heading such as `## My Notes`, and text before the first heading (`adf tidy` would move it out of the pointer). The first remedy is `vendor set <file> compiled`, which keeps the file compiled. Otherwise, move that content under `## Environment` or into a `.ai/` module first. For a pointer, every non-blank line must survive: a line that is not from a Charter pointer template (current or earlier) or the generated module index, and that the new pointer would not carry, is refused as `hand-authored` with the first few lines named. Retained sections of a pointer are carried over verbatim and listed. It is the fix for a recorded pointer that now holds compiled output. A file with no entry gets `pointer` recorded before the file is written; if that cannot be recorded, nothing is written (`record-write`), and if the file write fails, the manifest is put back byte for byte (`write-failed`, with `writeError`). A result identical to the file on disk is `unchanged` and writes nothing. `--dry-run` reports `planned`. An unknown file name exits 2. JSON output: `file`, `status` (`restored`, `planned`, `unchanged`, `refused`), `refusal`, `keptSections`, `remedy`, `writeError`; text lines go to stderr under `--format json`.
 
 One physical file has one entry. When two vendor names are the same file (`AGENTS.md` and `agents.md` on a case-insensitive filesystem, or a hard link), every writer records it under the spelling already recorded, or `AGENTS.md` when neither is. `status` shows it once. `set` names the spelling it used.
 - `--dry-run`: with `set`, `init` or `restore`, report the change without writing
