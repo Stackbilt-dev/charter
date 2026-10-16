@@ -292,6 +292,7 @@ charter adf compile --target all --write # Re-render compiled-mode CLAUDE.md, AG
 charter adf compile --target all --write --mode compiled # Switch pointer files to compiled output
 charter adf vendor status                # Show each vendor file's mode (pointer, compiled, unmanaged)
 charter adf vendor restore CLAUDE.md     # Rewrite one pointer from its template (refuses if content would be lost)
+charter adf vendor rename-legacy         # Rename a pre-#297 agents.md to AGENTS.md (stages a git mv; moves its VENDORS entry)
 charter adf patch <file> --ops <json>   # Apply structured patch operations to an ADF file
 charter adf sync --check                 # Verify files match lock
 charter adf fmt .ai/core.adf --write     # Reformat to canonical form

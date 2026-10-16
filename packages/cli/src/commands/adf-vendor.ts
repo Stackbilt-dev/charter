@@ -23,6 +23,7 @@ import type { AdfDocument, CompileTarget, ManifestVendorEntry } from '@stackbilt
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
+import { getGitErrorMessage, runGit } from '../git-helpers';
 import {
   MODULE_INDEX_END,
   MODULE_INDEX_START,
@@ -38,7 +39,7 @@ import { fileIdentity, generateModuleIndex } from './adf-migrate';
 import { divergentRetainedHeadings } from './adf-compile';
 import { composeCompiled, compiledMatchesFresh, readAiModuleLines } from './adf-retained';
 import { countExtractable, readRetainedSections } from './adf-tidy';
-import { insertManifestBullet, lastSectionIndex, replaceManifestBullet, sectionHeaders } from './adf-manifest-register';
+import { insertManifestBullet, lastSectionIndex, removeManifestBullet, replaceManifestBullet, sectionHeaders } from './adf-manifest-register';
 
 // ============================================================================
 // Entities
@@ -159,6 +160,30 @@ export const MSG = {
   restoreWriteFailed: '  [warn] Could not write {file}: {error}.{note}',
   restoreReverted: ' Its new mode record was removed again.',
   restoreNotReverted: ' Its new mode record (pointer) was kept; delete that VENDORS line by hand if you do not want it.',
+  // Legacy lowercase agents.md (#302).
+  usageRenameLegacy: 'Usage: charter adf vendor rename-legacy [--dry-run] [--ai-dir <dir>] [--format json]',
+  renameOk: '  [ok] Renamed agents.md -> AGENTS.md ({method}){recordNote}{titleNote}',
+  renamePlanned: '  [dry-run] Would rename agents.md -> AGENTS.md ({method}){recordNote}{titleNote}',
+  renameStagedHint: '  The rename is staged. Commit it together with {paths}: git add {addArgs} && git commit',
+  renameStagedOnly: '  The rename is staged. Commit it: git commit',
+  renameRecordOnly: '  [ok] The file is already AGENTS.md; moved its VENDORS entry from agents.md to AGENTS.md',
+  renameRecordOnlyDuplicate: '  [ok] The file is already AGENTS.md; removed the duplicate agents.md VENDORS entry',
+  renameRecordOnlyPlanned: '  [dry-run] The file is already AGENTS.md; would {action} its agents.md VENDORS entry',
+  renameUnchanged: '  [ok] Nothing to rename: no lowercase agents.md in git, on disk, or in VENDORS.',
+  renameReferences: '  agents.md is still mentioned in: {refs}. Charter does not edit these; update them by hand if they mean the file.',
+  renameBothDistinct: '  [warn] agents.md and AGENTS.md are two different files. Move anything you need from agents.md into AGENTS.md, then: {rm} agents.md',
+  renameBothOneFile: '  [warn] git has two index entries (agents.md and AGENTS.md) for one file on this case-insensitive checkout. Drop the stale entry: git rm --cached agents.md',
+  renameDirty: '  [warn] agents.md has uncommitted changes. Commit or stash them first, so the rename lands as a pure rename.',
+  renameTmpExists: '  [warn] {tmp} already exists; remove it and re-run.',
+  renameRecordConflict: '  [warn] VENDORS records agents.md as {legacyMode} and AGENTS.md as {mode}. Keep one line in {manifestPath}, then re-run.',
+  renameRecordWrite: '  [warn] agents.md was not renamed: its VENDORS entry could not be moved in {manifestPath}. Fix the manifest or run: charter adf vendor status',
+  renameFailed: '  [warn] Rename failed: {error}. {undoNote}',
+  renameUndone: 'agents.md and the VENDORS entry are back as they were.',
+  renameRecover: 'Recover by hand: {recovery}',
+  legacyRemedy: 'charter adf vendor rename-legacy && charter adf compile --target agents --write --mode compiled',
+  refusedLegacySpelling: '  [warn] Refused to compile AGENTS.md: its VENDORS entry and git path still use the legacy name agents.md, which cannot be compiled output.\n         Run: charter adf vendor rename-legacy, then re-run this command.',
+  legacyFirst: '         AGENTS.md is still recorded as agents.md; rename it first: charter adf vendor rename-legacy',
+  setLegacy: "  [warn] AGENTS.md is recorded under the legacy name agents.md, which cannot be 'compiled'. Run: charter adf vendor rename-legacy, then: charter adf vendor set AGENTS.md compiled",
 } as const;
 
 function fill(template: string, values: Record<string, string | number>): string {
@@ -613,9 +638,11 @@ export function adfVendorCommand(options: CLIOptions, args: string[]): number {
       return vendorInit(options, manifestPath, dryRun);
     case 'restore':
       return vendorRestore(options, aiDir, rest, dryRun);
+    case 'rename-legacy':
+      return vendorRenameLegacy(options, aiDir, rest, dryRun);
     default:
       throw new CLIError(
-        `${sub ? `Unknown adf vendor subcommand: ${sub}. ` : ''}Usage: charter adf vendor <status|set|init|restore> [--ai-dir <dir>] [--format json]`,
+        `${sub ? `Unknown adf vendor subcommand: ${sub}. ` : ''}Usage: charter adf vendor <status|set|init|restore|rename-legacy> [--ai-dir <dir>] [--format json]`,
       );
   }
 }
@@ -677,6 +704,15 @@ function vendorSet(options: CLIOptions, manifestPath: string, rest: string[], dr
   if (!isVendorMode(mode)) throw new CLIError(fill(MSG.unknownMode, { mode }));
 
   const json = options.format === 'json';
+  // A legacy-keyed AGENTS.md names the rename, not the generic modeNotAllowed (#302, N4).
+  if (file === 'AGENTS.md' && mode === 'compiled' && legacyKeyFor(manifestPath, file)) {
+    if (json) {
+      const result = { status: 'skipped', file: 'agents.md', mode, skipReason: 'mode-not-allowed' };
+      console.log(JSON.stringify({ manifestPath, written: false, result, remedy: 'charter adf vendor rename-legacy' }, null, 2));
+    }
+    console.error(MSG.setLegacy);
+    return EXIT_CODE.POLICY_VIOLATION;
+  }
   const warnings: string[] = [];
   const outcome = recordVendorModes(manifestPath, [{ file, mode }], 'upsert', { dryRun, onWarning: w => warnings.push(w) });
   const result = outcome.results[0];
@@ -1027,6 +1063,372 @@ function vendorRestore(options: CLIOptions, aiDir: string, rest: string[], dryRu
     print: (line, isWarning) => (json || isWarning ? console.error(line) : console.log(line)),
   });
   for (const w of warnings) console.error(json ? `Warning: ${w}` : `  Warning: ${w}`);
+  if (json) console.log(JSON.stringify(result, null, 2));
+  return result.status === 'refused' ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+}
+
+// ============================================================================
+// Legacy lowercase agents.md (#302)
+// ============================================================================
+
+/** Temp name for the case-safe two-step rename. It must not exist beforehand. */
+export const RENAME_TMP = 'agents.md.charter-rename';
+
+export type GitRunner = (args: string[]) => string;
+
+/** Exact-case agents.md / AGENTS.md entries in the git index. */
+export interface LegacyIndexEntries {
+  lower: boolean;
+  upper: boolean;
+}
+
+/**
+ * D0: the git index's agents.md / AGENTS.md entries, or null outside git (or
+ * when ls-files fails). The `:(icase)` pathspec finds both spellings whatever
+ * core.ignorecase says; the exact-case filter makes the answer the same on
+ * case-sensitive and case-insensitive checkouts. Never looks at the disk.
+ */
+export function legacyIndexEntries(git: GitRunner = runGit): LegacyIndexEntries | null {
+  let out: string;
+  try {
+    out = git(['ls-files', '-z', '--', ':(icase)agents.md']);
+  } catch {
+    return null;
+  }
+  const paths = out.split('\0');
+  return { lower: paths.includes('agents.md'), upper: paths.includes('AGENTS.md') };
+}
+
+/** Both names exist and are one physical file (case-insensitive checkout, or a hard link). */
+export function sameFileOnDisk(a: string, b: string): boolean {
+  const fa = path.resolve(a);
+  const fb = path.resolve(b);
+  return fs.existsSync(fa) && fs.existsSync(fb) && fileIdentity(fa) === fileIdentity(fb);
+}
+
+export type LegacyIndexKind = 'legacy-tracked' | 'legacy-both-distinct' | 'legacy-both-one-file';
+
+/** D1/D2: classify the index entries (null: nothing to report). */
+export function legacyIndexKind(
+  entries: LegacyIndexEntries | null,
+  sameFile: () => boolean = () => sameFileOnDisk('agents.md', 'AGENTS.md'),
+): LegacyIndexKind | null {
+  if (!entries?.lower) return null;
+  if (!entries.upper) return 'legacy-tracked';
+  return sameFile() ? 'legacy-both-one-file' : 'legacy-both-distinct';
+}
+
+/**
+ * N1: 'agents.md' iff `file` is AGENTS.md, both names are one physical file,
+ * and the VENDORS entry for that file is the legacy agents.md key. Else null.
+ */
+export function legacyKeyFor(manifestPath: string, file: VendorFile): 'agents.md' | null {
+  if (file !== 'AGENTS.md') return null;
+  const groups = vendorFileGroups();
+  if (!groups.some(g => g.includes('AGENTS.md') && g.includes('agents.md'))) return null;
+  const { recorded } = readVendorRecord(manifestPath);
+  return recordedSpelling('AGENTS.md', recorded, groups) === 'agents.md' ? 'agents.md' : null;
+}
+
+export type RenameMethod = 'git-mv' | 'fs' | 'record-only' | 'none';
+export type RenameRefusal = 'both-distinct' | 'dirty' | 'tmp-exists' | 'record-conflict' | 'record-write' | 'rename-failed';
+
+export interface RenameResult {
+  status: 'renamed' | 'planned' | 'unchanged' | 'refused';
+  method: RenameMethod;
+  from: 'agents.md';
+  to: 'AGENTS.md';
+  /** Paths this command left staged (git-mv only), as one rename. */
+  staged: string[];
+  record: { action: 'rekeyed' | 'removed-duplicate' | 'none' | 'reverted'; mode: 'pointer' | 'unmanaged' | null };
+  /** True iff line 1 was exactly `# agents.md` and was (or, under --dry-run, would be) rewritten. */
+  titleUpdated: boolean;
+  /** "<path>:<line>" mentions of agents.md, report-only. */
+  references: string[];
+  refusal: RenameRefusal | null;
+  remedy: string | null;
+  error: string | null;
+}
+
+export interface RenameLegacyOptions {
+  dryRun?: boolean;
+  /** Receives each result line; isWarning marks a refusal or failure. */
+  print?: (line: string, isWarning: boolean) => void;
+  /** Injected for tests: the git runner and the fs rename. */
+  git?: GitRunner;
+  rename?: (from: string, to: string) => void;
+  /** Injected for tests: are agents.md and AGENTS.md one physical file? */
+  sameFile?: () => boolean;
+}
+
+const LEGACY_TITLE_RE = /^# agents\.md(?=\r?\n|$)/;
+const LEGACY_REF_RE = /\bagents\.md\b/;
+
+function posix(p: string): string {
+  return p.split(path.sep).join('/');
+}
+
+function shellQuote(p: string): string {
+  return /^[\w./-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+function listDir(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir).sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * S6: "<path>:<line>" for each line mentioning agents.md (case-sensitive, word
+ * bounded) in <aiDir>/*.adf and the repo-root *.md files. `planned` stands in
+ * for a file's content (by display path) when a dry run has not written it.
+ */
+function legacyReferences(aiDir: string, planned: ReadonlyMap<string, string>): string[] {
+  const files: Array<{ shown: string; full: string }> = [];
+  for (const f of listDir(aiDir)) if (f.endsWith('.adf')) files.push({ shown: posix(path.join(aiDir, f)), full: path.join(aiDir, f) });
+  for (const f of listDir('.')) {
+    if (!f.endsWith('.md')) continue;
+    // The file being renamed is shown under its new name.
+    files.push({ shown: f.toLowerCase() === 'agents.md' ? 'AGENTS.md' : f, full: f });
+  }
+  const refs: string[] = [];
+  for (const { shown, full } of files) {
+    const text = planned.get(shown) ?? (fs.statSync(full, { throwIfNoEntry: false })?.isFile() ? readText(full) : null);
+    if (text === null) continue;
+    text.split('\n').forEach((line, i) => {
+      if (LEGACY_REF_RE.test(line)) refs.push(`${shown}:${i + 1}`);
+    });
+  }
+  return [...new Set(refs)];
+}
+
+/** The S2 edit: the manifest text with the legacy key moved, checked by re-parse. Null on a guard skip. */
+function legacyRecordEdit(text: string, index: number, removeDuplicate: boolean, mode: VendorMode): string | null {
+  let doc: AdfDocument;
+  try {
+    doc = parseAdf(text);
+  } catch {
+    return null;
+  }
+  const expected: AdfDocument = JSON.parse(JSON.stringify(doc));
+  const section = expected.sections[lastSectionIndex(expected, VENDORS_SECTION_KEY)];
+  if (!section || section.content.type !== 'list') return null;
+  const bullet = `AGENTS.md: ${mode}`;
+  const next = removeDuplicate
+    ? removeManifestBullet(text, VENDORS_SECTION_KEY, index)
+    : replaceManifestBullet(text, VENDORS_SECTION_KEY, index, bullet);
+  if (next === null) return null;
+  if (removeDuplicate) section.content.items.splice(index, 1);
+  else section.content.items[index] = bullet;
+  // Guard: the edit must change nothing but that one entry.
+  try {
+    return JSON.stringify(parseAdf(next)) === JSON.stringify(expected) ? next : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `charter adf vendor rename-legacy`: rename a pre-#297 lowercase agents.md to
+ * AGENTS.md, moving its VENDORS key with it. The record moves first; the rename
+ * is two steps through RENAME_TMP (a one-step case-only rename is a no-op or an
+ * error on a case-insensitive filesystem), with `git mv` when agents.md is
+ * tracked, so the rename is staged and nothing else is. On any rename failure
+ * the completed step is undone and the record put back. The only content edit
+ * is an exact `# agents.md` first line. Never deletes or merges a file.
+ */
+export function renameLegacyAgents(aiDir: string, options: RenameLegacyOptions = {}): RenameResult {
+  const git = options.git ?? runGit;
+  const renameFs = options.rename ?? ((from: string, to: string) => fs.renameSync(from, to));
+  const print = options.print ?? (() => undefined);
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  const shownManifest = posix(manifestPath);
+  let result: RenameResult = {
+    status: 'unchanged', method: 'none', from: 'agents.md', to: 'AGENTS.md', staged: [],
+    record: { action: 'none', mode: null }, titleUpdated: false, references: [], refusal: null, remedy: null, error: null,
+  };
+  const refuse = (refusal: RenameRefusal, remedy: string | null, line: string): RenameResult => {
+    print(line, true);
+    return { ...result, status: 'refused', refusal, remedy };
+  };
+
+  // S1: plan. Nothing below writes until the dry-run return.
+  const index = legacyIndexEntries(git);
+  const names = listDir('.');
+  const diskLower = names.includes('agents.md');
+  const diskUpper = names.includes('AGENTS.md');
+  const oneFile = (options.sameFile ?? (() => sameFileOnDisk('agents.md', 'AGENTS.md')))();
+  if (index?.lower && index.upper) {
+    return oneFile
+      ? refuse('both-distinct', 'git rm --cached agents.md', MSG.renameBothOneFile)
+      : refuse('both-distinct', 'git rm agents.md', fill(MSG.renameBothDistinct, { rm: 'git rm' }));
+  }
+  if (diskLower && diskUpper && !oneFile) {
+    const rm = index?.lower ? 'git rm' : 'rm';
+    return refuse('both-distinct', `${rm} agents.md`, fill(MSG.renameBothDistinct, { rm }));
+  }
+
+  const record = readVendorRecord(manifestPath);
+  const legacy = record.recorded.get('agents.md');
+  const method: RenameMethod = index?.lower ? 'git-mv' : diskLower && !diskUpper ? 'fs' : legacy ? 'record-only' : 'none';
+  result.method = method;
+  if (method === 'none') {
+    print(MSG.renameUnchanged, false);
+    return result;
+  }
+  if (record.readProblem) {
+    return refuse('record-write', 'charter adf vendor status', fill(MSG.renameRecordWrite, { manifestPath: shownManifest }));
+  }
+  const renames = method === 'git-mv' || method === 'fs';
+  if (method === 'git-mv') {
+    let dirty = true;
+    try {
+      dirty = git(['status', '--porcelain=v1', '-z', '--untracked-files=no', '--', 'agents.md']) !== '';
+    } catch {
+      dirty = true;
+    }
+    if (dirty) return refuse('dirty', 'git commit', MSG.renameDirty);
+  }
+  if (renames) {
+    let tmpTracked = false;
+    try {
+      tmpTracked = index !== null && git(['ls-files', '-z', '--', RENAME_TMP]) !== '';
+    } catch {
+      tmpTracked = false;
+    }
+    if (fs.existsSync(RENAME_TMP) || tmpTracked) {
+      return refuse('tmp-exists', `rm ${RENAME_TMP}`, fill(MSG.renameTmpExists, { tmp: RENAME_TMP }));
+    }
+  }
+
+  const upper = record.recorded.get('AGENTS.md');
+  let edit: { next: string; before: string; action: 'rekeyed' | 'removed-duplicate'; mode: 'pointer' | 'unmanaged' } | null = null;
+  if (legacy) {
+    if (upper && upper.mode !== legacy.mode) {
+      return refuse('record-conflict', null, fill(MSG.renameRecordConflict, {
+        legacyMode: legacy.mode, mode: upper.mode, manifestPath: shownManifest,
+      }));
+    }
+    const before = readText(manifestPath);
+    const next = before === null ? null : legacyRecordEdit(before, legacy.index, upper !== undefined, legacy.mode);
+    if (before === null || next === null) {
+      return refuse('record-write', 'charter adf vendor status', fill(MSG.renameRecordWrite, { manifestPath: shownManifest }));
+    }
+    // agents.md may only be pointer or unmanaged (ALLOWED_MODES), both allowed for AGENTS.md.
+    edit = { next, before, action: upper ? 'removed-duplicate' : 'rekeyed', mode: legacy.mode as 'pointer' | 'unmanaged' };
+    result.record = { action: edit.action, mode: edit.mode };
+  }
+  const current = renames ? readText('agents.md') : null;
+  const retitled = current !== null && LEGACY_TITLE_RE.test(current) ? current.replace(LEGACY_TITLE_RE, '# AGENTS.md') : null;
+  const recordNote = edit ? (edit.action === 'rekeyed' ? '; VENDORS entry moved' : '; duplicate VENDORS entry removed') : '';
+
+  if (options.dryRun) {
+    const planned = new Map<string, string>();
+    if (edit) planned.set(shownManifest, edit.next);
+    if (retitled !== null) planned.set('AGENTS.md', retitled);
+    result = { ...result, status: 'planned', titleUpdated: retitled !== null, references: legacyReferences(aiDir, planned) };
+    print(renames
+      ? fill(MSG.renamePlanned, { method, recordNote, titleNote: retitled !== null ? '; title line would be updated' : '' })
+      : fill(MSG.renameRecordOnlyPlanned, { action: edit?.action === 'removed-duplicate' ? 'remove the duplicate' : 'move' }), false);
+    return result;
+  }
+
+  // S2: record first.
+  if (edit) {
+    try {
+      fs.writeFileSync(manifestPath, edit.next);
+    } catch {
+      return refuse('record-write', 'charter adf vendor status', fill(MSG.renameRecordWrite, { manifestPath: shownManifest }));
+    }
+  }
+  if (!renames) {
+    result = { ...result, status: 'renamed', references: legacyReferences(aiDir, new Map()) };
+    print(edit?.action === 'removed-duplicate' ? MSG.renameRecordOnlyDuplicate : MSG.renameRecordOnly, false);
+    return result;
+  }
+
+  // S3: two-step rename; S4: undo on failure.
+  const move = (from: string, to: string): void => {
+    if (method === 'git-mv') git(['mv', '--', from, to]);
+    else renameFs(from, to);
+  };
+  let done = 0;
+  try {
+    move('agents.md', RENAME_TMP);
+    done = 1;
+    move(RENAME_TMP, 'AGENTS.md');
+    done = 2;
+  } catch (err: unknown) {
+    const error = method === 'git-mv' ? getGitErrorMessage(err) : err instanceof Error ? err.message : String(err);
+    const recovery: string[] = [];
+    let undone = true;
+    try {
+      if (done === 1) move(RENAME_TMP, 'agents.md');
+      else if (fs.existsSync(RENAME_TMP) && !fs.existsSync('agents.md')) renameFs(RENAME_TMP, 'agents.md');
+    } catch {
+      undone = false;
+      recovery.push(`${method === 'git-mv' ? 'git mv --' : 'mv'} ${RENAME_TMP} agents.md`);
+    }
+    if (edit) {
+      let reverted = false;
+      try {
+        if (readText(manifestPath) === edit.next) {
+          fs.writeFileSync(manifestPath, edit.before);
+          reverted = true;
+        }
+      } catch {
+        reverted = false;
+      }
+      if (reverted) result.record = { ...result.record, action: 'reverted' };
+      else recovery.push(`put back the line '  - agents.md: ${edit.mode}' under VENDORS in ${shownManifest}`);
+    }
+    const undoNote = undone && recovery.length === 0 ? MSG.renameUndone : fill(MSG.renameRecover, { recovery: recovery.join('; ') });
+    result.error = error;
+    // The full error is in JSON; the line shows its first line (git's hints run long).
+    const shown = error.split(/\r?\n/, 1)[0].replace(/\.$/, '');
+    return refuse('rename-failed', 'charter adf vendor rename-legacy', fill(MSG.renameFailed, { error: shown, undoNote }));
+  }
+  result.status = 'renamed';
+  if (method === 'git-mv') result.staged = ['agents.md', 'AGENTS.md'];
+
+  // S5: the legacy title line only.
+  if (retitled !== null) {
+    try {
+      fs.writeFileSync('AGENTS.md', retitled);
+      result.titleUpdated = true;
+    } catch (err: unknown) {
+      print(`  Warning: could not update the title line of AGENTS.md: ${err instanceof Error ? err.message : String(err)}`, true);
+    }
+  }
+  result.references = legacyReferences(aiDir, new Map());
+
+  print(fill(MSG.renameOk, { method, recordNote, titleNote: result.titleUpdated ? '; title line updated' : '' }), false);
+  if (method === 'git-mv') {
+    // CP-3: the manifest (and a title edit) are left unstaged, for the user to commit with the rename.
+    const paths = [...(edit ? [shownManifest] : []), ...(result.titleUpdated ? ['AGENTS.md'] : [])];
+    print(paths.length > 0
+      ? fill(MSG.renameStagedHint, { paths: paths.join(' and '), addArgs: paths.map(shellQuote).join(' ') })
+      : MSG.renameStagedOnly, false);
+  }
+  return result;
+}
+
+function vendorRenameLegacy(options: CLIOptions, aiDir: string, rest: string[], dryRun: boolean): number {
+  if (rest.length !== 0) throw new CLIError(MSG.usageRenameLegacy);
+  const json = options.format === 'json';
+  const result = renameLegacyAgents(aiDir, {
+    dryRun,
+    // JSON stdout stays one document: text lines go to stderr there.
+    print: (line, isWarning) => (json || isWarning ? console.error(line) : console.log(line)),
+  });
+  if (result.references.length > 0) {
+    const shown = result.references.slice(0, 5).join(', ') + (result.references.length > 5 ? `, and ${result.references.length - 5} more` : '');
+    const line = fill(MSG.renameReferences, { refs: shown });
+    if (json) console.error(line);
+    else console.log(line);
+  }
   if (json) console.log(JSON.stringify(result, null, 2));
   return result.status === 'refused' ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
 }

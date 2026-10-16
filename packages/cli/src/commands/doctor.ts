@@ -16,7 +16,7 @@ import { CHARTER_OWNED_MARKERS } from './adf';
 import { TARGET_FILENAMES } from '@stackbilt/adf';
 import type { CompileTarget } from '@stackbilt/adf';
 import { countExtractable } from './adf-tidy';
-import { readVendorRecord, resolveVendorModes, vendorFileGroups } from './adf-vendor';
+import { legacyIndexEntries, legacyIndexKind, readVendorRecord, resolveVendorMode, resolveVendorModes, vendorFileGroups } from './adf-vendor';
 import type { ModeSource, VendorEntryProblem, VendorFile, VendorMode } from './adf-vendor';
 import { checkGateEnforcement, checkPreCommitScope } from './doctor-gate-enforcement';
 import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
@@ -152,7 +152,11 @@ export const DOCTOR_MSG = {
   entryProblem: "VENDORS entry '{raw}' in {manifestPath} is ignored ({problem}). Fix or delete that line in {manifestPath}.",
   entryDuplicate: "VENDORS lists {file} more than once in {manifestPath}; '{raw}' is ignored because a later entry wins. Delete that line.",
   alias: 'VENDORS records both {file} and {other}, which are the same file on disk; {file} is used. Delete the {other} line.',
-  legacySpelling: "VENDORS records the legacy name agents.md for the file AGENTS.md; `adf compile --target agents --mode compiled` cannot switch it. Change the line to '  - AGENTS.md: {mode}' (an automatic rename comes with #302).",
+  legacySpelling: "VENDORS records the legacy name agents.md for the file AGENTS.md, so `adf compile --target agents --mode compiled` cannot switch it. Run: charter adf vendor rename-legacy",
+  // Legacy lowercase agents.md in the git index (#302). All INFO: Charter's own pre-#297 bootstrap created it.
+  legacyTracked: 'git tracks agents.md under its pre-#297 lowercase name. Rename it (case-safe, keeps its VENDORS entry): charter adf vendor rename-legacy',
+  legacyBothDistinct: 'git tracks both agents.md and AGENTS.md as separate files. Move anything you need from agents.md into AGENTS.md, then: git rm agents.md',
+  legacyBothOneFile: 'git has two index entries (agents.md and AGENTS.md) for one file on this case-insensitive checkout. Drop the stale entry: git rm --cached agents.md',
   sectionNotList: 'VENDORS in {manifestPath} does not read as a list, so every vendor mode is inferred. Every line under it must look like "  - CLAUDE.md: pointer".',
   agentConfigPass: '{pointers} thin pointer(s) and {compiled} compiled file(s) route to .ai/{unmanagedNote}.',
   unmanagedNote: '; {n} file(s) recorded unmanaged are left alone',
@@ -170,6 +174,9 @@ export type VendorModeRowKind =
   | 'entry-problem'
   | 'alias-recorded'
   | 'legacy-spelling'
+  | 'legacy-tracked'
+  | 'legacy-both-distinct'
+  | 'legacy-both-one-file'
   | 'section-not-list';
 
 type CheckStatus = 'PASS' | 'WARN' | 'INFO';
@@ -183,6 +190,9 @@ export const ROW_STATUS: Record<VendorModeRowKind, CheckStatus> = {
   'entry-problem': 'WARN',
   'alias-recorded': 'INFO',
   'legacy-spelling': 'INFO',
+  'legacy-tracked': 'INFO',
+  'legacy-both-distinct': 'INFO',
+  'legacy-both-one-file': 'INFO',
   'section-not-list': 'WARN',
 };
 
@@ -227,7 +237,10 @@ export function vendorModeRows(aiDir: string, manifestPath: string): Array<{ row
   // Key order follows the row schema: kind, status, file, recordedMode, inferredMode, source, raw, remedy.
   const base: VendorModeRow = { kind: 'recorded-ok', status: 'PASS', file: null, recordedMode: null, inferredMode: null, source: null, raw: null, remedy: null };
   if (record.readProblem === 'section-not-list') {
-    return [{ row: { ...base, kind: 'section-not-list', status: 'WARN' }, detail: fill(DOCTOR_MSG.sectionNotList, { manifestPath }) }];
+    return [
+      { row: { ...base, kind: 'section-not-list', status: 'WARN' }, detail: fill(DOCTOR_MSG.sectionNotList, { manifestPath }) },
+      ...legacyIndexRows(aiDir, base),
+    ];
   }
   const out: Array<{ row: VendorModeRow; detail: string | null }> = [];
   for (const r of resolveVendorModes(aiDir)) {
@@ -288,11 +301,36 @@ export function vendorModeRows(aiDir: string, manifestPath: string): Array<{ row
       }
     } else if (names[0] === 'agents.md' && group.includes('AGENTS.md')) {
       const mode = record.recorded.get('agents.md')?.mode ?? 'pointer';
-      const row: VendorModeRow = { ...base, kind: 'legacy-spelling', status: 'INFO', file: 'agents.md', recordedMode: mode, source: 'recorded' };
-      out.push({ row, detail: fill(DOCTOR_MSG.legacySpelling, { mode }) });
+      const row: VendorModeRow = {
+        ...base, kind: 'legacy-spelling', status: 'INFO', file: 'agents.md', recordedMode: mode, source: 'recorded', remedy: 'charter adf vendor rename-legacy',
+      };
+      out.push({ row, detail: DOCTOR_MSG.legacySpelling });
     }
   }
+  out.push(...legacyIndexRows(aiDir, base));
   return out;
+}
+
+const LEGACY_INDEX_ROWS = {
+  'legacy-tracked': { detail: DOCTOR_MSG.legacyTracked, remedy: 'charter adf vendor rename-legacy' },
+  'legacy-both-distinct': { detail: DOCTOR_MSG.legacyBothDistinct, remedy: 'git rm agents.md' },
+  'legacy-both-one-file': { detail: DOCTOR_MSG.legacyBothOneFile, remedy: 'git rm --cached agents.md' },
+} as const;
+
+/**
+ * A lowercase agents.md in the git index (#302). Reads the index only (plus the
+ * file identity to tell two files from one), so an untracked agents.md, or a
+ * directory outside git, gives no row. Always INFO (INV-P6-2).
+ */
+function legacyIndexRows(aiDir: string, base: VendorModeRow): Array<{ row: VendorModeRow; detail: string | null }> {
+  const kind = legacyIndexKind(legacyIndexEntries());
+  if (!kind) return [];
+  const r = resolveVendorMode(aiDir, 'agents.md');
+  const row: VendorModeRow = {
+    ...base, kind, status: ROW_STATUS[kind], file: 'agents.md', recordedMode: r.source === 'recorded' ? r.mode : null,
+    inferredMode: r.evidence.inferredMode, source: r.source, remedy: LEGACY_INDEX_ROWS[kind].remedy,
+  };
+  return [{ row, detail: LEGACY_INDEX_ROWS[kind].detail }];
 }
 
 /** The `adf vendor mode` check: worst row status, one detail line per non-PASS row. */
