@@ -567,6 +567,35 @@ npx charter adf suggest --emit-ops /tmp/ops.json
 
 Also reports co-occurrence trigger candidates — a weaker, non-failure-backed heuristic where a keyword often appears alongside one that already triggers a module.
 
+### charter adf vendor
+
+Show or record each vendor file's mode: a thin `pointer` to `.ai/`, `compiled` output of `charter adf compile`, or `unmanaged` (hand-authored, left alone). The record is a `VENDORS` list in `<ai-dir>/manifest.adf`. Vendor files are read from the repository root.
+
+```bash
+npx charter adf vendor status                       # recorded or inferred mode of each vendor file
+npx charter adf vendor status --all --format json   # include absent names
+npx charter adf vendor set CLAUDE.md compiled       # record one file's mode
+npx charter adf vendor set CLAUDE.md pointer --dry-run
+npx charter adf vendor init                         # record inferred modes for unrecorded files
+```
+
+```
+🏷️ VENDORS:
+  - CLAUDE.md: pointer
+  - AGENTS.md: compiled
+```
+
+- `status`: read-only. A file with a valid entry shows its recorded mode, plus `(recorded; file looks compiled)` when the markers on disk disagree. A file without one shows the mode inferred from its markers, the way `adf tidy` classifies it: the compile banner means `compiled`, a pointer marker means `pointer`, and anything else is `unmanaged`. Malformed, duplicate (the last entry wins), unknown-file and not-allowed entries are reported and ignored. A missing manifest exits 0 with a warning.
+- `set <file> <mode>`: records or replaces one entry, editing only that line. Only `CLAUDE.md`, `AGENTS.md`, `.cursorrules` and `GEMINI.md` may be `compiled`. `agents.md` and `copilot-instructions.md` have no compile target, so `compiled` is refused with exit 1. An unknown file or mode, or a missing manifest, exits 2. The file does not have to exist yet.
+- `init`: records the inferred mode of every vendor file on disk that has no entry. It never changes an existing entry, and a second run writes nothing. `AGENTS.md` and `agents.md` that are the same file are recorded once, as `AGENTS.md`.
+- `--dry-run`: with `set` or `init`, report the change without writing
+- `--all`: with `status`, also list vendor names that are absent and unrecorded
+- `--ai-dir <dir>`: custom `.ai/` directory (default: `.ai`)
+
+`bootstrap` and `adf init --emit-pointers` record `pointer` for each pointer file they write. `adf migrate` records `pointer` for each source it replaces with a pointer, and `adf compile --write` records `compiled` for each target it writes. These writers only add missing entries. If a file is already recorded with another mode, the entry is kept and a warning names `adf vendor set` as the way to change it. Nothing is recorded under `--dry-run`, and a failed record write is only a warning. Every manifest edit is text-level and keeps line endings and every other byte. It is re-parsed before writing, and if the result would change anything else, nothing is written.
+
+No command acts on the record yet: `adf compile --check`, `adf tidy`, `doctor` and the pre-commit hook still decide from the markers in each file. Later changes under [#318](https://github.com/Stackbilt-dev/charter/issues/318) make them read it.
+
 ### charter blast
 
 Compute the blast radius of a change: which files transitively depend on the given seed files?

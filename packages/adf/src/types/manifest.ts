@@ -12,6 +12,21 @@ export interface Manifest {
   sync: SyncEntry[];
   cadence: CadenceEntry[];
   metrics: MetricSource[];
+  /**
+   * Raw VENDORS list items (#318). Permissive: strings only, with no knowledge
+   * of vendor file names or which modes a file allows. The CLI validates them.
+   */
+  vendors: ManifestVendorEntry[];
+}
+
+/**
+ * One VENDORS list item, e.g. `CLAUDE.md: pointer`. `file` and `mode` are null
+ * when the item does not have the `<file>: <pointer|compiled|unmanaged>` shape.
+ */
+export interface ManifestVendorEntry {
+  raw: string;
+  file: string | null;
+  mode: string | null;
 }
 
 export interface SyncEntry {

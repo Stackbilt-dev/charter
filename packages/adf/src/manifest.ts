@@ -11,6 +11,7 @@ import type {
   Manifest,
   ManifestModule,
   SyncEntry,
+  ManifestVendorEntry,
   BundleResult,
 } from './types';
 
@@ -30,6 +31,7 @@ export function parseManifest(doc: AdfDocument): Manifest {
     sync: [],
     cadence: [],
     metrics: [],
+    vendors: [],
   };
 
   for (const section of doc.sections) {
@@ -61,6 +63,12 @@ export function parseManifest(doc: AdfDocument): Manifest {
       case 'SYNC': {
         if (section.content.type === 'list') {
           manifest.sync = section.content.items.map(parseSyncEntry).filter((e): e is SyncEntry => e !== null);
+        }
+        break;
+      }
+      case 'VENDORS': {
+        if (section.content.type === 'list') {
+          manifest.vendors = section.content.items.map(parseVendorEntry);
         }
         break;
       }
@@ -108,6 +116,20 @@ function parseSyncEntry(entry: string): SyncEntry | null {
   const match = entry.match(/^(.+?)\s*->\s*(.+)$/);
   if (!match) return null;
   return { source: match[1].trim(), target: match[2].trim() };
+}
+
+/** `<file>: <mode>`. Anything else keeps its raw text with null file and mode. */
+const VENDOR_ENTRY_RE = /^(\S+?)\s*:\s*(pointer|compiled|unmanaged)$/;
+
+/**
+ * Parse a VENDORS entry like:
+ *   "CLAUDE.md: pointer"
+ * Never throws (#318): a malformed item keeps its raw text with null file and mode.
+ */
+function parseVendorEntry(entry: string): ManifestVendorEntry {
+  const raw = entry.trim();
+  const match = raw.match(VENDOR_ENTRY_RE);
+  return match ? { raw, file: match[1], mode: match[2] } : { raw, file: null, mode: null };
 }
 
 /**

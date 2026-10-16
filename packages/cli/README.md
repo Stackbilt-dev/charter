@@ -315,6 +315,9 @@ charter adf evidence [--task "<prompt>"] [--ai-dir <dir>] [--auto-measure]
 charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]
 charter adf migrate [--dry-run] [--source <file>] [--no-backup]
                     [--merge-strategy append|dedupe|replace] [--ai-dir <dir>]
+charter adf vendor status [--all] [--ai-dir <dir>]
+charter adf vendor set <file> <pointer|compiled|unmanaged> [--dry-run] [--ai-dir <dir>]
+charter adf vendor init [--dry-run] [--ai-dir <dir>]
 ```
 
 - `init`: Scaffold `.ai/` with `manifest.adf`, `core.adf`, `state.adf`, and starter `frontend.adf`/`backend.adf` on-demand module stubs. Core module includes a 500-line LOC guardrail metric by default.
@@ -328,6 +331,7 @@ charter adf migrate [--dry-run] [--source <file>] [--no-backup]
 - `evidence`: Validate all metric ceilings in the merged document and produce a structured pass/fail evidence report. `--auto-measure` counts lines in files referenced by the manifest METRICS section. `--context` or `--context-file` inject external metric overrides that take precedence over auto-measured and document values. In `--ci` mode, exits 1 on constraint failures (warnings don't fail). Also reports stale-baseline warnings (baseline vs current delta + recommended ceiling) when baseline values drift significantly. The governance workflow template runs this automatically on PRs when `.ai/manifest.adf` is present.
 - `metrics recalibrate`: Re-measure current LOC from manifest metric sources, propose and apply new ceilings using configurable headroom, and append rationale records to `BUDGET_RATIONALES`. Requires explicit rationale (`--reason`) unless `--auto-rationale` is used.
 - `migrate`: Scan existing agent config files (CLAUDE.md, .cursorrules, agents.md, GEMINI.md, copilot-instructions.md), classify content using the ADX-002 decision tree, and migrate into ADF modules. `--dry-run` previews the migration plan without writing files. `--source <file>` targets a single file. `--no-backup` skips `.pre-adf-migrate.bak` creation. `--merge-strategy` controls deduplication: `dedupe` (default, skip items already in ADF), `append` (always add), or `replace`. Environment-specific rules (WSL, PATH, credential helpers) are retained in the thin pointer. Each module that receives content is registered in `manifest.adf`: `core.adf` and `state.adf` under `DEFAULT_LOAD`, the rest under `ON_DEMAND` with triggers inferred from the migrated headings. Registration is append-only, so existing entries are never rewritten. The `CLAUDE.md` module index is refreshed to match, and the plan shows a `REGISTER` line per module.
+- `vendor`: Show or record whether each vendor file (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `GEMINI.md`, `agents.md`, `copilot-instructions.md`) is a thin `pointer`, `compiled` output, or `unmanaged`. The record is a `VENDORS` list in `manifest.adf` (`  - CLAUDE.md: pointer`). `status` is read-only and shows each file's recorded mode, or the mode inferred from its markers when none is recorded. `set` records one file's mode; only the four compile targets may be `compiled`. `init` records the inferred mode of every vendor file on disk that has no entry yet, and never changes an existing one. `bootstrap`, `adf init --emit-pointers`, `adf migrate` and `adf compile --write` also record the mode of each file they write, without changing an existing entry. No command acts on the record yet (`#318`).
 
 ### `charter blast`
 

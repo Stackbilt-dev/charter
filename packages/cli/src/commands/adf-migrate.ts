@@ -35,6 +35,7 @@ import {
 } from './adf';
 import { registerModules, toRegisterAction, dedupePlannedRegistrations } from './adf-manifest-register';
 import type { ModuleRegistration, RegisterAction } from './adf-manifest-register';
+import { recordWrittenVendorModes } from './adf-vendor';
 
 // ============================================================================
 // Constants
@@ -380,6 +381,7 @@ export function migrateSource(
 
     // Write pointer with retained STAY items (and optional architecture summary)
     writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined, coexist, aiDir);
+    recordWrittenVendorModes(aiDir, [sourcePath], 'pointer', 'adf migrate', warn);
 
     // A non-CLAUDE.md source can add modules after CLAUDE.md's pointer was written.
     if (path.basename(sourcePath) !== 'CLAUDE.md' && registration.registrations.some(r => r.status === 'added')) {

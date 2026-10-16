@@ -17,6 +17,7 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   STATE: '\u{1F9E0}',
   BUDGET: '\u{1F4B0}',
   SYNC: '\u{1F504}',
+  VENDORS: '\u{1F3F7}\u{FE0F}',
   CADENCE: '\u{1F4CA}',
   GUIDE: '\u{1F4D6}',
 };
@@ -32,6 +33,7 @@ export const CANONICAL_KEY_ORDER: string[] = [
   'ON_DEMAND',
   'BUDGET',
   'SYNC',
+  'VENDORS',
   'CADENCE',
   'FILES',
   'TOOLS',
