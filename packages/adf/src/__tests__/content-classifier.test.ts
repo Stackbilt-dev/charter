@@ -381,3 +381,52 @@ describe('routing trace (#46)', () => {
     expect(result.routingTrace!.headingModule).toBe('frontend.adf');
   });
 });
+
+// ============================================================================
+// Heading keyword in the routing trace (#239)
+// ============================================================================
+
+describe('routing trace headingKeyword (#239)', () => {
+  it('records the heading word that matched, without a triggerMap', () => {
+    const result = classifyElement(rule('Deploy from main only'), 'Deployment');
+    expect(result.targetModule).toBe('infra.adf');
+    expect(result.routingTrace).toBeDefined();
+    expect(result.routingTrace!.headingModule).toBe('infra.adf');
+    expect(result.routingTrace!.headingKeyword).toBe('deployment');
+    expect(result.routingTrace!.candidateScores).toEqual({});
+  });
+
+  it('records the keyword alongside triggerMap scores', () => {
+    const result = classifyElement(rule('Use PascalCase'), 'React components', triggerMap);
+    expect(result.routingTrace!.headingModule).toBe('frontend.adf');
+    expect(result.routingTrace!.headingKeyword).toBe('react');
+    expect('frontend.adf' in result.routingTrace!.candidateScores).toBe(true);
+  });
+
+  it('records the matched text of a multi-word route', () => {
+    const result = classifyElement(rule('Use the tokens'), 'Design System');
+    expect(result.routingTrace!.headingKeyword).toBe('design system');
+  });
+
+  it('leaves headingKeyword undefined for the core.adf fallback', () => {
+    const result = classifyElement(rule('Use conventional commits'), 'Conventions');
+    expect(result.routingTrace!.headingModule).toBe('core.adf');
+    expect(result.routingTrace!.headingKeyword).toBeUndefined();
+  });
+
+  it('records the match of a custom heading route', () => {
+    const result = classifyElement(rule('Use Terraform'), 'Infra Setup', undefined, {
+      headingRoutes: [{ pattern: /\binfra\b/, module: 'infra.adf' }],
+    });
+    expect(result.routingTrace!.headingModule).toBe('infra.adf');
+    expect(result.routingTrace!.headingKeyword).toBe('infra');
+  });
+
+  it('carries the keyword through buildMigrationPlan', () => {
+    const sections: MarkdownSection[] = [
+      { heading: 'CI pipeline', elements: [rule('Run lint in CI')] },
+    ];
+    const plan = buildMigrationPlan(sections);
+    expect(plan.migrateItems[0].classification.routingTrace?.headingKeyword).toBe('ci');
+  });
+});

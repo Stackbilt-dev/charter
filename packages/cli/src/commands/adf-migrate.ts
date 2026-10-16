@@ -33,6 +33,8 @@ import {
   MODULE_INDEX_START,
   MODULE_INDEX_END,
 } from './adf';
+import { registerModules, toRegisterAction, dedupePlannedRegistrations } from './adf-manifest-register';
+import type { ModuleRegistration, RegisterAction } from './adf-manifest-register';
 
 // ============================================================================
 // Constants
@@ -137,9 +139,11 @@ export async function adfMigrateCommand(options: CLIOptions, args: string[]): Pr
   }
 
   const results: SourceMigrationResult[] = [];
+  const plannedModules = new Set<string>();
 
   for (const source of sources) {
     const result = migrateSource(source, aiDir, mergeStrategy, dryRun, noBackup, keepSummary, options, coexist);
+    if (dryRun) dedupePlannedRegistrations(result, plannedModules);
     results.push(result);
   }
 
@@ -180,13 +184,11 @@ export interface SourceMigrationResult {
   sectionCount: number;
   plan?: ReturnType<typeof buildMigrationPlan>;
   actions: MigrationAction[];
+  /** Manifest registrations for this source's target modules (#239); empty when skipped. */
+  registrations: ModuleRegistration[];
 }
 
-interface MigrationAction {
-  type: 'MERGE' | 'KEEP' | 'BACKUP' | 'SKIP';
-  target: string;
-  detail: string;
-}
+type MigrationAction = { type: 'MERGE' | 'KEEP' | 'BACKUP' | 'SKIP'; target: string; detail: string } | RegisterAction;
 
 // ============================================================================
 // Module Index — shared helpers for #52 and #53
@@ -257,6 +259,7 @@ export function migrateSource(
       lineCount: 0,
       sectionCount: 0,
       actions: [],
+      registrations: [],
     };
   }
 
@@ -271,6 +274,7 @@ export function migrateSource(
       lineCount: content.split('\n').length,
       sectionCount: 0,
       actions: [{ type: 'SKIP', target: sourcePath, detail: 'Already a thin pointer' }],
+      registrations: [],
     };
   }
 
@@ -322,6 +326,7 @@ export function migrateSource(
       detail: `+${counts.join(', +')}`,
     });
   }
+  const registerAt = actions.length;
 
   if (plan.stayItems.length > 0) {
     const envItems = plan.stayItems.filter(i =>
@@ -348,6 +353,13 @@ export function migrateSource(
     });
   }
 
+  // Register target modules in manifest.adf (#239). The writer is append-only and,
+  // under dry-run, writes nothing. In a real run it runs after the module merge and
+  // before the pointer, so the hybrid CLAUDE.md module index sees the new entries.
+  const warn = (w: string) => options.format === 'json' ? console.warn(`Warning: ${w}`) : console.log(`  Warning: ${w}`);
+  const register = () => registerModules(manifestPath, plan.targetModules, plan.migrateItems, { dryRun, onWarning: warn });
+  let registration = dryRun ? register() : undefined;
+
   // Apply if not dry-run
   if (!dryRun) {
     // Backup
@@ -364,9 +376,19 @@ export function migrateSource(
       applyMigrationToModule(modulePath, sectionGroups, mergeStrategy);
     }
 
+    registration = register();
+
     // Write pointer with retained STAY items (and optional architecture summary)
     writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined, coexist, aiDir);
+
+    // A non-CLAUDE.md source can add modules after CLAUDE.md's pointer was written.
+    if (path.basename(sourcePath) !== 'CLAUDE.md' && registration.registrations.some(r => r.status === 'added')) {
+      updateModuleIndex('CLAUDE.md', aiDir);
+    }
   }
+
+  const registrations = registration?.registrations ?? [];
+  actions.splice(registerAt, 0, ...registrations.map(r => toRegisterAction(r, manifestPath)));
 
   return {
     source: sourcePath,
@@ -375,6 +397,7 @@ export function migrateSource(
     sectionCount: sections.length,
     plan,
     actions,
+    registrations,
   };
 }
 
@@ -460,11 +483,6 @@ function applyMigrationToModule(
           section: sectionKey,
           value: formatted,
         });
-      }
-
-      // Weight promotion
-      if (weight === 'load-bearing' && existingSection.weight !== 'load-bearing') {
-        // We can't directly update weight via patch, so we handle it post-patch
       }
     }
   }
@@ -726,8 +744,4 @@ function printAuditReport(result: SourceMigrationResult): void {
   }
   console.log('');
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 

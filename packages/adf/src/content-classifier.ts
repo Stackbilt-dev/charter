@@ -30,9 +30,14 @@ export interface ClassifierConfig {
 export interface RoutingTrace {
   /** What headingToModule() returned before content-based fallback. */
   headingModule: string;
+  /**
+   * The heading word that matched the heading route (e.g. "deploy"); undefined
+   * when no route matched and the heading fell back to core.adf.
+   */
+  headingKeyword?: string;
   /** Set when a phrase-level QA override fired instead of keyword scoring. */
   phraseOverride?: string;
-  /** Per-module keyword match score from the triggerMap scoring pass. */
+  /** Per-module keyword match score from the triggerMap scoring pass; empty without a triggerMap. */
   candidateScores: Record<string, number>;
 }
 
@@ -42,7 +47,7 @@ export interface ClassificationResult {
   targetModule: string;
   weight: WeightTag;
   reason: string;
-  /** Populated when content-based routing ran. Opt-in observability for #46. */
+  /** Routing observability (#46). Always set by classifyElement; candidateScores is empty without a triggerMap. */
   routingTrace?: RoutingTrace;
 }
 
@@ -115,35 +120,38 @@ function matchesMetaPattern(text: string): boolean {
 }
 
 /**
- * Map a heading name to the most appropriate ADF target module.
+ * Map a heading name to the most appropriate ADF target module, and report the
+ * heading word that matched. `keyword` is undefined for the core.adf fallback.
  */
-function headingToModule(heading: string, routes?: ClassifierConfig['headingRoutes']): string {
+function headingToModule(
+  heading: string,
+  routes?: ClassifierConfig['headingRoutes'],
+): { module: string; keyword?: string } {
   const lower = heading.toLowerCase();
 
   if (routes) {
     for (const route of routes) {
-      if (route.pattern.test(lower)) return route.module;
+      if (route.pattern.test(lower)) {
+        return { module: route.module, keyword: lower.match(route.pattern)?.[0] || undefined };
+      }
     }
-    return 'core.adf';
+    return { module: 'core.adf' };
   }
 
-  if (/\b(design.system|ui|frontend|css|component|react|vue|svelte|next|nextjs|tailwind|shadcn|radix|storybook|vite|vitest|playwright|remix|nuxt|astro)\b/.test(lower)) {
-    return 'frontend.adf';
+  for (const [pattern, module] of HEADING_ROUTES) {
+    const match = lower.match(pattern);
+    if (match) return { module, keyword: match[1] };
   }
-  if (/\b(qa|quality|test|testing|verification|validate|validation|contract|smoke|evidence|audit)\b/.test(lower)) {
-    return 'qa.adf';
-  }
-  if (/\b(auth|authentication|authorization|security|secret|token|permission|cors|rate.limit|jwt|oauth|clerk|nextauth|lucia|session|cookie|csrf|xss|password|bcrypt)\b/.test(lower)) {
-    return 'security.adf';
-  }
-  if (/\b(deploy|deployment|infrastructure|infra|ci|cd|pipeline|config|configuration|environment|env|docker|wrangler|cloudflare|vercel|netlify|railway|fly|render|github.actions|kv|d1|r2|queue|durable.object)\b/.test(lower)) {
-    return 'infra.adf';
-  }
-  if (/\b(api|backend|server|database|db|endpoint|query|migration|handler|prisma|drizzle|mongoose|postgres|postgresql|mysql|sqlite|express|fastify|hono|trpc|zod|graphql)\b/.test(lower)) {
-    return 'backend.adf';
-  }
-  return 'core.adf';
+  return { module: 'core.adf' };
 }
+
+const HEADING_ROUTES: ReadonlyArray<[RegExp, string]> = [
+  [/\b(design.system|ui|frontend|css|component|react|vue|svelte|next|nextjs|tailwind|shadcn|radix|storybook|vite|vitest|playwright|remix|nuxt|astro)\b/, 'frontend.adf'],
+  [/\b(qa|quality|test|testing|verification|validate|validation|contract|smoke|evidence|audit)\b/, 'qa.adf'],
+  [/\b(auth|authentication|authorization|security|secret|token|permission|cors|rate.limit|jwt|oauth|clerk|nextauth|lucia|session|cookie|csrf|xss|password|bcrypt)\b/, 'security.adf'],
+  [/\b(deploy|deployment|infrastructure|infra|ci|cd|pipeline|config|configuration|environment|env|docker|wrangler|cloudflare|vercel|netlify|railway|fly|render|github.actions|kv|d1|r2|queue|durable.object)\b/, 'infra.adf'],
+  [/\b(api|backend|server|database|db|endpoint|query|migration|handler|prisma|drizzle|mongoose|postgres|postgresql|mysql|sqlite|express|fastify|hono|trpc|zod|graphql)\b/, 'backend.adf'],
+];
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -240,9 +248,9 @@ export function classifyElement(
   config?: ClassifierConfig,
 ): ClassificationResult {
   const text = element.content;
-  const headingModule = headingToModule(heading, config?.headingRoutes);
+  const { module: headingModule, keyword: headingKeyword } = headingToModule(heading, config?.headingRoutes);
   let module = headingModule;
-  let routingTrace: RoutingTrace | undefined;
+  const routingTrace: RoutingTrace = { headingModule, headingKeyword, candidateScores: {} };
 
   // Content-based routing: check element content against ON_DEMAND trigger
   // keywords from the manifest. When heading routes to core.adf, always apply.
@@ -256,7 +264,8 @@ export function classifyElement(
     } else if (contentModule !== 'core.adf' && contentModule !== module && (scores[contentModule] ?? 0) >= 2) {
       module = contentModule;
     }
-    routingTrace = { headingModule, phraseOverride, candidateScores: scores };
+    routingTrace.phraseOverride = phraseOverride;
+    routingTrace.candidateScores = scores;
   }
 
   // Heading-level STAY: operational/session-protocol headings (#198)

@@ -46,9 +46,9 @@ import {
   manifestForPreset,
 } from './adf';
 import { loadPatterns } from '../config';
-import { parseAdf, parseManifest, formatAdf } from '@stackbilt/adf';
+import { parseAdf, parseManifest } from '@stackbilt/adf';
 import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
-import { isRequiredDefaultLoad } from './adf-wiring';
+import { registerModules } from './adf-manifest-register';
 import type { SourceMigrationResult } from './adf-migrate';
 
 // ============================================================================
@@ -227,20 +227,20 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     }
     if (shouldRegister) {
       const manifestFilePath = path.join('.ai', 'manifest.adf');
-      // Split orphans: core.adf and state.adf belong in DEFAULT_LOAD, everything else in ON_DEMAND
-      const defaultLoadOrphans = orphans.filter(m => isRequiredDefaultLoad(m));
-      const onDemandOrphans = orphans.filter(m => !isRequiredDefaultLoad(m));
-
-      if (defaultLoadOrphans.length > 0) {
-        registerModulesInDefaultLoad(manifestFilePath, defaultLoadOrphans);
-        if (options.format === 'text') {
-          console.log(`  Registered ${defaultLoadOrphans.length} module(s) as DEFAULT_LOAD in manifest.adf`);
-        }
-      }
-      if (onDemandOrphans.length > 0) {
-        registerOrphansInManifest(manifestFilePath, onDemandOrphans);
-        if (options.format === 'text') {
-          console.log(`  Registered ${onDemandOrphans.length} module(s) as ON_DEMAND in manifest.adf`);
+      // Shared append-only writer (#239): core.adf and state.adf go to DEFAULT_LOAD,
+      // everything else to ON_DEMAND with the module stem as its trigger.
+      // Writer warnings join phase 3's step so they also reach the JSON payload (#307).
+      const { registrations } = registerModules(manifestFilePath, orphans, [], {
+        onWarning: w => {
+          adfResult.step.warnings.push(w);
+          warnings++;
+          if (options.format === 'text') console.log(`  Warning: ${w}`);
+        },
+      });
+      for (const policy of ['DEFAULT_LOAD', 'ON_DEMAND'] as const) {
+        const added = registrations.filter(r => r.status === 'added' && r.loadPolicy === policy).length;
+        if (added > 0 && options.format === 'text') {
+          console.log(`  Registered ${added} module(s) as ${policy} in manifest.adf`);
         }
       }
 
@@ -1425,86 +1425,4 @@ function promptYesNo(question: string): Promise<boolean> {
       resolve(answer.trim().toLowerCase() === 'y');
     });
   });
-}
-
-/**
- * Append orphaned modules to the ON_DEMAND section of manifest.adf.
- */
-function registerOrphansInManifest(manifestPath: string, orphans: string[]): void {
-  const content = fs.readFileSync(manifestPath, 'utf-8');
-  const lines = content.split('\n');
-
-  // Find ON_DEMAND section
-  const onDemandIdx = lines.findIndex(l => l.includes('ON_DEMAND:'));
-
-  if (onDemandIdx === -1) {
-    // No ON_DEMAND section — append one
-    const newEntries = orphans.map(name => {
-      const stem = name.replace('.adf', '');
-      return `  - ${name} (Triggers on: ${stem})`;
-    });
-    fs.writeFileSync(
-      manifestPath,
-      content.trimEnd() + '\n\n📂 ON_DEMAND:\n' + newEntries.join('\n') + '\n',
-    );
-    return;
-  }
-
-  // Find end of ON_DEMAND entries
-  let insertIdx = onDemandIdx + 1;
-  while (insertIdx < lines.length && lines[insertIdx].match(/^\s+-\s/)) {
-    insertIdx++;
-  }
-
-  const newEntries = orphans.map(name => {
-    const stem = name.replace('.adf', '');
-    return `  - ${name} (Triggers on: ${stem})`;
-  });
-  lines.splice(insertIdx, 0, ...newEntries);
-  fs.writeFileSync(manifestPath, lines.join('\n'));
-}
-
-/**
- * Register modules in the DEFAULT_LOAD section of manifest.adf.
- * Uses the structured parseAdf/formatAdf round-trip so the result is canonical.
- * DEFAULT_LOAD entries are plain filenames with no "(Triggers on: ...)" suffix.
- */
-function registerModulesInDefaultLoad(manifestPath: string, modules: string[]): void {
-  const manifestDoc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
-  const sectionKey = 'DEFAULT_LOAD';
-
-  let section = manifestDoc.sections.find(s => s.key === sectionKey);
-  if (!section) {
-    section = {
-      key: sectionKey,
-      decoration: '📦',
-      content: { type: 'list', items: [] },
-    };
-    // Prepend DEFAULT_LOAD before any ON_DEMAND section
-    const onDemandIdx = manifestDoc.sections.findIndex(s => s.key === 'ON_DEMAND');
-    if (onDemandIdx !== -1) {
-      manifestDoc.sections.splice(onDemandIdx, 0, section);
-    } else {
-      manifestDoc.sections.push(section);
-    }
-  }
-
-  if (section.content.type !== 'list') {
-    // Fallback: append raw text rather than throwing — bootstrap should not crash
-    const raw = '\n\n📦 DEFAULT_LOAD:\n' + modules.map(m => `  - ${m}`).join('\n') + '\n';
-    fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf-8').trimEnd() + raw);
-    return;
-  }
-
-  let updated = false;
-  for (const mod of modules) {
-    if (!section.content.items.includes(mod)) {
-      section.content.items.push(mod);
-      updated = true;
-    }
-  }
-
-  if (updated) {
-    fs.writeFileSync(manifestPath, formatAdf(manifestDoc));
-  }
 }

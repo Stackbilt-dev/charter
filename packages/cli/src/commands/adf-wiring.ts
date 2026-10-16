@@ -30,7 +30,7 @@ export interface DefaultLoadClassification {
 }
 
 /** Normalize a manifest entry path: forward slashes, no leading `./`. */
-function normalizeModulePath(modulePath: string): string {
+export function normalizeModulePath(modulePath: string): string {
   return modulePath.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
 }
 

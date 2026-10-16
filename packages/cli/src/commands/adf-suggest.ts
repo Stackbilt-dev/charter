@@ -37,20 +37,14 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import type { AdfConstraintEvent, AdfResolutionEvent, CliTelemetryEvent } from '../telemetry';
+// Generic English function words filtered out of the near-miss keyword detector.
+// Without this, "the"/"a"/"and" dominate the report purely on frequency, drowning
+// out keywords that are actually candidate triggers. Shared with adf migrate's
+// trigger inference (#239).
+import { STOPWORDS } from './adf-manifest-register';
 
 const DEFAULT_MIN_OCCURRENCES = 3;
 const DEFAULT_WINDOW_MINUTES = 60;
-
-/**
- * Generic English function words filtered out of the near-miss keyword
- * detector. Without this, "the"/"a"/"and" dominate the report purely on
- * frequency, drowning out keywords that are actually candidate triggers.
- */
-const STOPWORDS = new Set([
-  'a', 'an', 'the', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'for', 'with',
-  'is', 'are', 'was', 'were', 'be', 'been', 'this', 'that', 'these', 'those',
-  'it', 'its', 'as', 'at', 'by', 'from', 'into', 'about', 'my', 'our', 'your',
-]);
 
 export interface DeadModuleFinding {
   module: string;
