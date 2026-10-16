@@ -88,7 +88,7 @@ async function fresh(target: string): Promise<string> {
   return (await run(['compile', '--target', target])).out;
 }
 
-interface WriteRow { file: string; status: string; previousMode: string | null; recordedMode: string | null; remedy: string | null; retainedSections: string[]; retainedSource: string; retainedSkipped: string[] }
+interface WriteRow { file: string; status: string; previousMode: string | null; recordedMode: string | null; remedy: string | null; retainedSections: string[]; retainedSource: string; retainedSkipped: string[]; retainedAmbiguous: string[] }
 interface WriteJson { written: string[]; refused: string[]; targets: WriteRow[]; nextActions: string[] }
 interface CheckRow { file: string; status: string; staleReason: string | null; remedy: string | null }
 interface CheckJson { upToDate: boolean; targets: CheckRow[]; nextActions: string[] }
@@ -507,23 +507,21 @@ const TARGET_OF_FILE: Record<string, string> = { 'CLAUDE.md': 'claude', 'AGENTS.
 type SkipJson = WriteJson;
 
 describe('rendered .ai/ text is never carried as the user\'s (review item 1)', () => {
-  const cases: Array<[string, string, string | null]> = [
+  const edited: Array<[string, string, string]> = [
     ['edited', 'Intro line\n## Session notes\n- keep tabs', 'Intro line\n## Session notes\n- keep spaces'],
     ['edited (## Environment)', '## Environment\nUse WSL.', '## Environment\nUse Docker.'],
-    ['removed', 'Intro line\n## Session notes\n- keep tabs', null],
   ];
-  for (const [name, before, after] of cases) {
-    it(`does not carry the old rendered copy when the .ai/ value is ${name}, and reports it`, async () => {
+  for (const [name, before, after] of edited) {
+    it(`does not carry the old rendered copy when the .ai/ value is ${name} (rule b: skip + warn)`, async () => {
       scaffold();
       fs.writeFileSync('.ai/core.adf', NOTES_CORE(before));
       await run(['compile', '--target', 'all', '--write']);
-      fs.writeFileSync('.ai/core.adf', after === null ? 'ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - TypeScript monorepo\n' : NOTES_CORE(after));
+      fs.writeFileSync('.ai/core.adf', NOTES_CORE(after));
       const heading = before.split('\n').find(l => l.startsWith('## ')) as string;
       const r = await runJson<SkipJson>(['compile', '--target', 'all', '--write']);
       expect(r.code).toBe(0);
       for (const t of r.json.targets) {
-        expect(t.retainedSkipped, t.file).toEqual([heading]);
-        expect(t.retainedSource, t.file).toBe('none');
+        expect(t, t.file).toMatchObject({ status: 'written', retainedSkipped: [heading], retainedAmbiguous: [], retainedSource: 'none' });
       }
       expect(r.err).toContain(`CLAUDE.md: ${heading} was not carried: it looks like compiler output from .ai/. If it is yours, move it into the retained block.`);
       for (const f of TARGET_FILES) {
@@ -534,6 +532,71 @@ describe('rendered .ai/ text is never carried as the user\'s (review item 1)', (
       expect(again.json.targets.every(t => t.retainedSkipped.length === 0)).toBe(true);
     });
   }
+
+  describe('a removed .ai/ value with no .ai/ match is ambiguous: refused, never dropped silently', () => {
+    async function setupRemoved(): Promise<Record<string, string>> {
+      scaffold();
+      fs.writeFileSync('.ai/core.adf', NOTES_CORE('Intro line\n## Session notes\n- keep tabs'));
+      await run(['compile', '--target', 'all', '--write']);
+      fs.writeFileSync('.ai/core.adf', 'ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - TypeScript monorepo\n');
+      return Object.fromEntries(TARGET_FILES.map(f => [f, read(f)]));
+    }
+
+    it('--write refuses every target (exit 1, nothing written), keep remedy first', async () => {
+      const before = await setupRemoved();
+      const manifest = read('.ai/manifest.adf');
+      const text = await run(['compile', '--target', 'claude', '--write']);
+      expect(text.code).toBe(1);
+      expect(text.err).toContain('Refused to compile CLAUDE.md: ## Session notes sit(s) inside a section .ai/ no longer renders that way');
+      expect(text.err).toContain(`Keep it: wrap it in place between these two lines, then re-run charter adf compile --target claude --write\n           ${RETAINED_START}\n           ${RETAINED_END}\n         Or discard it: charter adf compile --target claude --write --force  (discards: ## Session notes)`);
+      const r = await runJson<SkipJson>(['compile', '--target', 'all', '--write']);
+      expect(r.code).toBe(1);
+      for (const t of r.json.targets) expect(t, t.file).toMatchObject({ status: 'refused-ambiguous', retainedAmbiguous: ['## Session notes'] });
+      expect(r.json.nextActions[0]).toBe(`charter adf compile --target claude --write  # after wrapping ## Session notes in CLAUDE.md between ${RETAINED_START} and ${RETAINED_END}`);
+      expect(r.json.nextActions[1]).toBe('charter adf compile --target claude --write --force');
+      for (const f of TARGET_FILES) expect(read(f), f).toBe(before[f]);
+      expect(read('.ai/manifest.adf')).toBe(manifest);
+    });
+
+    it('--check reads it stale (retained-ambiguous) with the same remedies, not collapsed', async () => {
+      await setupRemoved();
+      const text = await run(['compile', '--target', 'claude', '--check']);
+      expect(text.code).toBe(1);
+      expect(text.out).toContain('[stale] CLAUDE.md — ## Session notes may be stale compiler output from .ai/ or your own text');
+      expect(text.out).toContain('(discards: ## Session notes)');
+      const r = await runJson<CheckJson>(['compile', '--target', 'all', '--check']);
+      expect(r.json.targets.every(t => t.status === 'stale' && t.staleReason === 'retained-ambiguous')).toBe(true);
+      expect(r.json.nextActions.slice(0, 2)).toEqual([
+        `charter adf compile --target claude --write  # after wrapping ## Session notes in CLAUDE.md between ${RETAINED_START} and ${RETAINED_END}`,
+        'charter adf compile --target claude --write --force',
+      ]);
+    });
+
+    it('wrapping it in place keeps it, stably', async () => {
+      await setupRemoved();
+      for (const f of TARGET_FILES) {
+        fs.writeFileSync(f, read(f).replace('## Session notes\n- keep tabs', `${RETAINED_START}\n## Session notes\n- keep tabs\n${RETAINED_END}`));
+      }
+      const r = await runJson<SkipJson>(['compile', '--target', 'all', '--write']);
+      expect(r.code).toBe(0);
+      for (const f of TARGET_FILES) {
+        const kept = read(f);
+        expect(kept.endsWith(`${RETAINED_START}\n## Session notes\n- keep tabs\n${RETAINED_END}\n`), f).toBe(true);
+        await run(['compile', '--target', TARGET_OF_FILE[f], '--write']);
+        expect(read(f), f).toBe(kept);
+      }
+      expect((await run(['compile', '--target', 'all', '--check'])).code).toBe(0);
+    });
+
+    it('--force discards it and lists it in retainedSkipped', async () => {
+      await setupRemoved();
+      const r = await runJson<SkipJson>(['compile', '--target', 'all', '--write', '--force']);
+      expect(r.code).toBe(0);
+      for (const t of r.json.targets) expect(t, t.file).toMatchObject({ status: 'written', retainedSkipped: ['## Session notes'], retainedAmbiguous: [] });
+      expect(r.err).toContain('CLAUDE.md: ## Session notes was discarded (--force)');
+      for (const f of TARGET_FILES) expect(read(f), f).toBe(await fresh(TARGET_OF_FILE[f]));
+    });
+  });
 
   it('does not carry a legacy section whose heading is in a current .ai/ module (rule b)', () => {
     const c = composeCompiled(FRESH, `${FRESH}\n## Session notes\n- old\n`, 'CLAUDE.md', { aiLines: new Set(['## Session notes']) });

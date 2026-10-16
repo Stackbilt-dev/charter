@@ -46,7 +46,7 @@ import {
 import { countExtractable, readRetainedSections } from './adf-tidy';
 import { inferVendorMode, readVendorRecord, recordedSpelling, recordVendorModes, resolveVendorMode } from './adf-vendor';
 import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
-import { composeCompiled, linesConvertWouldDrop, readAiModuleLines, RETAINED_MSG } from './adf-retained';
+import { composeCompiled, linesConvertWouldDrop, readAiModuleLines, RETAINED_END, RETAINED_MSG, RETAINED_START } from './adf-retained';
 import type { RetainedSource } from './adf-retained';
 
 // ============================================================================
@@ -75,6 +75,8 @@ export const MSG = {
   refusedBloated: '  [warn] Refused to compile {file}: it carries {n} item(s) beyond the pointer that .ai/ does not hold yet.\n         Move them into .ai/ first: charter adf tidy --source {file}\n         Or discard them: charter adf compile --target {target} --write --mode compiled --force  (discards {n} item(s))',
   refusedWouldDrop: "  [warn] Refused to compile {file}: {n} line(s) of yours would be lost ({lines}).\n         Move them under ## Environment or into a .ai/ module, or discard them: charter adf compile --target {target} --write --mode compiled --force  (discards {n} line(s))",
   collision: '{file}: your retained section {heading} has the same heading as a compiled section; both are kept.',
+  refusedAmbiguous: '  [warn] Refused to compile {file}: {headings} sit(s) inside a section .ai/ no longer renders that way, and no .ai/ module holds that heading.\n         It may be stale compiler output or your own text, so --write will not drop it.\n         Keep it: wrap it in place between these two lines, then re-run charter adf compile --target {target} --write\n           {start}\n           {end}\n         Or discard it: charter adf compile --target {target} --write --force  (discards: {headings})',
+  checkStaleAmbiguous: '  [stale] {file} — {headings} may be stale compiler output from .ai/ or your own text; --write refuses until you decide.\n          Keep it: wrap it in place between these two lines, then run charter adf compile --target {target} --write\n            {start}\n            {end}\n          Or discard it: charter adf compile --target {target} --write --force  (discards: {headings})',
   checkStaleUnfenced: '  [stale] {file} — your {headings} section(s) sit outside the retained block.\n          Run: charter adf compile --target {target} --write  (keeps them)',
   nothingCompiled: '  No target is in compiled mode, so nothing was written. Pointer files stay pointers.\n  To switch them: charter adf compile --target all --write --mode compiled. To see modes: charter adf vendor status',
   checkFresh: '  [ok] {file} is up-to-date',
@@ -113,6 +115,11 @@ function targetState(aiDir: string, filename: string): TargetState {
   if (r.source === 'recorded') return { state: r.mode, source: 'recorded', exists, disagrees: r.disagrees, inferredMode };
   if (exists && inferredMode) return { state: inferredMode, source: 'inferred', exists, disagrees: false, inferredMode };
   return { state: 'absent-unrecorded', source: null, exists: false, disagrees: false, inferredMode: null };
+}
+
+/** The content-preserving remedy for an ambiguous legacy section: wrap it, then re-run (a comment names the manual step). */
+function ambiguousKeepRemedy(target: CompileTarget, file: string, headings: string): string {
+  return `charter adf compile --target ${target} --write  # after wrapping ${headings} in ${file} between ${RETAINED_START} and ${RETAINED_END}`;
 }
 
 function dedupe(items: string[]): string[] {
@@ -314,6 +321,7 @@ type WriteStatus =
   | 'refused-hand-authored'
   | 'refused-bloated'
   | 'refused-would-drop'
+  | 'refused-ambiguous'
   | 'refused-record';
 // 'refused-retained' is retired (#303): retained sections are carried, not refused over.
 
@@ -333,6 +341,8 @@ interface WriteTargetOutcome {
   retainedSource: RetainedSource;
   /** Legacy retained-heading sections not carried because they look like rendered .ai/ text. */
   retainedSkipped: string[];
+  /** Legacy sections that may be the user's or stale .ai/ output: the reason for refused-ambiguous. */
+  retainedAmbiguous: string[];
 }
 
 function runWriteMode(
@@ -357,7 +367,7 @@ function runWriteMode(
     const { state, source } = targetState(aiDir, filename);
     const row: WriteTargetOutcome = {
       target, file: filename, state, source, status: 'written', recordedMode: null, previousMode: null, remedy: null, writeError: null,
-      retainedSections: [], retainedSource: 'none', retainedSkipped: [],
+      retainedSections: [], retainedSource: 'none', retainedSkipped: [], retainedAmbiguous: [],
     };
     rows.push(row);
 
@@ -417,6 +427,17 @@ function runWriteMode(
     // output would NOT carry: bloat tidy can fold into .ai/, or other stray lines.
     const existing = fs.existsSync(filename) ? fs.readFileSync(filename, 'utf-8') : null;
     const composed = composeCompiled(result.output, existing, filename, { aiLines: readAiModuleLines(aiDir) });
+    // A legacy section that is either stale .ai/ output or the user's own is
+    // never dropped without --force: the user decides (wrap it, or --force).
+    if (composed.ambiguous.length > 0 && !flags.force) {
+      const headings = composed.ambiguous.join(', ');
+      row.status = 'refused-ambiguous';
+      row.retainedAmbiguous = composed.ambiguous;
+      row.remedy = ambiguousKeepRemedy(target, filename, headings);
+      extraActions.set(filename, `charter adf compile --target ${target} --write${modeSuffix} --force`);
+      if (!json) console.error(fill(MSG.refusedAmbiguous, { file: filename, headings, target, start: RETAINED_START, end: RETAINED_END }));
+      continue;
+    }
     // Decided by the file's markers, not by whether anything is carried: a
     // pointer with no retained sections can still hold bloat or stray lines.
     if (existing !== null && inferVendorMode(filename as VendorFile, existing).inferredMode === 'pointer' && !flags.force) {
@@ -487,8 +508,9 @@ function runWriteMode(
     if (state === 'pointer' || state === 'unmanaged') row.previousMode = state;
     row.retainedSections = composed.retainedSections;
     row.retainedSource = composed.retainedSource;
-    row.retainedSkipped = composed.skipped;
+    row.retainedSkipped = [...composed.skipped, ...composed.ambiguous];
     for (const heading of composed.skipped) warn(fill(RETAINED_MSG.skipped, { file: filename, heading }));
+    for (const heading of composed.ambiguous) warn(fill(RETAINED_MSG.discarded, { file: filename, heading }));
     for (const heading of composed.collisions) warn(fill(MSG.collision, { file: filename, heading }));
     if (!json) {
       const headings = composed.retainedSections.join(', ');
@@ -554,7 +576,7 @@ interface CheckTargetResult {
   extractable: number | null;
   remedy: string | null;
   /** Set iff status is stale: 'retained-unfenced' when retained sections sit outside the retained block, else 'content'. */
-  staleReason: 'content' | 'retained-unfenced' | null;
+  staleReason: 'content' | 'retained-unfenced' | 'retained-ambiguous' | null;
 }
 
 /**
@@ -563,7 +585,7 @@ interface CheckTargetResult {
  */
 function collapseCompileRemedies(rows: CheckTargetResult[], nextActions: string[]): string[] {
   const failing = rows.filter(r => FAILING_CHECK_STATUSES.includes(r.status));
-  const plain = failing.every(r => (r.status === 'stale' || r.status === 'missing') && r.mode !== 'pointer');
+  const plain = failing.every(r => (r.status === 'stale' || r.status === 'missing') && r.mode !== 'pointer' && r.staleReason !== 'retained-ambiguous');
   return rows.length > 1 && failing.length > 0 && plain ? ['charter adf compile --target all --write'] : nextActions;
 }
 
@@ -629,10 +651,18 @@ function runCheckMode(
       } else {
         row.status = 'stale';
         row.remedy = compileRemedy;
-        row.staleReason = composed.unfenced.length > 0 ? 'retained-unfenced' : 'content';
-        print(row.staleReason === 'retained-unfenced'
-          ? fill(MSG.checkStaleUnfenced, { file, headings: composed.unfenced.join(', '), target })
-          : fill(MSG.checkStale, { file, aiDir: displayAiDir, target }));
+        if (composed.ambiguous.length > 0) {
+          const headings = composed.ambiguous.join(', ');
+          row.staleReason = 'retained-ambiguous';
+          row.remedy = ambiguousKeepRemedy(target, file, headings);
+          nextActions.push(row.remedy, `${compileRemedy} --force`);
+          print(fill(MSG.checkStaleAmbiguous, { file, headings, target, start: RETAINED_START, end: RETAINED_END }));
+        } else {
+          row.staleReason = composed.unfenced.length > 0 ? 'retained-unfenced' : 'content';
+          print(row.staleReason === 'retained-unfenced'
+            ? fill(MSG.checkStaleUnfenced, { file, headings: composed.unfenced.join(', '), target })
+            : fill(MSG.checkStale, { file, aiDir: displayAiDir, target }));
+        }
       }
     } else if (ts.state === 'pointer') {
       // A pointer is checked for being intact, never against compiled output.

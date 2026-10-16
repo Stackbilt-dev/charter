@@ -542,7 +542,7 @@ Default with no `--write` or `--check` prints to stdout, single target only.
 | pointer | skipped (its `[skip]` line names the command), exit 0 | refused, exit 1 | record set to compiled, then written as `Written CLAUDE.md (mode: pointer -> compiled)` |
 | unmanaged | skipped, exit 0 | refused, exit 1 | as pointer, but an existing hand-authored file also needs `--force` |
 
-When every target is skipped, compile says that nothing was written and how to switch. JSON output keeps `written`, `refused` and `nextActions`, and adds `skipped` and `targets` (one row per target: `state`, `source`, `status`, `recordedMode`, `previousMode`, `remedy`, `writeError`, `retainedSections`, `retainedSource`, `retainedSkipped`). `previousMode` (`pointer` or `unmanaged`) is how a JSON consumer tells a conversion from a re-compile.
+When every target is skipped, compile says that nothing was written and how to switch. JSON output keeps `written`, `refused` and `nextActions`, and adds `skipped` and `targets` (one row per target: `state`, `source`, `status`, `recordedMode`, `previousMode`, `remedy`, `writeError`, `retainedSections`, `retainedSource`, `retainedSkipped`, `retainedAmbiguous`). `previousMode` (`pointer` or `unmanaged`) is how a JSON consumer tells a conversion from a re-compile.
 
 **Retained sections.** Compiled output keeps your own `## Environment` section and the other sections `adf tidy` retains (`## Session ...` other than `## Session Start`, and headings containing Protocol, Receipt, Provenance or Registration). They live in a block at the very end of the file, after the module index:
 
@@ -564,7 +564,11 @@ When every target is skipped, compile says that nothing was written and how to s
 
 A file with nothing to carry gets no block, so its output is byte-identical to the plain render. The block uses the HTML markers in every target, `.cursorrules` included. Sections keep their source order, and the output is LF. A carried section whose heading matches a compiled one (say `## CONTEXT`) is kept, with a warning on stderr. The written line names what was kept: `Written CLAUDE.md (kept ## Environment)`. `adf compile` without `--write` prints the plain render, with no block. `adf tidy`, `doctor` and `adf migrate` ignore the block, because it is a Charter sentinel.
 
-A retained-looking section that is really rendered `.ai/` text is not carried. This covers a `## Session notes` or `## Environment` line inside a `.ai/` text value, left in the compiled file after you edited or removed that value. Two signs mark such a section. It sits inside a generated section's span (from a `## KEY` heading to the next generated heading or the module index) that no longer matches the current render. Or its heading appears in a current `.ai/` module. Compile prints `<file>: <heading> was not carried: it looks like compiler output from .ai/. If it is yours, move it into the retained block.` and lists the heading in the row's `retainedSkipped`. A section appended after the last rendered section is still carried when that section matches the current render.
+A retained-looking section can really be rendered `.ai/` text: a `## Session notes` or `## Environment` line inside a `.ai/` text value, left in the compiled file after you edited or removed that value. Compile handles such sections as follows:
+
+- If its heading appears in a current `.ai/` module, it is compiler output. It is not carried. Compile prints `<file>: <heading> was not carried: it looks like compiler output from .ai/. If it is yours, move it into the retained block.` and lists it in the row's `retainedSkipped`.
+- If it sits inside a generated section's span (from a `## KEY` heading to the next generated heading or the module index) that no longer matches the current render, and no `.ai/` module holds its heading, it could be stale output or your own text. `--write` will not drop it. That target is refused as `refused-ambiguous` (exit 1, nothing written, `VENDORS` unchanged), named in `retainedAmbiguous`. The first remedy keeps it: wrap it in place between `<!-- charter:retained:start -->` and `<!-- charter:retained:end -->` (the two lines are printed), then re-run `--write`. The second, `--write --force`, discards it and lists it in `retainedSkipped`. `--check` reads such a file as `stale` with `staleReason: "retained-ambiguous"` and gives the same two remedies.
+- A section appended after the last rendered section is still carried when that section matches the current render.
 
 Parsing follows Markdown. A `## ` line, a module index fence or a retained marker inside a ```` ``` ```` or `~~~` code fence is text, and an indented `    ## x` is code, not a heading. Marker lines match with the same loose whitespace that `stripCharterSentinels` accepts (`<!--charter:retained:start-->` works). A marker line that the render itself contains, quoted in a `.ai/` text value, never starts the block.
 
@@ -584,7 +588,7 @@ Limitations:
 
 | Status | When | Exit |
 |---|---|---|
-| `fresh` / `stale` | compiled: the file equals / differs from what `--write` would write, which is the render plus the file's own retained block (remedy: `compile --target <t> --write`). `staleReason` is `retained-unfenced` when retained sections sit outside the block (the remedy keeps them), else `content` | 0 / 1 |
+| `fresh` / `stale` | compiled: the file equals / differs from what `--write` would write, which is the render plus the file's own retained block (remedy: `compile --target <t> --write`). `staleReason` is `retained-ambiguous` when a legacy section may be stale `.ai/` output or yours (see retained sections), `retained-unfenced` when retained sections sit outside the block (the remedy keeps them), else `content` | 0 / 1 |
 | `missing` | no file on disk (a recorded pointer suggests `adf vendor restore <file>` or `adf vendor set <file> unmanaged`) | 1 |
 | `pointer-ok` | pointer with nothing `adf tidy` would extract | 0 |
 | `pointer-bloated` | pointer carrying content that belongs in `.ai/` (remedy: `adf tidy --source <file>`) | 1 |

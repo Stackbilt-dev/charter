@@ -61,6 +61,7 @@ const MODULE_INDEX_FENCE_LINES = new Set(['<!-- agents-modules -->', '<!-- /agen
 
 export const RETAINED_MSG = {
   skipped: '{file}: {heading} was not carried: it looks like compiler output from .ai/. If it is yours, move it into the retained block.',
+  discarded: '{file}: {heading} was discarded (--force): it sat inside a section .ai/ no longer renders that way.',
 } as const;
 
 /**
@@ -90,6 +91,12 @@ export interface ComposedCompiled {
   unfenced: string[];
   /** Legacy retained-heading sections NOT carried because they look like rendered .ai/ text. */
   skipped: string[];
+  /**
+   * Legacy retained-heading sections inside a generated section the render no
+   * longer matches, whose heading no .ai/ module holds: stale compiler output or
+   * the user's own, which cannot be told apart. --write refuses over them.
+   */
+  ambiguous: string[];
   /** Block content a pointer could not keep as retained: non-retained headings, or text before the first heading. */
   blockOther: string[];
   /** Carried headings that equal a heading the fresh render emits (both are kept). */
@@ -243,26 +250,32 @@ interface FreshContext {
 /**
  * User sections in compiled text with no block (or outside one): retained headings
  * the renderer could not have produced, other than `## Module Index`. A section the
- * render accounts for is ignored. One that sits inside a generated section the
- * render no longer matches, or whose heading is in a current .ai/ module, is
+ * render accounts for is ignored. One whose heading is in a current .ai/ module is
  * rendered .ai/ text gone stale: it is not carried, and is reported (`skipped`).
+ * One that sits inside a generated section the render no longer matches, with no
+ * .ai/ match, is `ambiguous`: it may be stale output or the user's own.
  */
-function legacySections(lines: string[], code: CodeMask, from: number, to: number, ctx: FreshContext): { carry: Section[]; skipped: string[] } {
+function legacySections(lines: string[], code: CodeMask, from: number, to: number, ctx: FreshContext): { carry: Section[]; skipped: string[]; ambiguous: string[] } {
   const spans = renderedSpans(lines, code, from, to, ctx.lines, ctx.code);
   const carry: Section[] = [];
   const skipped: string[] = [];
+  const ambiguous: string[] = [];
   for (const s of sectionsOf(lines, code, from, to)) {
     if (!isRetained(s.heading) || GENERATED_HEADING_RE.test(s.heading) || s.heading === '## Module Index') continue;
     const span = spans.find(sp => s.start > sp.start && s.start < sp.end);
     const text = trimBlankEdges(lines.slice(s.start, s.end)).join('\n');
     if (ctx.fresh.includes(text)) continue;
-    if (span || ctx.aiLines.has(s.heading)) {
+    if (ctx.aiLines.has(s.heading)) {
       skipped.push(s.heading);
+      continue;
+    }
+    if (span) {
+      ambiguous.push(s.heading);
       continue;
     }
     carry.push(s);
   }
-  return { carry, skipped };
+  return { carry, skipped, ambiguous };
 }
 
 const sectionLines = (lines: string[], s: Section): string[] =>
@@ -340,7 +353,7 @@ export function readAiModuleLines(aiDir: string): Set<string> {
  */
 export function composeCompiled(fresh: string, existing: string | null, file: string, opts: ComposeOptions = {}): ComposedCompiled {
   const none: ComposedCompiled = {
-    output: fresh, retainedSections: [], retainedSource: 'none', body: '', unfenced: [], skipped: [], blockOther: [], collisions: [], generated: existing ?? '',
+    output: fresh, retainedSections: [], retainedSource: 'none', body: '', unfenced: [], skipped: [], ambiguous: [], blockOther: [], collisions: [], generated: existing ?? '',
   };
   if (existing === null) return none;
 
@@ -358,6 +371,7 @@ export function composeCompiled(fresh: string, existing: string | null, file: st
   let body: string[];
   let unfenced: string[] = [];
   let skipped: string[] = [];
+  let ambiguous: string[] = [];
   let blockOther: string[] = [];
   let block: string | null = null;
 
@@ -382,9 +396,10 @@ export function composeCompiled(fresh: string, existing: string | null, file: st
     const inner = lines.slice(start + 1, end);
     const blockBody = trimBlankEdges(inner.filter(l => !isNote(l)));
     const before = legacySections(lines, fullCode, 0, start, ctx);
-    const after = closed ? legacySections(lines, codeMask(lines, end + 1), end + 1, lines.length, ctx) : { carry: [], skipped: [] };
+    const after = closed ? legacySections(lines, codeMask(lines, end + 1), end + 1, lines.length, ctx) : { carry: [], skipped: [], ambiguous: [] };
     unfenced = [...before.carry, ...after.carry].map(s => s.heading);
     skipped = [...before.skipped, ...after.skipped];
+    ambiguous = [...before.ambiguous, ...after.ambiguous];
     const beforeLines = before.carry.map(take);
     const afterLines = after.carry.map(take);
     body = joinSections([...beforeLines, blockBody, ...afterLines]);
@@ -403,6 +418,7 @@ export function composeCompiled(fresh: string, existing: string | null, file: st
       const found = legacySections(lines, fullCode, 0, lines.length, ctx);
       unfenced = found.carry.map(s => s.heading);
       skipped = found.skipped;
+      ambiguous = found.ambiguous;
       body = joinSections(found.carry.map(take));
       source = 'legacy';
     } else if (mode === 'pointer') {
@@ -416,14 +432,14 @@ export function composeCompiled(fresh: string, existing: string | null, file: st
   }
 
   const generated = lines.filter((_, i) => !removed.has(i)).join('\n');
-  if (body.length === 0 && block === null) return { ...none, skipped, generated };
+  if (body.length === 0 && block === null) return { ...none, skipped, ambiguous, generated };
 
   const retainedSections = headingsOf(body);
   const freshHeadings = new Set(headingsOf(freshLines).map(withoutWeight));
   const collisions = retainedSections.filter(h => freshHeadings.has(withoutWeight(h)));
   const output = fresh.trimEnd() + '\n\n' + (block ?? newBlock(body));
   return {
-    output, retainedSections, retainedSource: source, body: body.join('\n'), unfenced, skipped, blockOther, collisions, generated,
+    output, retainedSections, retainedSource: source, body: body.join('\n'), unfenced, skipped, ambiguous, blockOther, collisions, generated,
   };
 }
 
