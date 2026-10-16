@@ -36,7 +36,8 @@ npx @stackbilt/cli score
 npx @stackbilt/cli bootstrap --yes
 
 # 3. Generate every vendor file from the same modular source
-npx charter adf compile --target all --write
+#    (bootstrap writes thin pointers; --mode compiled switches them to compiled output)
+npx charter adf compile --target all --write --mode compiled
 ```
 
 ```text
@@ -254,7 +255,7 @@ For live session continuity snapshots, use `charter context-refresh` to produce 
 | I want to compile task-specific agent context | `charter adf bundle --task "Fix the login flow"` |
 | I want to enforce metric/file-size ceilings | `charter adf evidence --auto-measure --ci` |
 | I want to migrate existing agent docs | `charter adf migrate --dry-run` |
-| I want to regenerate CLAUDE.md / AGENTS.md / .cursorrules / GEMINI.md from `.ai/` | `charter adf compile --target all --write` |
+| I want to regenerate CLAUDE.md / AGENTS.md / .cursorrules / GEMINI.md from `.ai/` | `charter adf compile --target all --write` (add `--mode compiled` to convert pointer files) |
 | I want a letter-grade AI-readiness audit | `charter score` |
 | I want to validate governance in CI | `charter validate --ci --format json` |
 | I want to check pattern drift | `charter drift --ci --format json` |
@@ -287,7 +288,9 @@ charter adf init                         # Scaffold .ai/ directory
 charter adf bundle --task "..."          # Merge context for a task
 charter adf evidence --auto-measure      # Validate metric constraints
 charter adf migrate                      # Migrate existing configs
-charter adf compile --target all --write # Render .ai/ to CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
+charter adf compile --target all --write # Re-render compiled-mode CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
+charter adf compile --target all --write --mode compiled # Switch pointer files to compiled output
+charter adf vendor status                # Show each vendor file's mode (pointer, compiled, unmanaged)
 charter adf patch <file> --ops <json>   # Apply structured patch operations to an ADF file
 charter adf sync --check                 # Verify files match lock
 charter adf fmt .ai/core.adf --write     # Reformat to canonical form

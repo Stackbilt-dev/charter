@@ -63,7 +63,8 @@ export const AGENT_CONFIG_FILES = [
  */
 export function fileIdentity(fullPath: string): string {
   try {
-    const st = fs.statSync(fullPath);
+    // bigint: NTFS file indexes exceed 2^53, so a number ino can collide (#318).
+    const st = fs.statSync(fullPath, { bigint: true });
     if (st.ino) return `${st.dev}:${st.ino}`;
   } catch {
     // Fall through to the path-based identities below.

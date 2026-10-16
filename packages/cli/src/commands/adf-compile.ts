@@ -9,8 +9,13 @@
  *
  * Usage:
  *   charter adf compile --target <claude|agents|cursor|gemini>
- *   charter adf compile --target all --write
+ *   charter adf compile --target all --write [--mode compiled]
  *   charter adf compile --target claude --check
+ *
+ * Each target's mode comes from the VENDORS record in manifest.adf, else from its
+ * markers (#318). --write compiles only targets in compiled mode (or absent);
+ * converting a pointer or unmanaged file needs --mode compiled, which records the
+ * switch first. --check verifies each target by its mode.
  */
 
 import * as fs from 'node:fs';
@@ -35,8 +40,9 @@ import {
   POINTER_CURSORRULES,
   POINTER_GEMINI_MD,
 } from './adf';
-import { readRetainedSections } from './adf-tidy';
-import { recordWrittenVendorModes } from './adf-vendor';
+import { countExtractable, readRetainedSections } from './adf-tidy';
+import { readVendorRecord, recordedSpelling, recordVendorModes, resolveVendorMode } from './adf-vendor';
+import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 
 // ============================================================================
 // Zod validation — at the CLI boundary per Zod-core-out architecture
@@ -44,6 +50,60 @@ import { recordWrittenVendorModes } from './adf-vendor';
 
 const CompileTargetOrAllSchema = z.enum(['claude', 'agents', 'cursor', 'gemini', 'all']);
 type CompileTargetOrAll = z.infer<typeof CompileTargetOrAllSchema>;
+
+export const COMPILE_MODE_FLAG_ERRORS = {
+  notWithWrite: '--mode requires --write.',
+  badValue: "--mode accepts only 'compiled'. To make a file a pointer: charter adf vendor set <file> pointer",
+} as const;
+
+export const MSG = {
+  skippedMode: '  [skip] {file} is {mode} ({source}); not compiled. To switch it to compiled output: charter adf compile --target {target} --write --mode compiled',
+  refusedModeChange: '  [warn] Refused to compile {file}: it is {mode} ({source}), and writing compiled output would change its mode.\n         Run: charter adf compile --target {target} --write --mode compiled',
+  refusedRecord: '  [warn] Refused to compile {file}: its mode could not be recorded as compiled in {manifestPath}. Nothing was written. Fix the manifest or run: charter adf vendor status',
+  writtenSwitched: '  [ok] Written {file} (mode: {previous} -> compiled)',
+  writtenOk: '  [ok] Written {file}',
+  nothingCompiled: '  No target is in compiled mode, so nothing was written. Pointer files stay pointers.\n  To switch them: charter adf compile --target all --write --mode compiled. To see modes: charter adf vendor status',
+  checkFresh: '  [ok] {file} is up-to-date',
+  checkPointerOk: '  [ok] {file} is a thin pointer to {aiDir}/ ({source})',
+  checkSkippedUnmanaged: '  [skip] {file} is unmanaged ({source}); not checked',
+  checkStale: '  [stale] {file} — out of date with {aiDir}/ source.\n          Run: charter adf compile --target {target} --write',
+  checkMissingCompiled: '  [missing] {file} — not found on disk.\n          Run: charter adf compile --target {target} --write',
+  checkMissingPointer: '  [missing] {file} — recorded as a pointer but not found on disk.\n          Restore it (git checkout -- {file}), or stop tracking it: charter adf vendor set {file} unmanaged',
+  checkPointerBloated: '  [bloated] {file} — thin pointer carries {n} item(s) that belong in {aiDir}/.\n          Run: charter adf tidy --source {file}',
+  checkModeDrift: '  [drift] {file} — recorded as {recorded} but looks {inferred} on disk.\n          Keep the file as it is: charter adf vendor set {file} {inferred}\n          Or make it match the record: {restore}',
+} as const;
+
+function fill(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => (key in values ? String(values[key]) : whole));
+}
+
+/** A target's state before this run: its recorded mode, else its inferred one, else absent. */
+export type CompileTargetState = VendorMode | 'absent-unrecorded';
+
+interface TargetState {
+  state: CompileTargetState;
+  source: ModeSource | null;
+  exists: boolean;
+  disagrees: boolean;
+  inferredMode: VendorMode | null;
+}
+
+/**
+ * Derive a target's state (COMPILE_STATE_RULES). The resolver's 'unmanaged'
+ * fallback for an absent, unrecorded file is NOT reused: compile must still
+ * write a fresh target in a repo that has no vendor files yet.
+ */
+function targetState(aiDir: string, filename: string): TargetState {
+  const r = resolveVendorMode(aiDir, filename as VendorFile);
+  const { exists, inferredMode } = r.evidence;
+  if (r.source === 'recorded') return { state: r.mode, source: 'recorded', exists, disagrees: r.disagrees, inferredMode };
+  if (exists && inferredMode) return { state: inferredMode, source: 'inferred', exists, disagrees: false, inferredMode };
+  return { state: 'absent-unrecorded', source: null, exists: false, disagrees: false, inferredMode: null };
+}
+
+function dedupe(items: string[]): string[] {
+  return [...new Set(items)];
+}
 
 // ============================================================================
 // Entry point
@@ -75,6 +135,11 @@ export function adfCompileCommand(options: CLIOptions, args: string[]): number {
   if (writeMode && checkMode) {
     throw new CLIError('--write and --check are mutually exclusive.');
   }
+  if (args.includes('--mode')) {
+    if (!writeMode) throw new CLIError(COMPILE_MODE_FLAG_ERRORS.notWithWrite);
+    if (getFlag(args, '--mode') !== 'compiled') throw new CLIError(COMPILE_MODE_FLAG_ERRORS.badValue);
+  }
+  const modeCompiled = args.includes('--mode');
 
   const manifestPath = path.join(aiDir, 'manifest.adf');
   if (!fs.existsSync(manifestPath)) {
@@ -96,7 +161,11 @@ export function adfCompileCommand(options: CLIOptions, args: string[]): number {
   }
 
   if (writeMode) {
-    return runWriteMode(options, targets, aiDir, displayAiDir, readFile, forceWrite);
+    return runWriteMode(options, targets, aiDir, displayAiDir, readFile, {
+      force: forceWrite,
+      modeCompiled,
+      all: targetOrAll === 'all',
+    });
   }
 
   // Default: stdout (single target only in non-write/check mode)
@@ -216,40 +285,91 @@ function divergentRetainedHeadings(existing: string, filename: string): string[]
   return divergent;
 }
 
+interface WriteFlags {
+  force: boolean;
+  /** --mode compiled: convert pointer and unmanaged targets, recording the switch first. */
+  modeCompiled: boolean;
+  /** --target all: a target in another mode is skipped, not refused. */
+  all: boolean;
+}
+
+type WriteStatus =
+  | 'written'
+  | 'skipped-mode'
+  | 'refused-mode-change'
+  | 'refused-hand-authored'
+  | 'refused-retained'
+  | 'refused-record';
+
+interface WriteTargetOutcome {
+  target: CompileTarget;
+  file: string;
+  state: CompileTargetState;
+  source: ModeSource | null;
+  status: WriteStatus;
+  recordedMode: VendorMode | null;
+  previousMode: VendorMode | null;
+  remedy: string | null;
+}
+
 function runWriteMode(
   options: CLIOptions,
   targets: CompileTarget[],
   aiDir: string,
   displayAiDir: string,
   readFile: (p: string) => string,
-  force: boolean,
+  flags: WriteFlags,
 ): number {
-  const written: string[] = [];
-  const refused: string[] = [];
+  const json = options.format === 'json';
+  const manifestPath = path.join(aiDir, 'manifest.adf');
+  const warn = (w: string): void => (json ? console.warn(`Warning: ${w}`) : console.error(`  [warn] ${w}`));
+  const rows: WriteTargetOutcome[] = [];
+  const addIfAbsent: Array<{ file: VendorFile; mode: VendorMode }> = [];
+  const modeSuffix = flags.modeCompiled ? ' --mode compiled' : '';
 
   for (const target of targets) {
     const filename = TARGET_FILENAMES[target];
+    const { state, source } = targetState(aiDir, filename);
+    const row: WriteTargetOutcome = {
+      target, file: filename, state, source, status: 'written', recordedMode: null, previousMode: null, remedy: null,
+    };
+    rows.push(row);
+
+    // A pointer or unmanaged file changes mode only under --mode compiled (#318).
+    // --force alone never converts one: it means "overwrite hand-authored content".
+    if ((state === 'pointer' || state === 'unmanaged') && !flags.modeCompiled) {
+      row.remedy = `charter adf compile --target ${target} --write --mode compiled`;
+      const values = { file: filename, mode: state, source: source ?? 'inferred', target };
+      if (flags.all) {
+        row.status = 'skipped-mode';
+        if (!json) console.log(fill(MSG.skippedMode, values));
+      } else {
+        row.status = 'refused-mode-change';
+        if (!json) console.error(fill(MSG.refusedModeChange, values));
+      }
+      continue;
+    }
 
     // Overwrite protection: refuse to clobber a hand-written file.
     //
     // Charter-owned files are safe to replace: compile artifacts (which carry the
     // banner) and the thin pointer stubs written by `bootstrap` and
     // `adf init --emit-pointers`. CHARTER_OWNED_MARKERS covers both — it is the
-    // banner plus every pointer marker. The pointer half is what stops the first
-    // compile after a clean bootstrap refusing every file Charter itself just
-    // wrote (#295); the banner half keeps re-compiles working.
+    // banner plus every pointer marker. The pointer half is what lets
+    // `--mode compiled` convert a clean bootstrap pointer without --force (#295);
+    // the banner half keeps re-compiles working.
     //
     // This is the OWNERSHIP question, not the pointer-shape question — see the
     // note on the two marker lists in adf.ts. Do not narrow it to
     // POINTER_MARKERS: that drops the banner, and every re-compile over an
     // existing artifact would then refuse without --force (pinned by
     // adf-compile.test.ts, 'overwrites a previous compile artifact').
-    let replacedPointer = false;
-    if (fs.existsSync(filename) && !force) {
+    if (fs.existsSync(filename) && !flags.force) {
       const existing = fs.readFileSync(filename, 'utf-8');
       if (!CHARTER_OWNED_MARKERS.some(marker => existing.includes(marker))) {
-        refused.push(filename);
-        if (options.format !== 'json') {
+        row.status = 'refused-hand-authored';
+        row.remedy = `charter adf compile --target ${target} --write${modeSuffix} --force`;
+        if (!json) {
           console.error(
             `  [warn] Refused to overwrite ${filename} — hand-authored content found.\n` +
             `         Pass --force to overwrite. This protects hand-authored CLAUDE.md files.`,
@@ -257,18 +377,15 @@ function runWriteMode(
         }
         continue;
       }
-      // Charter-owned, but not a previous compile artifact — the file is being
-      // converted from a pointer stub to compiled output. Surface the mode switch.
-      replacedPointer = !existing.includes(COMPILE_BANNER_MARKER);
-
       // A pointer stub the user has written notes into is not disposable: the
       // compiler emits no Environment or Protocol section, and `adf tidy` routes
       // none of it into .ai/, so overwriting would destroy it outright.
-      if (replacedPointer) {
+      if (!existing.includes(COMPILE_BANNER_MARKER)) {
         const divergent = divergentRetainedHeadings(existing, filename);
         if (divergent.length > 0) {
-          refused.push(filename);
-          if (options.format !== 'json') {
+          row.status = 'refused-retained';
+          row.remedy = `charter adf compile --target ${target} --write${modeSuffix} --force`;
+          if (!json) {
             console.error(
               `  [warn] Refused to overwrite ${filename} — it is a charter pointer carrying your own\n` +
               `         content under ${divergent.join(', ')}. Compiled output has no such section,\n` +
@@ -281,41 +398,92 @@ function runWriteMode(
       }
     }
 
+    // Render first: a compile error then leaves both record and file untouched.
     const result = compileAdf({ target, aiDir, displayAiDir, readFile });
-    fs.writeFileSync(filename, result.output, 'utf-8');
-    written.push(filename);
 
-    if (options.format !== 'json') {
-      console.log(
-        `  [ok] Written ${filename}${replacedPointer ? ' (replaced charter pointer stub)' : ''}`,
-      );
+    // --mode compiled: record the mode BEFORE writing, so a half-done switch can
+    // never leave record and file disagreeing. A skipped upsert writes nothing.
+    if (flags.modeCompiled && state !== 'absent-unrecorded') {
+      let recorded = false;
+      try {
+        const outcome = recordVendorModes(manifestPath, [{ file: filename as VendorFile, mode: 'compiled' }], 'upsert', { onWarning: warn });
+        recorded = outcome.results.every(r => r.status !== 'skipped');
+      } catch (err: unknown) {
+        warn(`Vendor modes were not recorded: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (!recorded) {
+        row.status = 'refused-record';
+        row.remedy = 'charter adf vendor status';
+        if (!json) console.error(fill(MSG.refusedRecord, { file: filename, manifestPath }));
+        continue;
+      }
+    } else {
+      addIfAbsent.push({ file: filename as VendorFile, mode: 'compiled' });
+    }
+
+    fs.writeFileSync(filename, result.output, 'utf-8');
+    if (state === 'pointer' || state === 'unmanaged') row.previousMode = state;
+    if (!json) {
+      console.log(row.previousMode
+        ? fill(MSG.writtenSwitched, { file: filename, previous: row.previousMode })
+        : fill(MSG.writtenOk, { file: filename }));
     }
   }
 
-  // Record each written target as compiled, add-if-absent (#318). Warnings only.
-  recordWrittenVendorModes(aiDir, written, 'compiled', 'adf compile --write', w =>
-    options.format === 'json' ? console.warn(`Warning: ${w}`) : console.error(`  [warn] ${w}`));
+  // Record each target written without --mode as compiled, add-if-absent. Its
+  // state was compiled or absent, so this never contradicts an entry. Warnings only.
+  if (addIfAbsent.length > 0) {
+    try {
+      recordVendorModes(manifestPath, addIfAbsent, 'add-if-absent', { onWarning: warn });
+    } catch (err: unknown) {
+      warn(`Vendor modes were not recorded: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const record = readVendorRecord(manifestPath);
+  for (const row of rows) {
+    row.recordedMode = record.recorded.get(recordedSpelling(row.file as VendorFile, record.recorded))?.mode ?? null;
+  }
 
-  if (options.format === 'json') {
+  const refused = rows.filter(r => r.status.startsWith('refused-'));
+  const skipped = rows.filter(r => r.status === 'skipped-mode');
+  if (!json && skipped.length === rows.length) console.log(MSG.nothingCompiled);
+
+  if (json) {
+    const remedies = dedupe([...refused, ...skipped].map(r => r.remedy).filter((r): r is string => r !== null));
     console.log(JSON.stringify({
-      written,
-      refused,
-      nextActions: refused.length > 0
-        ? ['charter adf compile --target all --write --force  # to overwrite protected files']
+      written: rows.filter(r => r.status === 'written').map(r => r.file),
+      refused: refused.map(r => r.file),
+      skipped: skipped.map(r => r.file),
+      targets: rows,
+      nextActions: remedies.length > 0
+        ? remedies
         : ['charter adf compile --target all --check  # to verify files are up-to-date'],
     }, null, 2));
   }
 
-  // If any targets were refused and we wrote nothing, that's a policy error
-  if (refused.length > 0 && written.length === 0) {
-    return EXIT_CODE.POLICY_VIOLATION;
-  }
-  // Partial writes (some refused): report as policy violation so CI can catch it
-  if (refused.length > 0) {
-    return EXIT_CODE.POLICY_VIOLATION;
-  }
+  // Any refusal is a policy violation so CI can catch it; skips are a respected choice.
+  return refused.length > 0 ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+}
 
-  return EXIT_CODE.SUCCESS;
+type CheckStatus =
+  | 'fresh'
+  | 'stale'
+  | 'missing'
+  | 'pointer-ok'
+  | 'pointer-bloated'
+  | 'mode-drift'
+  | 'skipped-unmanaged';
+
+const FAILING_CHECK_STATUSES: readonly CheckStatus[] = ['stale', 'missing', 'pointer-bloated', 'mode-drift'];
+
+interface CheckTargetResult {
+  target: CompileTarget;
+  file: string;
+  mode: VendorMode | null;
+  source: ModeSource | null;
+  status: CheckStatus;
+  extractable: number | null;
+  remedy: string | null;
 }
 
 function runCheckMode(
@@ -325,55 +493,84 @@ function runCheckMode(
   displayAiDir: string,
   readFile: (p: string) => string,
 ): number {
-  const stale: string[] = [];
-  const current: string[] = [];
-  const missing: string[] = [];
+  const json = options.format === 'json';
+  const rows: CheckTargetResult[] = [];
+  const nextActions: string[] = [];
+  const print = (line: string): void => {
+    if (!json) console.log(line);
+  };
 
   for (const target of targets) {
-    const filename = TARGET_FILENAMES[target];
+    const file = TARGET_FILENAMES[target];
+    const ts = targetState(aiDir, file);
+    const mode = ts.state === 'absent-unrecorded' ? null : ts.state;
+    const row: CheckTargetResult = { target, file, mode, source: ts.source, status: 'fresh', extractable: null, remedy: null };
+    rows.push(row);
+    const source = ts.source ?? 'inferred';
+    const compileRemedy = `charter adf compile --target ${target} --write`;
 
-    if (!fs.existsSync(filename)) {
-      missing.push(filename);
-      if (options.format !== 'json') {
-        console.log(`  [missing] ${filename} — not found on disk`);
+    if (ts.state === 'absent-unrecorded' || (!ts.exists && ts.state === 'compiled')) {
+      row.status = 'missing';
+      row.remedy = compileRemedy;
+      print(fill(MSG.checkMissingCompiled, { file, target }));
+    } else if (!ts.exists && ts.state === 'pointer') {
+      row.status = 'missing';
+      row.remedy = `git checkout -- ${file}`;
+      nextActions.push(row.remedy, `charter adf vendor set ${file} unmanaged`);
+      print(fill(MSG.checkMissingPointer, { file }));
+    } else if (ts.disagrees && ts.state !== 'unmanaged' && ts.inferredMode) {
+      // Recorded compiled|pointer, but the file looks like another mode: checking
+      // it as either mode would give a misleading remedy.
+      row.status = 'mode-drift';
+      const restore = ts.state === 'compiled'
+        ? `${compileRemedy}${ts.inferredMode === 'unmanaged' ? ' --force' : ''}`
+        : `git checkout -- ${file}`;
+      row.remedy = `charter adf vendor set ${file} ${ts.inferredMode}`;
+      nextActions.push(row.remedy, restore);
+      print(fill(MSG.checkModeDrift, { file, recorded: ts.state, inferred: ts.inferredMode, restore }));
+    } else if (ts.state === 'compiled') {
+      const onDisk = fs.readFileSync(file, 'utf-8');
+      const result = compileAdf({ target, aiDir, displayAiDir, readFile });
+      if (onDisk === result.output) {
+        print(fill(MSG.checkFresh, { file }));
+      } else {
+        row.status = 'stale';
+        row.remedy = compileRemedy;
+        print(fill(MSG.checkStale, { file, aiDir: displayAiDir, target }));
       }
-      continue;
-    }
-
-    const onDisk = fs.readFileSync(filename, 'utf-8');
-    const result = compileAdf({ target, aiDir, displayAiDir, readFile });
-
-    if (onDisk === result.output) {
-      current.push(filename);
-      if (options.format !== 'json') {
-        console.log(`  [ok] ${filename} is up-to-date`);
+    } else if (ts.state === 'pointer') {
+      // A pointer is checked for being intact, never against compiled output.
+      const n = countExtractable(file, aiDir);
+      if (n === 0) {
+        row.status = 'pointer-ok';
+        print(fill(MSG.checkPointerOk, { file, aiDir: displayAiDir, source }));
+      } else {
+        row.status = 'pointer-bloated';
+        row.extractable = n;
+        row.remedy = `charter adf tidy --source ${file}`;
+        print(fill(MSG.checkPointerBloated, { file, n, aiDir: displayAiDir }));
       }
     } else {
-      stale.push(filename);
-      if (options.format !== 'json') {
-        console.log(
-          `  [stale] ${filename} — out of date with .ai/ source.\n` +
-          `          Run: charter adf compile --target ${target} --write`,
-        );
-      }
+      row.status = 'skipped-unmanaged';
+      print(fill(MSG.checkSkippedUnmanaged, { file, source }));
     }
+    if (row.remedy) nextActions.push(row.remedy);
   }
 
-  if (options.format === 'json') {
-    const isStale = stale.length > 0 || missing.length > 0;
+  const failing = rows.some(r => FAILING_CHECK_STATUSES.includes(r.status));
+  if (json) {
+    const files = (...statuses: CheckStatus[]): string[] => rows.filter(r => statuses.includes(r.status)).map(r => r.file);
     console.log(JSON.stringify({
-      stale,
-      current,
-      missing,
-      upToDate: !isStale,
-      nextActions: isStale
-        ? ['charter adf compile --target all --write']
-        : [],
+      stale: files('stale', 'pointer-bloated', 'mode-drift'),
+      current: files('fresh', 'pointer-ok'),
+      missing: files('missing'),
+      skipped: files('skipped-unmanaged'),
+      upToDate: !failing,
+      targets: rows,
+      nextActions: dedupe(nextActions),
     }, null, 2));
   }
 
-  // Exit 1 if any file is stale or missing (CI drift gate)
-  return (stale.length > 0 || missing.length > 0)
-    ? EXIT_CODE.POLICY_VIOLATION
-    : EXIT_CODE.SUCCESS;
+  // Exit 1 if any target fails its mode's check (CI drift gate)
+  return failing ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
 }
