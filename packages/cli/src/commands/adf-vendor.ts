@@ -16,6 +16,7 @@
  * record the mode of a vendor file they just wrote).
  */
 
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { compileAdf, parseAdf, parseManifest, COMPILE_BANNER_MARKER, TARGET_FILENAMES } from '@stackbilt/adf';
@@ -23,7 +24,7 @@ import type { AdfDocument, CompileTarget, ManifestVendorEntry } from '@stackbilt
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { getGitErrorMessage, runGit } from '../git-helpers';
+import { getGitErrorMessage } from '../git-helpers';
 import {
   MODULE_INDEX_END,
   MODULE_INDEX_START,
@@ -166,6 +167,11 @@ export const MSG = {
   renamePlanned: '  [dry-run] Would rename agents.md -> AGENTS.md ({method}){recordNote}{titleNote}',
   renameStagedHint: '  The rename is staged. Commit it together with {paths}: git add {addArgs} && git commit',
   renameStagedOnly: '  The rename is staged. Commit it: git commit',
+  renameStagedNote: '  (git commit also records anything else you had already staged; check git status first.)',
+  renameIndexUnreadable: '  [warn] Could not read the git index (git ls-files failed), so agents.md may be tracked. Nothing was renamed. Check: git status',
+  renameNotRoot: '  [warn] Run rename-legacy from the repository root: {root}',
+  renameNotRootAiDir: '  [warn] --ai-dir {aiDir} is outside this directory. Run rename-legacy from the project root (the directory that holds the vendor files).',
+  renameRecordDuplicate: '  [warn] VENDORS lists agents.md more than once in {manifestPath} ({lines}). Keep one agents.md line, then re-run.',
   renameRecordOnly: '  [ok] The file is already AGENTS.md; moved its VENDORS entry from agents.md to AGENTS.md',
   renameRecordOnlyDuplicate: '  [ok] The file is already AGENTS.md; removed the duplicate agents.md VENDORS entry',
   renameRecordOnlyPlanned: '  [dry-run] The file is already AGENTS.md; would {action} its agents.md VENDORS entry',
@@ -1082,21 +1088,48 @@ export interface LegacyIndexEntries {
   upper: boolean;
 }
 
+/** Environment variables that change how git reads a pathspec. */
+const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+
 /**
- * D0: the git index's agents.md / AGENTS.md entries, or null outside git (or
- * when ls-files fails). The `:(icase)` pathspec finds both spellings whatever
- * core.ignorecase says; the exact-case filter makes the answer the same on
- * case-sensitive and case-insensitive checkouts. Never looks at the disk.
+ * runGit with the pathspec-mode variables removed from the child environment,
+ * so `agents.md` always means that exact path, whatever the caller exported.
  */
-export function legacyIndexEntries(git: GitRunner = runGit): LegacyIndexEntries | null {
+export function legacyGit(args: string[]): string {
+  const env = { ...process.env };
+  for (const k of PATHSPEC_ENV) delete env[k];
+  return execFileSync('git', args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 10 * 1024 * 1024, env });
+}
+
+/** The index read: its entries, 'not-git' outside a work tree, or 'unreadable' when ls-files fails inside one. */
+export type LegacyIndexRead = LegacyIndexEntries | 'not-git' | 'unreadable';
+
+/**
+ * D0: the git index's exact-case agents.md / AGENTS.md entries. Plain pathspecs
+ * are exact-case even with core.ignorecase=true, and the exact filter covers
+ * GIT_ICASE_PATHSPECS, so the answer is the same on case-sensitive and
+ * case-insensitive checkouts. Needs no pathspec magic. Never looks at the disk.
+ */
+export function readLegacyIndex(git: GitRunner = legacyGit): LegacyIndexRead {
+  try {
+    git(['rev-parse', '--show-toplevel']);
+  } catch {
+    return 'not-git';
+  }
   let out: string;
   try {
-    out = git(['ls-files', '-z', '--', ':(icase)agents.md']);
+    out = git(['ls-files', '-z', '--', 'agents.md', 'AGENTS.md']);
   } catch {
-    return null;
+    return 'unreadable';
   }
   const paths = out.split('\0');
   return { lower: paths.includes('agents.md'), upper: paths.includes('AGENTS.md') };
+}
+
+/** D0 for doctor: the entries, or null when there is nothing to report from (D3). */
+export function legacyIndexEntries(git: GitRunner = legacyGit): LegacyIndexEntries | null {
+  const read = readLegacyIndex(git);
+  return typeof read === 'string' ? null : read;
 }
 
 /** Both names exist and are one physical file (case-insensitive checkout, or a hard link). */
@@ -1131,7 +1164,10 @@ export function legacyKeyFor(manifestPath: string, file: VendorFile): 'agents.md
 }
 
 export type RenameMethod = 'git-mv' | 'fs' | 'record-only' | 'none';
-export type RenameRefusal = 'both-distinct' | 'dirty' | 'tmp-exists' | 'record-conflict' | 'record-write' | 'rename-failed';
+export type RenameRefusal =
+  | 'both-distinct' | 'dirty' | 'tmp-exists' | 'record-conflict' | 'record-write' | 'rename-failed'
+  // Added in review: an unreadable index inside a work tree, and a run from below the root.
+  | 'index-unreadable' | 'not-repo-root';
 
 export interface RenameResult {
   status: 'renamed' | 'planned' | 'unchanged' | 'refused';
@@ -1154,10 +1190,11 @@ export interface RenameLegacyOptions {
   dryRun?: boolean;
   /** Receives each result line; isWarning marks a refusal or failure. */
   print?: (line: string, isWarning: boolean) => void;
-  /** Injected for tests: the git runner and the fs rename. */
+  /** @internal Injected for tests: the git runner (default: legacyGit). */
   git?: GitRunner;
+  /** @internal Injected for tests: the fs rename. */
   rename?: (from: string, to: string) => void;
-  /** Injected for tests: are agents.md and AGENTS.md one physical file? */
+  /** @internal Injected for tests: are agents.md and AGENTS.md one physical file? */
   sameFile?: () => boolean;
 }
 
@@ -1166,6 +1203,19 @@ const LEGACY_REF_RE = /\bagents\.md\b/;
 
 function posix(p: string): string {
   return p.split(path.sep).join('/');
+}
+
+/** One directory, compared by real path (case-insensitively on Windows). */
+function samePath(a: string, b: string): boolean {
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync.native(path.resolve(p));
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const [ra, rb] = [real(a), real(b)];
+  return process.platform === 'win32' ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
 }
 
 function shellQuote(p: string): string {
@@ -1240,7 +1290,7 @@ function legacyRecordEdit(text: string, index: number, removeDuplicate: boolean,
  * is an exact `# agents.md` first line. Never deletes or merges a file.
  */
 export function renameLegacyAgents(aiDir: string, options: RenameLegacyOptions = {}): RenameResult {
-  const git = options.git ?? runGit;
+  const git = options.git ?? legacyGit;
   const renameFs = options.rename ?? ((from: string, to: string) => fs.renameSync(from, to));
   const print = options.print ?? (() => undefined);
   const manifestPath = path.join(aiDir, 'manifest.adf');
@@ -1255,7 +1305,32 @@ export function renameLegacyAgents(aiDir: string, options: RenameLegacyOptions =
   };
 
   // S1: plan. Nothing below writes until the dry-run return.
-  const index = legacyIndexEntries(git);
+  // Inside a work tree the index must be read: never fall back to an fs rename
+  // of a file git may track.
+  const read = readLegacyIndex(git);
+  if (read === 'unreadable') return refuse('index-unreadable', 'git status', MSG.renameIndexUnreadable);
+  const index = read === 'not-git' ? null : read;
+  // Vendor names are cwd-relative, so run below the root this would rename a
+  // nested docs/agents.md. Refuse rather than resolve to the root: every other
+  // path here (--ai-dir, the references scan) is cwd-relative too.
+  if (index) {
+    let top = '';
+    try {
+      top = git(['rev-parse', '--show-toplevel']).trim();
+    } catch {
+      top = '';
+    }
+    if (!top || !samePath(top, process.cwd())) {
+      const remedy = top ? `cd ${shellQuote(top)} && charter adf vendor rename-legacy` : null;
+      return refuse('not-repo-root', remedy, fill(MSG.renameNotRoot, { root: top || '(unknown)' }));
+    }
+  } else {
+    // Outside git, an --ai-dir above cwd is the sign of a run from a subdirectory.
+    const rel = path.relative(process.cwd(), path.resolve(aiDir));
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+      return refuse('not-repo-root', null, fill(MSG.renameNotRootAiDir, { aiDir }));
+    }
+  }
   const names = listDir('.');
   const diskLower = names.includes('agents.md');
   const diskUpper = names.includes('AGENTS.md');
@@ -1280,6 +1355,12 @@ export function renameLegacyAgents(aiDir: string, options: RenameLegacyOptions =
   }
   if (record.readProblem) {
     return refuse('record-write', 'charter adf vendor status', fill(MSG.renameRecordWrite, { manifestPath: shownManifest }));
+  }
+  // Two agents.md lines: moving only the winner would make the other one live. Refuse up front.
+  const legacyDuplicates = record.problems.filter(p => p.problem === 'duplicate' && p.file === 'agents.md').map(p => p.raw);
+  if (legacy && legacyDuplicates.length > 0) {
+    const lines = [...legacyDuplicates, `agents.md: ${legacy.mode}`].map(l => `'${l}'`).join(', ');
+    return refuse('record-conflict', null, fill(MSG.renameRecordDuplicate, { manifestPath: shownManifest, lines }));
   }
   const renames = method === 'git-mv' || method === 'fs';
   if (method === 'git-mv') {
@@ -1386,31 +1467,33 @@ export function renameLegacyAgents(aiDir: string, options: RenameLegacyOptions =
     }
     const undoNote = undone && recovery.length === 0 ? MSG.renameUndone : fill(MSG.renameRecover, { recovery: recovery.join('; ') });
     result.error = error;
-    // The full error is in JSON; the line shows its first line (git's hints run long).
-    const shown = error.split(/\r?\n/, 1)[0].replace(/\.$/, '');
-    return refuse('rename-failed', 'charter adf vendor rename-legacy', fill(MSG.renameFailed, { error: shown, undoNote }));
+    // The whole error: git's second line often holds the reason (sparse checkout).
+    return refuse('rename-failed', 'charter adf vendor rename-legacy', fill(MSG.renameFailed, { error: error.trimEnd().replace(/\.$/, ''), undoNote }));
   }
   result.status = 'renamed';
   if (method === 'git-mv') result.staged = ['agents.md', 'AGENTS.md'];
 
   // S5: the legacy title line only.
+  let titleWarning: string | null = null;
   if (retitled !== null) {
     try {
       fs.writeFileSync('AGENTS.md', retitled);
       result.titleUpdated = true;
     } catch (err: unknown) {
-      print(`  Warning: could not update the title line of AGENTS.md: ${err instanceof Error ? err.message : String(err)}`, true);
+      titleWarning = `  Warning: the title line of AGENTS.md was left as '# agents.md': ${err instanceof Error ? err.message : String(err)}`;
     }
   }
   result.references = legacyReferences(aiDir, new Map());
 
   print(fill(MSG.renameOk, { method, recordNote, titleNote: result.titleUpdated ? '; title line updated' : '' }), false);
+  if (titleWarning) print(titleWarning, true);
   if (method === 'git-mv') {
     // CP-3: the manifest (and a title edit) are left unstaged, for the user to commit with the rename.
     const paths = [...(edit ? [shownManifest] : []), ...(result.titleUpdated ? ['AGENTS.md'] : [])];
     print(paths.length > 0
       ? fill(MSG.renameStagedHint, { paths: paths.join(' and '), addArgs: paths.map(shellQuote).join(' ') })
       : MSG.renameStagedOnly, false);
+    print(MSG.renameStagedNote, false);
   }
   return result;
 }

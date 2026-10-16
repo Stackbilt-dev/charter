@@ -22,6 +22,7 @@ import {
   legacyIndexEntries,
   legacyIndexKind,
   legacyKeyFor,
+  readLegacyIndex,
   POINTER_ONLY_VENDOR_FILES,
   RENAME_TMP,
   renameLegacyAgents,
@@ -115,6 +116,8 @@ const manifestText = (): string => fs.readFileSync('.ai/manifest.adf', 'utf-8');
 const rootNames = (): string[] => fs.readdirSync('.').filter(n => n !== '.git').sort();
 const cached = (): string => git(['diff', '--cached', '--name-status', '-M']).trim();
 const porcelain = (): string => git(['status', '--porcelain=v1', '--untracked-files=all']);
+/** Index entries spelled agents.md in any case (read without pathspecs). */
+const indexAgents = (): string[] => git(['ls-files', '-z']).split('\0').filter(n => n.toLowerCase() === 'agents.md');
 
 /** Is this temp dir on a case-insensitive filesystem? */
 function caseInsensitive(): boolean {
@@ -192,16 +195,25 @@ describe('removeManifestBullet', () => {
 // ============================================================================
 
 describe('legacy agents.md detection (index only)', () => {
-  it('queries the index with an icase pathspec and filters by exact case (INV-P6-1, mocked git)', () => {
+  it('queries the index with plain exact paths and filters by exact case (INV-P6-1, mocked git)', () => {
     const calls: string[][] = [];
     const entries = legacyIndexEntries(args => {
       calls.push(args);
-      return 'Agents.md\0agents.md\0';
+      return args[0] === 'rev-parse' ? tmp : 'Agents.md\0agents.md\0';
     });
-    expect(calls).toEqual([['ls-files', '-z', '--', ':(icase)agents.md']]);
+    expect(calls).toEqual([['rev-parse', '--show-toplevel'], ['ls-files', '-z', '--', 'agents.md', 'AGENTS.md']]);
+    expect(calls.flat().some(a => a.startsWith(':('))).toBe(false); // no pathspec magic
     expect(entries).toEqual({ lower: true, upper: false });
-    expect(legacyIndexEntries(() => 'AGENTS.md\0agents.md\0')).toEqual({ lower: true, upper: true });
+    expect(legacyIndexEntries(args => (args[0] === 'rev-parse' ? tmp : 'AGENTS.md\0agents.md\0'))).toEqual({ lower: true, upper: true });
     expect(legacyIndexEntries(() => { throw new Error('not a git repository'); })).toBeNull();
+  });
+
+  it('tells "not a git repo" from "index unreadable" (mocked git)', () => {
+    expect(readLegacyIndex(() => { throw new Error('not a git repository'); })).toBe('not-git');
+    expect(readLegacyIndex(args => {
+      if (args[0] === 'ls-files') throw new Error('index file corrupt');
+      return tmp;
+    })).toBe('unreadable');
   });
 
   it('classifies by index entries, using file identity only to split both-spellings (mocked)', () => {
@@ -288,12 +300,13 @@ describe('adf vendor rename-legacy (git mv)', () => {
     const r = await run(['vendor', 'rename-legacy']);
     expect(r.code).toBe(0);
     expect(cached()).toMatch(/^R100\tagents\.md\tAGENTS\.md$/);
-    expect(git(['ls-files', '-z', '--', ':(icase)agents.md']).split('\0').filter(Boolean)).toEqual(['AGENTS.md']);
+    expect(indexAgents()).toEqual(['AGENTS.md']);
     expect(porcelain().split('\n').filter(Boolean).sort()).toEqual([' M .ai/core.adf', ' M .ai/manifest.adf', '?? notes.txt', 'RM agents.md -> AGENTS.md'].sort());
     expect(parseManifest(parseAdf(manifestText())).vendors.map(v => v.raw)).toEqual(['AGENTS.md: pointer']);
     expect(manifestText()).toBe(vendors('AGENTS.md: pointer'));
     expect(r.out).toContain('[ok] Renamed agents.md -> AGENTS.md (git-mv); VENDORS entry moved; title line updated');
     expect(r.out).toContain('The rename is staged. Commit it together with .ai/manifest.adf and AGENTS.md: git add .ai/manifest.adf AGENTS.md && git commit');
+    expect(r.out).toContain('(git commit also records anything else you had already staged; check git status first.)');
   });
 
   it('rewrites only an exact `# agents.md` first line (CP-4, INV-P6-3)', async () => {
@@ -400,7 +413,7 @@ describe('adf vendor rename-legacy (git mv)', () => {
 
   it('splits both index entries by file identity, deterministically on any host (mocked index and identity)', () => {
     fs.writeFileSync('agents.md', 'a\n');
-    const git = (args: string[]): string => (args[0] === 'ls-files' ? 'agents.md\0AGENTS.md\0' : '');
+    const git = (args: string[]): string => (args[0] === 'rev-parse' ? tmp : args[0] === 'ls-files' ? 'agents.md\0AGENTS.md\0' : '');
     const distinct = renameLegacyAgents('.ai', { git, sameFile: () => false });
     expect(distinct).toMatchObject({ refusal: 'both-distinct', remedy: 'git rm agents.md' });
     const oneFile = renameLegacyAgents('.ai', { git, sameFile: () => true });
@@ -635,7 +648,7 @@ describe('no automatic rename; discovery keeps the legacy name', () => {
     await run(['compile', '--target', 'all', '--check']);
     await run(['vendor', 'status']);
     await run(['tidy', '--dry-run']);
-    expect(git(['ls-files', '-z', '--', ':(icase)agents.md']).split('\0').filter(Boolean)).toEqual(['agents.md']);
+    expect(indexAgents()).toEqual(['agents.md']);
     expect(porcelain()).toBe('');
   });
 
@@ -645,5 +658,133 @@ describe('no automatic rename; discovery keeps the legacy name', () => {
     fs.writeFileSync('agents.md', LEGACY_POINTER);
     // Discovered once, under whichever spelling the host's filesystem matches first.
     expect(discoverAgentConfigFiles().filter(n => n.toLowerCase() === 'agents.md')).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// Review round 1: pathspec env, index read failure, duplicates, root, ordering
+// ============================================================================
+
+describe('adf vendor rename-legacy hardening', () => {
+  const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+
+  for (const name of PATHSPEC_ENV) {
+    it(`detects and renames correctly with ${name}=1 exported (INV-P6-1)`, async () => {
+      legacyRepo(vendors('AGENTS.md: pointer'));
+      const saved = process.env[name];
+      process.env[name] = '1';
+      try {
+        expect(legacyRows((await doctor()).check?.rows)).toEqual([['legacy-tracked', 'INFO', 'charter adf vendor rename-legacy']]);
+        const r = await runJson<{ status: string; method: string }>(['vendor', 'rename-legacy']);
+        expect(r.json).toMatchObject({ status: 'renamed', method: 'git-mv' });
+      } finally {
+        if (saved === undefined) delete process.env[name];
+        else process.env[name] = saved;
+      }
+      expect(cached()).toMatch(/^R100\tagents\.md\tAGENTS\.md$/);
+      expect(indexAgents()).toEqual(['AGENTS.md']);
+    });
+  }
+
+  it('refuses index-unreadable inside a work tree and never falls back to an fs rename', () => {
+    legacyRepo();
+    const manifest = manifestText();
+    const status = porcelain();
+    const injected = (args: string[]): string => {
+      if (args[0] === 'ls-files') throw new Error('fatal: index file corrupt');
+      return git(args);
+    };
+    const renames: string[] = [];
+    const r = renameLegacyAgents('.ai', { git: injected, rename: (a, b) => { renames.push(`${a}->${b}`); } });
+    expect(r).toMatchObject({ status: 'refused', refusal: 'index-unreadable', method: 'none' });
+    expect(renames).toEqual([]);
+    expect(rootNames()).toContain('agents.md');
+    expect(manifestText()).toBe(manifest);
+    expect(porcelain()).toBe(status);
+  });
+
+  it('refuses a duplicate legacy agents.md entry up front, naming both lines (no partial move)', async () => {
+    legacyRepo(vendors('agents.md: unmanaged', 'agents.md: pointer'));
+    const manifest = manifestText();
+    const r = await runJson<{ refusal: string }>(['vendor', 'rename-legacy']);
+    expect(r.code).toBe(1);
+    expect(r.json.refusal).toBe('record-conflict');
+    expect(r.err).toContain("VENDORS lists agents.md more than once in .ai/manifest.adf ('agents.md: unmanaged', 'agents.md: pointer'). Keep one agents.md line, then re-run.");
+    expect(manifestText()).toBe(manifest);
+    expect(porcelain()).toBe('');
+  });
+
+  it('refuses from a subdirectory of the repo and leaves a nested docs/agents.md alone', async () => {
+    legacyRepo();
+    fs.mkdirSync('docs');
+    fs.writeFileSync('docs/agents.md', '# agents.md\n\nnested\n');
+    commitAll();
+    process.chdir(path.join(tmp, 'docs'));
+    const r = await runJson<{ refusal: string; remedy: string }>(['vendor', 'rename-legacy', '--ai-dir', '../.ai']);
+    expect(r.code).toBe(1);
+    expect(r.json.refusal).toBe('not-repo-root');
+    expect(r.json.remedy).toContain('&& charter adf vendor rename-legacy');
+    expect(r.err).toContain('Run rename-legacy from the repository root:');
+    process.chdir(tmp);
+    expect(fs.readdirSync('docs')).toEqual(['agents.md']);
+    expect(indexAgents()).toEqual(['agents.md']);
+    expect(git(['ls-files', '--', 'docs']).trim()).toBe('docs/agents.md');
+    expect(porcelain()).toBe('');
+  });
+
+  it('refuses outside git when --ai-dir points above the current directory', async () => {
+    scaffold(vendors('agents.md: pointer'));
+    fs.mkdirSync('docs');
+    fs.writeFileSync('docs/agents.md', '# agents.md\n');
+    process.chdir(path.join(tmp, 'docs'));
+    const r = await runJson<{ refusal: string }>(['vendor', 'rename-legacy', '--ai-dir', '../.ai']);
+    expect(r.json.refusal).toBe('not-repo-root');
+    process.chdir(tmp);
+    expect(fs.readdirSync('docs')).toEqual(['agents.md']);
+    expect(manifestText()).toBe(vendors('agents.md: pointer'));
+  });
+
+  it('prints a title-write failure after the [ok] line, and keeps the staged rename', () => {
+    legacyRepo();
+    fs.chmodSync('agents.md', 0o444);
+    const probe = (() => {
+      try {
+        fs.appendFileSync('agents.md', '');
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    if (probe) { // privileged user: read-only does not block writes here
+      fs.chmodSync('agents.md', 0o644);
+      return;
+    }
+    const lines: string[] = [];
+    const r = renameLegacyAgents('.ai', { print: l => lines.push(l) });
+    fs.chmodSync('AGENTS.md', 0o644);
+    expect(r).toMatchObject({ status: 'renamed', titleUpdated: false });
+    const ok = lines.findIndex(l => l.includes('[ok] Renamed agents.md -> AGENTS.md'));
+    const warn = lines.findIndex(l => l.includes("title line of AGENTS.md was left as '# agents.md'"));
+    expect(ok).toBeGreaterThanOrEqual(0);
+    expect(warn).toBeGreaterThan(ok);
+    expect(cached()).toMatch(/^R100\tagents\.md\tAGENTS\.md$/);
+  });
+
+  it('prints the whole git error when a rename step fails', () => {
+    legacyRepo();
+    let mv = 0;
+    const injected = (args: string[]): string => {
+      if (args[0] === 'mv' && ++mv === 1) {
+        const e = new Error('git mv failed') as Error & { stderr: string };
+        e.stderr = 'The following paths and/or pathspecs matched paths that exist\noutside of your sparse-checkout definition, so will not be\nupdated in the index:\nagents.md';
+        throw e;
+      }
+      return git(args);
+    };
+    const lines: string[] = [];
+    const r = renameLegacyAgents('.ai', { git: injected, print: l => lines.push(l) });
+    expect(r.refusal).toBe('rename-failed');
+    expect(lines.join('\n')).toContain('outside of your sparse-checkout definition');
+    expect(porcelain()).toBe('');
   });
 });
