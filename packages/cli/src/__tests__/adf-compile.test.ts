@@ -448,45 +448,47 @@ describe('adf compile — --write overwrite guard', () => {
     expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toContain(COMPILE_BANNER_MARKER);
   });
 
-  it('refuses a pointer carrying user notes under ## Environment', async () => {
+  it('carries a pointer\'s ## Environment notes into the retained block (#303)', async () => {
     const tmp = makeTmp();
     // The shape `charter adf tidy` produces and the pre-commit hook manufactures:
-    // a thin pointer with retained Environment rules. The compiler emits no
-    // Environment section and .ai/ holds none of it, so overwriting destroys it.
+    // a thin pointer with retained Environment rules. .ai/ holds none of it, so
+    // the compiled file keeps it in its retained block (it used to be refused, #295).
     const withNotes = POINTER_CLAUDE_MD_HYBRID.replace(
       '<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->',
       '- In WSL, use the Windows credential helper if HTTPS push fails.\n- Keep core.hooksPath pointed at .githooks.',
     );
     scaffoldAi(tmp, { 'CLAUDE.md': withNotes });
 
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
-    const warning = spy.mock.calls.map(c => String(c[0])).join('\n');
-    spy.mockRestore();
+    const logs = await captureLog(() =>
+      adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']),
+    );
 
-    expect(exitCode).toBe(1);
-    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toBe(withNotes);
-    // The message must name the cause, not the generic hand-authored wording.
-    expect(warning).toContain('## Environment');
-    expect(warning).toContain('--force');
+    const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
+    expect(content).toContain(COMPILE_BANNER_MARKER);
+    expect(content.endsWith(
+      '<!-- charter:retained:start -->\n'
+      + '<!-- Kept verbatim by charter adf compile. Edit freely between the retained markers. -->\n\n'
+      + '## Environment\n- In WSL, use the Windows credential helper if HTTPS push fails.\n- Keep core.hooksPath pointed at .githooks.\n'
+      + '<!-- charter:retained:end -->\n',
+    )).toBe(true);
+    expect(logs.join('\n')).toContain('[ok] Written CLAUDE.md (mode: pointer -> compiled; kept ## Environment)');
   });
 
-  it('refuses a pointer carrying a retained operational protocol section', async () => {
+  it('carries a retained operational protocol section', async () => {
     const tmp = makeTmp();
     const withProtocol = `${POINTER_AGENTS_MD}\n## Release Protocol\n\n- Tag before publishing.\n`;
     scaffoldAi(tmp, { 'AGENTS.md': withProtocol });
 
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'agents', '--write', '--mode', 'compiled']);
-    const warning = spy.mock.calls.map(c => String(c[0])).join('\n');
-    spy.mockRestore();
 
-    expect(exitCode).toBe(1);
-    expect(fs.readFileSync(path.join(tmp, 'AGENTS.md'), 'utf-8')).toBe(withProtocol);
-    expect(warning).toContain('## Release Protocol');
+    expect(exitCode).toBe(0);
+    const content = fs.readFileSync(path.join(tmp, 'AGENTS.md'), 'utf-8');
+    expect(content).toContain(COMPILE_BANNER_MARKER);
+    expect(content).toContain('<!-- charter:retained:start -->');
+    expect(content).toContain('## Release Protocol\n\n- Tag before publishing.\n<!-- charter:retained:end -->\n');
   });
 
-  it('--force overwrites a pointer carrying user notes', async () => {
+  it('--force still carries a pointer\'s retained notes: it skips guards, never preservation', async () => {
     const tmp = makeTmp();
     const withNotes = POINTER_CLAUDE_MD_HYBRID.replace(
       '<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->',
@@ -501,7 +503,7 @@ describe('adf compile — --write overwrite guard', () => {
     expect(exitCode).toBe(0);
     const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
     expect(content).toContain(COMPILE_BANNER_MARKER);
-    expect(content).not.toContain('Some hand-written environment rule');
+    expect(content).toContain('## Environment\n- Some hand-written environment rule.\n<!-- charter:retained:end -->');
   });
 
   it('flags the pointer-to-compiled switch in the written line', async () => {

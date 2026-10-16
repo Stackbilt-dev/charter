@@ -732,14 +732,14 @@ describe('adf vendor restore', () => {
     expect(read('CLAUDE.md')).toBe(BLOATED_CLAUDE);
   });
 
-  it('refuses a compiled file carrying divergent retained sections (retained-divergent)', async () => {
+  it('carries a compiled file\'s own retained sections into the pointer (#303; retained-divergent retired)', async () => {
     scaffold(vendors('CLAUDE.md: pointer'));
     const compiled = `${await compiledOutput('claude')}\n## Environment\n- Use WSL for builds\n`;
     fs.writeFileSync('CLAUDE.md', compiled);
     const r = await restore('CLAUDE.md');
-    expect(r.json).toMatchObject({ status: 'refused', refusal: 'retained-divergent' });
-    expect(r.err).toContain('  [warn] CLAUDE.md carries your content under ## Environment, which the pointer template would drop. Move it into a .ai/ module first.');
-    expect(read('CLAUDE.md')).toBe(compiled);
+    expect(r.json).toMatchObject({ status: 'restored', refusal: null, keptSections: ['## Environment'] });
+    expect(read('CLAUDE.md')).toBe(restoredPointer('CLAUDE.md', null, '.ai', '## Environment\n- Use WSL for builds'));
+    expect(read('CLAUDE.md').endsWith('## Environment\n- Use WSL for builds\n')).toBe(true);
   });
 
   it('refuses when the record cannot be written, and writes no file (record-write)', async () => {

@@ -36,6 +36,7 @@ import {
 } from './adf';
 import { fileIdentity, generateModuleIndex } from './adf-migrate';
 import { divergentRetainedHeadings } from './adf-compile';
+import { composeCompiled, compiledMatchesFresh } from './adf-retained';
 import { countExtractable, readRetainedSections } from './adf-tidy';
 import { insertManifestBullet, lastSectionIndex, replaceManifestBullet, sectionHeaders } from './adf-manifest-register';
 
@@ -151,7 +152,6 @@ export const MSG = {
   restoreModeNotPointer: '  [warn] {file} is {mode} ({source}); restore writes a pointer. Record that intent first: charter adf vendor set {file} pointer',
   restoreHandAuthored: '  [warn] {file} has hand-authored content that .ai/ does not hold. Move it first: charter adf migrate --source {file}',
   restoreBloated: '  [warn] {file} carries {n} item(s) beyond the pointer. Fold them into .ai/ first: charter adf tidy --source {file}',
-  restoreRetained: '  [warn] {file} carries your content under {headings}, which the pointer template would drop. Move it into a .ai/ module first.',
   restoreLost: '  [warn] {file} has {n} line(s) the pointer template would drop: {lines}. Move them into a .ai/ module (or under ## Environment), or delete them, first.',
   restoreCompiledDiffers: '  [warn] {file} differs from what .ai/ compiles to (a hand edit, or .ai/ changed since), and restoring the pointer would lose that difference. Check it with: charter adf compile --target {target} --check. To keep the file as it is: charter adf vendor set {file} compiled',
   restoreRecord: '  [warn] {file} was not restored: its mode could not be recorded as pointer in {manifestPath}. Fix the manifest or run: charter adf vendor status',
@@ -754,7 +754,6 @@ export type RestoreRefusal =
   | 'mode-not-pointer'
   | 'hand-authored'
   | 'pointer-bloated'
-  | 'retained-divergent'
   | 'compiled-differs'
   | 'record-write'
   | 'write-failed';
@@ -800,11 +799,13 @@ function withoutModuleIndexSection(block: string): string {
  * sections re-appended verbatim (as tidy's restorePointer does) and, for
  * CLAUDE.md, the module index filled in (as bootstrap's updateModuleIndex does).
  * A clean bootstrap pointer therefore comes back byte-equal. Pure: never writes.
+ * `carried` is a compiled file's retained text (composeCompiled's body), appended
+ * as plain sections in place of reading `current` (#303).
  */
-export function restoredPointer(file: VendorFile, current: string | null, aiDir: string): string {
+export function restoredPointer(file: VendorFile, current: string | null, aiDir: string, carried = ''): string {
   let pointer = restoreTemplate(file);
   const hasIndex = pointer.includes(MODULE_INDEX_START);
-  let retained = current === null ? '' : readRetainedSections(current);
+  let retained = carried ? `\n\n${carried}\n` : current === null ? '' : readRetainedSections(current);
   if (hasIndex) retained = withoutModuleIndexSection(retained);
   if (retained) pointer = pointer.replace(/\n## Environment[\s\S]*$/, '').trimEnd() + retained;
   const index = hasIndex ? generateModuleIndex(aiDir) : '';
@@ -917,13 +918,13 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
     const n = countExtractable(file, aiDir);
     if (n > 0) return refuse('pointer-bloated', `charter adf tidy --source ${file}`, fill(MSG.restoreBloated, { file, n }));
   }
+  let carried = '';
+  let carriedSections: string[] = [];
   if (ev.inferredMode === 'compiled' && current !== null) {
-    const divergent = divergentRetainedHeadings(current, file);
-    if (divergent.length > 0) {
-      return refuse('retained-divergent', null, fill(MSG.restoreRetained, { file, headings: divergent.join(', ') }));
-    }
     // Compiled output that .ai/ no longer reproduces holds something .ai/ does not
     // (a hand edit, or rules since removed from .ai/). Compiled in memory; nothing is written.
+    // Its retained block (or retained sections outside one) is the user's: it is
+    // carried into the pointer, so it never counts as a difference (#303).
     const target = (Object.keys(TARGET_FILENAMES) as CompileTarget[]).find(t => TARGET_FILENAMES[t] === file);
     let fresh: string | null = null;
     try {
@@ -931,20 +932,23 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
     } catch {
       fresh = null;
     }
-    const norm = (t: string): string => t.replace(/\r\n/g, '\n').trimEnd();
-    if (fresh === null || norm(fresh) !== norm(current)) {
+    if (fresh === null || !compiledMatchesFresh(fresh, current, file)) {
       return refuse('compiled-differs', `charter adf vendor set ${file} compiled`,
         fill(MSG.restoreCompiledDiffers, { file, target: target ?? 'all' }));
     }
+    const composed = composeCompiled(fresh, current, file);
+    carried = composed.body;
+    carriedSections = composed.retainedSections;
   }
 
-  // Only a pointer's retained sections are the user's; a compiled file's come from .ai/.
-  // The template brings its own Module Index, so that heading is never "kept".
+  // A pointer's retained sections that differ from its template are the user's;
+  // a compiled file's are the ones composeCompiled carries. The template brings
+  // its own Module Index, so that heading is never "kept".
   const keptSections = ev.inferredMode === 'pointer' && current !== null
     ? divergentRetainedHeadings(current, file).filter(h => h !== '## Module Index')
-    : [];
+    : carriedSections;
   const kept = keptSections.length > 0 ? ` (kept ${keptSections.join(', ')})` : '';
-  const next = restoredPointer(file, ev.inferredMode === 'pointer' ? current : null, aiDir);
+  const next = restoredPointer(file, ev.inferredMode === 'pointer' ? current : null, aiDir, carried);
   // Any line of the user's that the new pointer would not carry is a loss: refuse.
   if (ev.inferredMode === 'pointer' && current !== null) {
     const lost = linesRestoreWouldDrop(current, next);

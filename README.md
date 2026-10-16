@@ -255,7 +255,7 @@ For live session continuity snapshots, use `charter context-refresh` to produce 
 | I want to compile task-specific agent context | `charter adf bundle --task "Fix the login flow"` |
 | I want to enforce metric/file-size ceilings | `charter adf evidence --auto-measure --ci` |
 | I want to migrate existing agent docs | `charter adf migrate --dry-run` |
-| I want to regenerate CLAUDE.md / AGENTS.md / .cursorrules / GEMINI.md from `.ai/` | `charter adf compile --target all --write` (add `--mode compiled` to convert pointer files) |
+| I want to regenerate CLAUDE.md / AGENTS.md / .cursorrules / GEMINI.md from `.ai/` | `charter adf compile --target all --write` (add `--mode compiled` to convert pointer files; your `## Environment` notes are kept in a retained block at the end) |
 | I want a letter-grade AI-readiness audit | `charter score` |
 | I want to validate governance in CI | `charter validate --ci --format json` |
 | I want to check pattern drift | `charter drift --ci --format json` |
@@ -288,7 +288,7 @@ charter adf init                         # Scaffold .ai/ directory
 charter adf bundle --task "..."          # Merge context for a task
 charter adf evidence --auto-measure      # Validate metric constraints
 charter adf migrate                      # Migrate existing configs
-charter adf compile --target all --write # Re-render compiled-mode CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md
+charter adf compile --target all --write # Re-render compiled-mode CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md (keeps your ## Environment notes)
 charter adf compile --target all --write --mode compiled # Switch pointer files to compiled output
 charter adf vendor status                # Show each vendor file's mode (pointer, compiled, unmanaged)
 charter adf vendor restore CLAUDE.md     # Rewrite one pointer from its template (refuses if content would be lost)
