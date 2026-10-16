@@ -215,6 +215,39 @@ describe('compile --check is mode-aware', () => {
     expect(r.json.nextActions).toEqual(['charter adf vendor set CLAUDE.md unmanaged', 'charter adf compile --target claude --write --force']);
   });
 
+  it('drift on a recorded-compiled pointer with bloat lists the content-preserving fix first', async () => {
+    scaffold(vendors('CLAUDE.md: compiled'));
+    fs.writeFileSync('CLAUDE.md', BLOATED_CLAUDE);
+    const text = await run(['compile', '--target', 'claude', '--check']);
+    expect(text.out).toMatch(/Keep the file as it is: charter adf vendor set CLAUDE\.md pointer, then charter adf tidy --source CLAUDE\.md\n {10}Or make it match the record: charter adf compile --target claude --write {2}\(discards \d+ item\(s\) not in \.ai\/\)/);
+    const r = await runJson<CheckJson>(['compile', '--target', 'claude', '--check']);
+    expect(r.json.nextActions).toEqual([
+      'charter adf vendor set CLAUDE.md pointer',
+      'charter adf tidy --source CLAUDE.md',
+      'charter adf compile --target claude --write',
+    ]);
+    // Following the first-listed actions loses nothing.
+    for (const action of r.json.nextActions.slice(0, 2)) {
+      expect((await run(action.replace(/^charter adf /, '').split(' '))).code).toBe(0);
+    }
+    expect(Object.values(aiSnapshot()).join('\n')).toContain('Never skip the integration suite in CI');
+    const after = await runJson<CheckJson>(['compile', '--target', 'claude', '--check']);
+    expect(after.json.targets[0].status).toBe('pointer-ok');
+  });
+
+  it('collapses nextActions to the legacy line when only compiled targets are stale or missing', async () => {
+    scaffold();
+    fs.writeFileSync('CLAUDE.md', `${await compiledOutput('claude')}\n# drift\n`);
+    fs.writeFileSync('GEMINI.md', POINTER_GEMINI_MD);
+    const all = await runJson<CheckJson>(['compile', '--target', 'all', '--check']);
+    expect(all.json.nextActions).toEqual(['charter adf compile --target all --write']);
+    const one = await runJson<CheckJson>(['compile', '--target', 'claude', '--check']);
+    expect(one.json.nextActions).toEqual(['charter adf compile --target claude --write']);
+    fs.writeFileSync('GEMINI.md', `${POINTER_GEMINI_MD}\n## Testing\n\n- Always run pnpm test before pushing to main.\n`);
+    const mixed = await runJson<CheckJson>(['compile', '--target', 'all', '--check']);
+    expect(mixed.json.nextActions).not.toContain('charter adf compile --target all --write');
+  });
+
   it('a recorded unmanaged file never drifts and an absent one is skipped', async () => {
     scaffold(vendors('CLAUDE.md: unmanaged', 'AGENTS.md: unmanaged'));
     fs.writeFileSync('CLAUDE.md', POINTER_CLAUDE_MD);
@@ -382,18 +415,76 @@ describe('compile --write decision table', () => {
     expect(j.json.refused).toEqual(['CLAUDE.md']);
   });
 
-  it('INV-P2-3: the record is upserted before the file is written', async () => {
-    if (typeof process.getuid === 'function' && process.getuid() === 0) return; // root ignores read-only files
+  const rootIgnoresReadOnly = typeof process.getuid === 'function' && process.getuid() === 0;
+
+  it('a write failure after the --mode upsert reverts that record and the run goes on', async () => {
+    if (rootIgnoresReadOnly) return;
     scaffold(vendors('CLAUDE.md: pointer'));
     fs.writeFileSync('CLAUDE.md', POINTER_CLAUDE_MD);
+    fs.writeFileSync('AGENTS.md', POINTER_AGENTS_MD);
     fs.chmodSync('CLAUDE.md', 0o444);
     try {
-      await expect(run(['compile', '--target', 'claude', '--write', '--mode', 'compiled'])).rejects.toThrow();
-      // The write failed after the upsert: the record already says compiled.
-      expect(manifestText()).toBe(vendors('CLAUDE.md: compiled'));
+      const r = await run(['compile', '--target', 'all', '--write', '--mode', 'compiled']);
+      expect(r.code).toBe(1);
+      expect(r.err).toMatch(/ {2}\[warn\] Could not write CLAUDE\.md: .+\. Its mode record was restored to pointer\./);
+      expect(read('CLAUDE.md')).toBe(POINTER_CLAUDE_MD);
+      // CLAUDE.md is back to pointer; the inferred AGENTS.md was switched; the absent targets were added.
+      expect(manifestText()).toBe(vendors('CLAUDE.md: pointer', 'AGENTS.md: compiled', '.cursorrules: compiled', 'GEMINI.md: compiled'));
+      expect(read('AGENTS.md')).toContain(COMPILE_BANNER_MARKER);
     } finally {
       fs.chmodSync('CLAUDE.md', 0o644);
     }
+  });
+
+  it('a write failure is a refused-record row with writeError; pending add-if-absent entries still land', async () => {
+    if (rootIgnoresReadOnly) return;
+    scaffold();
+    fs.writeFileSync('CLAUDE.md', `<!-- ${COMPILE_BANNER_MARKER} -->\nold\n`);
+    fs.chmodSync('CLAUDE.md', 0o444);
+    try {
+      const r = await runJson<WriteJson>(['compile', '--target', 'all', '--write']);
+      expect(r.code).toBe(1);
+      const claude = r.json.targets[0] as WriteRow & { writeError: string | null };
+      expect(claude).toMatchObject({ status: 'refused-record', recordedMode: null, remedy: 'charter adf compile --target claude --write' });
+      expect(claude.writeError).toBeTruthy();
+      expect(r.json.refused).toEqual(['CLAUDE.md']);
+      expect(r.json.written).toEqual(['AGENTS.md', '.cursorrules', 'GEMINI.md']);
+      expect(manifestText()).toBe(vendors('AGENTS.md: compiled', '.cursorrules: compiled', 'GEMINI.md: compiled'));
+      expect((r.json.targets[1] as WriteRow & { writeError: string | null }).writeError).toBeNull();
+    } finally {
+      fs.chmodSync('CLAUDE.md', 0o644);
+    }
+  });
+
+  it('refuses an existing hand-authored unmanaged file with a one-step remedy that includes --force', async () => {
+    scaffold();
+    fs.writeFileSync('GEMINI.md', HAND_WRITTEN);
+    fs.writeFileSync('CLAUDE.md', POINTER_CLAUDE_MD);
+    const r = await run(['compile', '--target', 'gemini', '--write']);
+    expect(r.err).toContain('Run: charter adf compile --target gemini --write --mode compiled --force');
+    const all = await runJson<WriteJson>(['compile', '--target', 'all', '--write']);
+    expect(all.json.nextActions).toEqual([
+      'charter adf compile --target claude --write --mode compiled',
+      'charter adf compile --target gemini --write --mode compiled --force',
+    ]);
+    const step = await run(['compile', '--target', 'gemini', '--write', '--mode', 'compiled', '--force']);
+    expect(step.code).toBe(0);
+  });
+
+  it('stdout-mode nextActions are mode-aware', async () => {
+    scaffold();
+    fs.writeFileSync('CLAUDE.md', POINTER_CLAUDE_MD);
+    const pointer = await runJson<{ nextActions: string[] }>(['compile', '--target', 'claude']);
+    expect(pointer.json.nextActions).toEqual([
+      'charter adf compile --target claude --write --mode compiled',
+      'charter adf compile --target claude --check',
+    ]);
+    const absent = await runJson<{ nextActions: string[] }>(['compile', '--target', 'agents']);
+    expect(absent.json.nextActions).toEqual([
+      'charter adf compile --target agents --write',
+      'charter adf compile --target all --write',
+      'charter adf compile --target agents --check',
+    ]);
   });
 
   it('INV-P2-4: no write path prints the "record kept" warning', async () => {
@@ -444,16 +535,30 @@ describe('adf tidy is mode-aware', () => {
     expect(read('CLAUDE.md')).toBe(compiled);
   });
 
-  it('skips a recorded-compiled file that lost its banner, with a regenerate remedy', async () => {
+  it('skips a recorded-compiled pointer; its first remedy keeps the content (follows it to prove it)', async () => {
     scaffold(vendors('CLAUDE.md: compiled'));
     fs.writeFileSync('CLAUDE.md', BLOATED_CLAUDE);
     const before = aiSnapshot();
     const r = await runJson<TidyJson>(['tidy']);
     expect(r.json.files[0]).toMatchObject({ status: 'compiled', skipReason: 'recorded-compiled', itemsExtracted: 0 });
     expect(r.json.totalExtracted).toBe(0);
-    expect(r.json.warnings).toEqual(['CLAUDE.md is recorded as compiled — skipping. Regenerate it from .ai/: charter adf compile --target claude --write']);
+    expect(r.json.warnings).toHaveLength(1);
+    expect(r.json.warnings[0]).toMatch(/^CLAUDE\.md is recorded as compiled but has no compile banner — skipping\. If it is meant to be a pointer: charter adf vendor set CLAUDE\.md pointer, then charter adf tidy --source CLAUDE\.md\. To regenerate it as compiled output instead \(discards \d+ item\(s\) not in \.ai\/\): charter adf compile --target claude --write$/);
     expect(aiSnapshot()).toEqual(before);
     expect(read('CLAUDE.md')).toBe(BLOATED_CLAUDE);
+
+    // The first-listed commands move the content into .ai/ instead of losing it.
+    expect((await run(['vendor', 'set', 'CLAUDE.md', 'pointer'])).code).toBe(0);
+    expect((await run(['tidy', '--source', 'CLAUDE.md'])).code).toBe(0);
+    expect(Object.values(aiSnapshot()).join('\n')).toContain('Always run pnpm test before pushing to main');
+    expect(read('CLAUDE.md')).not.toContain('Always run pnpm test');
+  });
+
+  it('a recorded-compiled hand-authored file is pointed at vendor set unmanaged first', async () => {
+    scaffold(vendors('CLAUDE.md: compiled'));
+    fs.writeFileSync('CLAUDE.md', HAND_WRITTEN);
+    const r = await runJson<TidyJson>(['tidy']);
+    expect(r.json.warnings).toEqual(['CLAUDE.md is recorded as compiled but has no compile banner — skipping. If it is hand-authored: charter adf vendor set CLAUDE.md unmanaged. To regenerate it as compiled output instead (discards its hand-authored content): charter adf compile --target claude --write --force']);
   });
 
   it('skips a recorded-unmanaged pointer and explains it', async () => {

@@ -49,13 +49,26 @@ type TidySkipReason =
 
 export const TIDY_MSG = {
   compiledBanner: '{file} is `charter adf compile` output, not a thin pointer — skipping. Its content is generated from {aiDir}/, so tidy will not ingest it. Edit the {aiDir}/ modules and re-run: charter adf compile --write',
-  recordedCompiled: '{file} is recorded as compiled — skipping. Regenerate it from {aiDir}/: charter adf compile --target {target} --write',
+  recordedCompiledPointer: '{file} is recorded as compiled but has no compile banner — skipping. If it is meant to be a pointer: charter adf vendor set {file} pointer, then charter adf tidy --source {file}. To regenerate it as compiled output instead{discards}: charter adf compile --target {target} --write',
+  recordedCompiledHand: '{file} is recorded as compiled but has no compile banner — skipping. If it is hand-authored: charter adf vendor set {file} unmanaged. To regenerate it as compiled output instead (discards its hand-authored content): charter adf compile --target {target} --write --force',
   unmanaged: '{file} is unmanaged ({source}) — skipping. To move its rules into {aiDir}/: charter adf migrate --source {file}',
   pointerNoMarker: '{file} is recorded as a pointer but has no Charter pointer marker — skipping rather than guessing. See: charter adf vendor status',
 } as const;
 
 function fill(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (whole, key: string) => (key in values ? values[key] : whole));
+}
+
+/**
+ * The skip warning for a file recorded compiled that carries no banner. The
+ * content-preserving fix comes first: regenerating would discard what the file
+ * holds beyond .ai/ (#318).
+ */
+function recordedCompiledWarning(file: string, aiDir: string, target: string, hasMarker: boolean): string {
+  if (!hasMarker) return fill(TIDY_MSG.recordedCompiledHand, { file, target });
+  const n = countExtractable(file, aiDir);
+  const discards = n > 0 ? ` (discards ${n} item(s) not in ${aiDir}/)` : '';
+  return fill(TIDY_MSG.recordedCompiledPointer, { file, target, discards });
 }
 
 /** The repo-root vendor name `file` refers to, or null for any other path. */
@@ -127,7 +140,7 @@ function tidyGate(file: string, content: string, aiDir: string, named: boolean):
   const hasMarker = POINTER_MARKERS.some(marker => content.includes(marker));
   if (r.mode === 'compiled') {
     return skip('compiled', 'recorded-compiled',
-      fill(TIDY_MSG.recordedCompiled, { file, aiDir, target: COMPILE_TARGET_OF[r.file] ?? 'all' }));
+      recordedCompiledWarning(file, aiDir, COMPILE_TARGET_OF[r.file] ?? 'all', hasMarker));
   }
   if (r.mode === 'unmanaged') {
     // An unrecorded hand-authored file was silently 'not-found' before #318; it

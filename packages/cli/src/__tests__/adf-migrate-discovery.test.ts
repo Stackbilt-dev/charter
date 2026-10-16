@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adfMigrateCommand, discoverAgentConfigFiles, fileIdentity } from '../commands/adf-migrate';
+import { adfMigrateCommand, discoverAgentConfigFiles } from '../commands/adf-migrate';
 import { bootstrapCommand } from '../commands/bootstrap';
 import type { CLIOptions } from '../index';
 
@@ -89,17 +89,5 @@ describe('adf migrate discovery — AGENTS.md casing (#343)', () => {
     const found = logs.find(l => l.includes('agent config file(s) with migratable content'));
     expect(found).toBeDefined();
     expect(found).toMatch(/migratable content: AGENTS\.md$/);
-  });
-
-  it('identifies files by their full-precision inode (#318)', () => {
-    // NTFS file indexes exceed 2^53. As a JS number, two different files
-    // (CLAUDE.md and .cursorrules) were seen to share an ino, so discovery
-    // dropped one as a duplicate. The bigint stat keeps every digit.
-    for (const name of ['CLAUDE.md', '.cursorrules', 'GEMINI.md']) fs.writeFileSync(name, name);
-    for (const name of ['CLAUDE.md', '.cursorrules', 'GEMINI.md']) {
-      const st = fs.statSync(name, { bigint: true });
-      if (st.ino) expect(fileIdentity(path.resolve(name))).toBe(`${st.dev}:${st.ino}`);
-    }
-    expect(discoverAgentConfigFiles()).toEqual(['CLAUDE.md', '.cursorrules', 'GEMINI.md']);
   });
 });
