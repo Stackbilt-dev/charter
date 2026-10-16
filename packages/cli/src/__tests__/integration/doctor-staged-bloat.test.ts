@@ -108,7 +108,7 @@ describe('doctor --staged', () => {
     expect(code).toBe(EXIT_CODE.SUCCESS);
     expect(status).toBe('PASS');
     expect(bloatRows(checks)).toEqual([
-      { name: 'adf vendor bloat', status: 'PASS', details: '0 staged vendor file(s) within bloat thresholds.' },
+      { name: 'adf vendor bloat', status: 'PASS', details: '0 staged vendor file(s) checked, within bloat thresholds.' },
       {
         name: 'adf vendor bloat (not blocking)',
         status: 'INFO',
@@ -144,6 +144,11 @@ describe('doctor --staged', () => {
 
     const both = await doctor(['--adf-only', '--staged', '--tidy-skipped', ' CLAUDE.md GEMINI.md']);
     expect(both.code).toBe(EXIT_CODE.SUCCESS);
+    expect(bloatRows(both.checks)[0]).toEqual({
+      name: 'adf vendor bloat',
+      status: 'PASS',
+      details: '0 staged vendor file(s) checked, within bloat thresholds. 2 staged vendor file(s) skipped by auto-tidy are not checked here (see the INFO row).',
+    });
   });
 
   it('a staged deletion does not count as staged', async () => {
@@ -152,6 +157,19 @@ describe('doctor --staged', () => {
     git('rm', '-q', '--cached', 'CLAUDE.md');
     const { checks } = await doctor(['--adf-only', '--staged']);
     expect(bloatRows(checks).find(c => c.status === 'WARN')).toBeUndefined();
+  });
+
+  it('an unreadable index falls back to enforcing every vendor file', async () => {
+    git('add', 'CLAUDE.md');
+    fs.writeFileSync(path.join(tmp, '.git', 'index'), 'not an index');
+    expect(() => execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: tmp, stdio: 'ignore' })).toThrow();
+    const { code, checks } = await doctor(['--adf-only', '--staged', '--tidy-skipped', 'CLAUDE.md']);
+    expect(code).toBe(EXIT_CODE.POLICY_VIOLATION);
+    expect(bloatRows(checks)).toEqual([{
+      name: 'adf vendor bloat',
+      status: 'WARN',
+      details: `Vendor file bloat detected:\n    ${CLAUDE_BLOAT}\n    ${GEMINI_BLOAT}\n    Run: charter adf tidy --dry-run`,
+    }]);
   });
 
   it('only bloat is scoped: any other WARN still fails --ci', async () => {

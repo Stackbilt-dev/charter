@@ -25,7 +25,7 @@ if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
       fi
       if ! git diff --quiet -- "$vf"; then
         echo "[pre-commit] $vf has unstaged changes, so auto-tidy is skipped for it in this commit."
-        echo "[pre-commit] Bloat in it does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy it: stage or stash the unstaged changes and commit again; or run: charter adf tidy --source $vf, then git add the result."
+        echo "[pre-commit] Its bloat, if any, is left as-is; a plain charter doctor --ci (as CI runs it) still reports it. To tidy it: stage or stash the unstaged changes and commit again; or run: charter adf tidy --source $vf, then git add the result."
         TIDY_SKIPPED="$TIDY_SKIPPED $vf"
         continue
       fi
@@ -52,7 +52,7 @@ if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
       set +f
       if [ -n "$BLOCKED" ]; then
         echo "[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work:$BLOCKED"
-        echo "[pre-commit] Bloat in$NAMES does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy: stage or stash that work and commit again; or run: charter adf tidy$SOURCES, then git add the result."
+        echo "[pre-commit] Bloat in$NAMES, if any, is left as-is; a plain charter doctor --ci (as CI runs it) still reports it. To tidy: stage or stash that work and commit again; or run: charter adf tidy$SOURCES, then git add the result."
         TIDY_SKIPPED="$TIDY_SKIPPED$NAMES"
       else
         echo "[pre-commit] Moving content beyond the thin pointer into .ai/ ..."

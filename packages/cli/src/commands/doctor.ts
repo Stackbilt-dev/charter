@@ -356,7 +356,8 @@ function checkVendorModes(aiDir: string, manifestPath: string): DoctorResult['ch
 export const BLOAT_SCOPE_MSG = {
   tidySkippedNeedsStaged: '--tidy-skipped requires --staged.',
   tidySkippedMissing: '--tidy-skipped requires a value: the vendor files the pre-commit hook skipped (may be empty, "").',
-  stagedPass: '{n} staged vendor file(s) within bloat thresholds.',
+  stagedPass: '{n} staged vendor file(s) checked, within bloat thresholds.',
+  stagedPassSkipped: ' {skipped} staged vendor file(s) skipped by auto-tidy are not checked here (see the INFO row).',
   outsideHeader: 'Vendor file bloat outside this commit (not blocking under --staged; charter doctor --ci without --staged still fails on it):',
   notStaged: '{file} (not staged)',
   tidySkipped: '{file} (auto-tidy skipped for it in this commit)',
@@ -716,6 +717,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
         };
         const blocking = bloatByFile.filter(b => scopeOf(b.file) === 'blocking');
         const outside = bloatByFile.filter(b => scopeOf(b.file) !== 'blocking');
+        const skippedBloated = outside.filter(b => scopeOf(b.file) === 'skipped').length;
         if (blocking.length > 0) {
           checks.push({
             name: 'adf vendor bloat',
@@ -727,7 +729,8 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
           checks.push({
             name: 'adf vendor bloat',
             status: 'PASS',
-            details: fill(BLOAT_SCOPE_MSG.stagedPass, { n: pointerFiles.filter(p => scopeOf(p.file) === 'blocking').length }),
+            details: fill(BLOAT_SCOPE_MSG.stagedPass, { n: pointerFiles.filter(p => scopeOf(p.file) === 'blocking').length })
+              + (skippedBloated > 0 ? fill(BLOAT_SCOPE_MSG.stagedPassSkipped, { skipped: skippedBloated }) : ''),
           });
         }
         if (outside.length > 0) {

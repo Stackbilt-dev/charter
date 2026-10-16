@@ -287,7 +287,7 @@ ${DB_BLOAT}`);
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
-    expect(result.output).toContain("[pre-commit] Bloat in it does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy it: stage or stash the unstaged changes and commit again; or run: charter adf tidy --source CLAUDE.md, then git add the result.");
+    expect(result.output).toContain("[pre-commit] Its bloat, if any, is left as-is; a plain charter doctor --ci (as CI runs it) still reports it. To tidy it: stage or stash the unstaged changes and commit again; or run: charter adf tidy --source CLAUDE.md, then git add the result.");
     expect(tidyCalls(repo)).toEqual([]);
     expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(staged);
     expect(read(tmp, 'CLAUDE.md')).toBe(worktree);
@@ -313,7 +313,7 @@ ${DB_BLOAT}`);
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work: .ai/backend.adf');
-    expect(result.output).toContain("[pre-commit] Bloat in CLAUDE.md does not block this commit at the hook's doctor gate (doctor --staged); a plain charter doctor --ci, as CI runs it, still fails on it. To tidy: stage or stash that work and commit again; or run: charter adf tidy --source CLAUDE.md, then git add the result.");
+    expect(result.output).toContain("[pre-commit] Bloat in CLAUDE.md, if any, is left as-is; a plain charter doctor --ci (as CI runs it) still reports it. To tidy: stage or stash that work and commit again; or run: charter adf tidy --source CLAUDE.md, then git add the result.");
     expect(tidyCalls(repo)).toEqual(['adf tidy --dry-run --print-paths --source CLAUDE.md']);
     expect(show(tmp, 'HEAD:CLAUDE.md')).toBe(bloated);
     expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
@@ -522,7 +522,7 @@ ${DB_BLOAT}`);
 
       expect(result.status).toBe(0);
       expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
-      expect(result.output).toContain("does not block this commit at the hook's doctor gate");
+      expect(result.output).toContain('[pre-commit] Its bloat, if any, is left as-is; a plain charter doctor --ci (as CI runs it) still reports it.');
       expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
       expect(result.output).not.toContain(BLOAT_WARN);
       expect(result.output).not.toContain('[pre-commit] Blocked because');
