@@ -178,32 +178,47 @@ describe('registerManifestModules', () => {
     expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
   });
 
-  it('warns and does not move a DEFAULT_LOAD module listed under ON_DEMAND', () => {
-    fs.writeFileSync(manifestPath, 'ADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n  - core.adf (Triggers on: core)\n');
+  it('reports core.adf under ON_DEMAND as it is, warns, and does not move it', () => {
+    fs.writeFileSync(manifestPath, 'ADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n  - core.adf (Triggers on: Core)\n');
     const before = fs.readFileSync(manifestPath, 'utf-8');
     const result = registerManifestModules(manifestPath, [plan('core.adf')], { onWarning });
-    expect(result.registrations[0]).toMatchObject({ status: 'already-registered', loadPolicy: 'DEFAULT_LOAD' });
+    expect(result.registrations[0]).toMatchObject({
+      status: 'already-registered', loadPolicy: 'ON_DEMAND', triggers: ['Core'], triggerSources: [],
+    });
     expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
     expect(warnings).toEqual([
       `core.adf is listed under ON_DEMAND in ${manifestPath}; not moved. Move core.adf from ON_DEMAND to DEFAULT_LOAD in .ai/manifest.adf`,
     ]);
   });
 
-  it('creates missing sections in canonical order', () => {
-    fs.writeFileSync(manifestPath, 'ADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n  - frontend.adf (Triggers on: React)\n');
-    registerManifestModules(manifestPath, [plan('core.adf')], { onWarning });
-    let doc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
-    expect(doc.sections.map(s => s.key)).toEqual(['DEFAULT_LOAD', 'ON_DEMAND']);
-
-    fs.writeFileSync(manifestPath, 'ADF: 0.1\n\n\u{1F4E6} DEFAULT_LOAD:\n  - core.adf\n\n\u{1F4D0} RULES:\n  - Keep it small.\n');
-    registerManifestModules(manifestPath, [plan('infra.adf')], { onWarning });
-    doc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
-    // formatAdf applies the canonical key order; DEFAULT_LOAD stays ahead of ON_DEMAND.
-    const keys = doc.sections.map(s => s.key);
-    expect(keys.indexOf('ON_DEMAND')).toBeGreaterThan(keys.indexOf('DEFAULT_LOAD'));
-    expect(keys).toContain('RULES');
+  it('reports an existing entry with its own triggers, not inferred ones', () => {
+    fs.writeFileSync(manifestPath, MANIFEST);
+    const [reg] = registerManifestModules(manifestPath, [plan('frontend.adf', 'React components')], { onWarning }).registrations;
+    expect(reg).toMatchObject({ module: 'frontend.adf', loadPolicy: 'ON_DEMAND', triggers: ['React', 'CSS', 'UI'], triggerSources: [], status: 'already-registered' });
+    expect(reg.reason).not.toContain('inferred from');
+    expect(formatRegisterDetail(reg)).toBe('frontend.adf → ON_DEMAND: React, CSS, UI [already registered]');
   });
 
+  it('appends a missing section at the end of the file without reordering', () => {
+    const original = 'ADF: 0.1\n\n\u{1F4D0} RULES:\n  - Keep it small.\n\n\u{1F4C2} ON_DEMAND:\n  - frontend.adf (Triggers on: React)\n';
+    fs.writeFileSync(manifestPath, original);
+    registerManifestModules(manifestPath, [plan('core.adf')], { onWarning });
+    expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(`${original}\n\u{1F4E6} DEFAULT_LOAD:\n  - core.adf\n`);
+  });
+
+  it('registers into an empty section header (an empty list)', () => {
+    for (const [header, module, line] of [
+      ['\u{1F4C2} ON_DEMAND:', 'infra.adf', '  - infra.adf (Triggers on: deployment)'],
+      ['\u{1F4E6} DEFAULT_LOAD:', 'core.adf', '  - core.adf'],
+    ] as const) {
+      const original = `ADF: 0.1\n\n${header}\n\n\u{1F4D0} RULES:\n  - Keep it small.\n`;
+      fs.writeFileSync(manifestPath, original);
+      const [reg] = registerManifestModules(manifestPath, [plan(module)], { onWarning }).registrations;
+      expect(reg.status).toBe('added');
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(original.replace(`${header}\n`, `${header}\n${line}\n`));
+    }
+    expect(warnings).toEqual([]);
+  });
   it('skips with manifest-missing and warns', () => {
     const result = registerManifestModules(manifestPath, [plan('infra.adf'), plan('core.adf')], { onWarning });
     expect(result.written).toBe(false);
@@ -220,6 +235,14 @@ describe('registerManifestModules', () => {
     const result = registerManifestModules(manifestPath, [plan('infra.adf')], { onWarning });
     expect(result.registrations[0]).toMatchObject({ status: 'skipped', skipReason: 'manifest-unparseable' });
     expect(fs.readFileSync(manifestPath, 'utf-8')).toBe('ADF: 9.9\n');
+    expect(warnings).toEqual([
+      `${manifestPath} could not be parsed; 1 module(s) were not registered. Fix the manifest or run: charter doctor`,
+    ]);
+  });
+
+  it('says "would be written" for a missing manifest under dryRun', () => {
+    registerManifestModules(manifestPath, [plan('infra.adf')], { dryRun: true, onWarning });
+    expect(warnings).toEqual([`${manifestPath} not found; 1 module(s) would be written but not registered. Run: charter adf init`]);
   });
 
   it('skips with section-not-list and warns', () => {
@@ -255,6 +278,122 @@ describe('registerManifestModules', () => {
       ['state.adf', 'already-registered', []],
     ]);
     expect(fs.readFileSync(manifestPath, 'utf-8')).toContain('Ops.adf (Triggers on: ops)');
+  });
+});
+
+/**
+ * Assert `after` is `before` plus inserted lines only (every original byte kept,
+ * in order) and return the inserted lines.
+ */
+function insertedLines(before: string, after: string): string[] {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  const inserted: string[] = [];
+  let i = 0;
+  for (const line of b) {
+    if (i < a.length && line === a[i]) i++;
+    else inserted.push(line);
+  }
+  expect(i).toBe(a.length);
+  return inserted;
+}
+
+describe('registerManifestModules — byte preservation', () => {
+  let tempDir: string;
+  let manifestPath: string;
+  let warnings: string[];
+  const onWarning = (w: string) => { warnings.push(w); };
+  const infra = () => planModuleRegistration('infra.adf', [routedTo('infra.adf', 'Deployment')]);
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-register-bytes-'));
+    manifestPath = path.join(tempDir, 'manifest.adf');
+    warnings = [];
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function register(original: string, entries = [infra()]): string {
+    fs.writeFileSync(manifestPath, original);
+    const result = registerManifestModules(manifestPath, entries, { onWarning });
+    expect(result.registrations.every(r => r.status === 'added')).toBe(true);
+    return fs.readFileSync(manifestPath, 'utf-8');
+  }
+
+  const LINE = '  - infra.adf (Triggers on: deployment)';
+
+  it('keeps comment lines above the first section', () => {
+    const original = '# Team manifest: keep RULES last, ping @platform before editing\nADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n  - frontend.adf (Triggers on: React)\n\n\u{1F4D0} RULES:\n  - Keep it small.\n';
+    const after = register(original);
+    expect(after).toBe(original.replace('React)\n', `React)\n${LINE}\n`));
+  });
+
+  it('keeps HTML comments and markdown tables in text sections', () => {
+    const original = [
+      'ADF: 0.1',
+      '',
+      '\u{1F4CB} CONTEXT:',
+      '  Routing notes <!-- TODO: revisit after Q3 -->',
+      '  | module | owner |',
+      '  |--------|-------|',
+      '  | infra  | ops   |',
+      '',
+      '\u{1F4C2} ON_DEMAND:',
+      '  - frontend.adf (Triggers on: React)',
+      '',
+    ].join('\n');
+    const after = register(original);
+    expect(insertedLines(original, after)).toEqual([LINE]);
+    expect(after).toContain('<!-- TODO: revisit after Q3 -->');
+  });
+
+  it('keeps CRLF line endings, both when inserting and when appending a section', () => {
+    const original = 'ADF: 0.1\r\n\r\n\u{1F4E6} DEFAULT_LOAD:\r\n  - core.adf\r\n\r\n\u{1F4C2} ON_DEMAND:\r\n  - frontend.adf (Triggers on: React)\r\n';
+    expect(register(original)).toBe(original.replace('React)\r\n', `React)\r\n${LINE}\r\n`));
+
+    const noOnDemand = 'ADF: 0.1\r\n\r\n\u{1F4E6} DEFAULT_LOAD:\r\n  - core.adf\r\n';
+    expect(register(noOnDemand)).toBe(`${noOnDemand}\r\n\u{1F4C2} ON_DEMAND:\r\n${LINE}\r\n`);
+  });
+
+  it('keeps blank lines inside a list and inserts after its last item', () => {
+    const original = 'ADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n  - a.adf (Triggers on: alpha)\n\n  - b.adf (Triggers on: bravo)\n\n\u{1F4D0} RULES:\n  - Keep it small.\n';
+    expect(register(original)).toBe(original.replace('bravo)\n', `bravo)\n${LINE}\n`));
+  });
+
+  it('copies tab indentation from the existing items', () => {
+    const original = 'ADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n\t- frontend.adf (Triggers on: React)\n';
+    expect(register(original)).toBe(`${original}\t- infra.adf (Triggers on: deployment)\n`);
+  });
+
+  it('keeps a missing trailing newline missing', () => {
+    const original = 'ADF: 0.1\n\n\u{1F4C2} ON_DEMAND:\n  - frontend.adf (Triggers on: React)';
+    expect(register(original)).toBe(`${original}\n${LINE}`);
+  });
+
+  it("leaves this repo's own manifest byte-identical apart from the new lines", () => {
+    const original = fs.readFileSync(path.join(__dirname, 'fixtures', 'charter-manifest.adf'), 'utf-8');
+    const core = planModuleRegistration('state.adf', []);
+    const after = register(original, [infra(), { ...core, module: 'session.adf', loadPolicy: 'DEFAULT_LOAD' }]);
+    expect(insertedLines(original, after)).toEqual(['  - session.adf', LINE]);
+    const lines = after.split('\n');
+    expect(lines[lines.indexOf(LINE) - 1]).toMatch(/^ {2}- typed-data-access\.adf /);
+    expect(lines[lines.indexOf('  - session.adf') - 1]).toBe('  - state.adf');
+  });
+
+  it('refuses to write when the edit would change anything else', () => {
+    // Lone-CR line endings: the parser splits them, a line-based edit cannot place
+    // the bullet, and the re-parse check catches the mismatch.
+    const original = 'ADF: 0.1\r\r\u{1F4C2} ON_DEMAND:\r  - frontend.adf (Triggers on: React)\r';
+    fs.writeFileSync(manifestPath, original);
+    const result = registerManifestModules(manifestPath, [infra()], { onWarning });
+    expect(result.written).toBe(false);
+    expect(result.registrations[0]).toMatchObject({ status: 'skipped', skipReason: 'manifest-unparseable' });
+    expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(original);
+    expect(warnings).toEqual([
+      `${manifestPath} could not be updated without changing its other entries; 1 module(s) were not registered. Fix the manifest or run: charter doctor`,
+    ]);
   });
 });
 

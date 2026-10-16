@@ -13,8 +13,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseAdf, formatAdf, parseManifest, formatTriggerEntry } from '@stackbilt/adf';
-import type { AdfDocument, AdfSection, MigrationItem } from '@stackbilt/adf';
+import { parseAdf, parseManifest, formatTriggerEntry } from '@stackbilt/adf';
+import type { AdfDocument, MigrationItem } from '@stackbilt/adf';
 import { classifyModuleLoad, normalizeModulePath } from './adf-wiring';
 import { NAMED_MODULE_DEFAULT_TRIGGERS } from './adf-named-scaffolds';
 
@@ -234,36 +234,90 @@ function summarizeSources(sources: readonly TriggerInferenceSource[]): string {
 
 const SECTION_DECORATION: Record<LoadPolicy, string> = { DEFAULT_LOAD: '\u{1F4E6}', ON_DEMAND: '\u{1F4C2}' };
 
-/** Find the section, creating it in canonical order (DEFAULT_LOAD before ON_DEMAND). */
-function ensureSection(doc: AdfDocument, key: LoadPolicy): AdfSection {
-  const existing = doc.sections.find(s => s.key === key);
-  if (existing) return existing;
-  const section: AdfSection = { key, decoration: SECTION_DECORATION[key], content: { type: 'list', items: [] } };
-  if (key === 'DEFAULT_LOAD') {
-    const onDemandIdx = doc.sections.findIndex(s => s.key === 'ON_DEMAND');
-    if (onDemandIdx !== -1) {
-      doc.sections.splice(onDemandIdx, 0, section);
-      return section;
-    }
-  } else {
-    const defaultIdx = doc.sections.findIndex(s => s.key === 'DEFAULT_LOAD');
-    if (defaultIdx !== -1) {
-      doc.sections.splice(defaultIdx + 1, 0, section);
-      return section;
+// Same header/version grammar as @stackbilt/adf's parser, so the text edit finds
+// exactly the sections parseAdf sees.
+const SECTION_HEADER_RE = /^(?:(\p{Emoji_Presentation}|\p{Extended_Pictographic})️?\s+)?([A-Z][A-Z0-9_]*)\s*(?:\[(load-bearing|advisory)\]\s*)?:\s*(.*)$/u;
+const VERSION_RE = /^ADF\s*:\s*(.+)$/i;
+const LIST_ITEM_PREFIX_RE = /^(\s*-\s+)\S/;
+
+/**
+ * Insert one bullet into the last `key` section of the manifest text (the one
+ * parseManifest reads), after its last list item and with that item's
+ * indentation and bullet style. A missing section is appended as a new block
+ * at the end of the file. Line endings (CRLF or LF) and the trailing-newline
+ * state are kept; no other byte changes.
+ */
+export function insertManifestBullet(text: string, key: LoadPolicy, bullet: string): string {
+  const crlf = text.includes('\r\n');
+  const eol = crlf ? '\r\n' : '\n';
+  const lines = text.split('\n');
+  const clean = (line: string) => line.replace(/\r$/, '').trimEnd();
+  const start = lines.length > 0 && VERSION_RE.test(clean(lines[0])) ? 1 : 0;
+  const headers: number[] = [];
+  for (let i = start; i < lines.length; i++) {
+    if (SECTION_HEADER_RE.test(clean(lines[i]))) headers.push(i);
+  }
+  const own = headers.filter(i => clean(lines[i]).match(SECTION_HEADER_RE)?.[2] === key);
+
+  if (own.length === 0) {
+    const block = `${SECTION_DECORATION[key]} ${key}:${eol}  - ${bullet}`;
+    if (text.length === 0) return `${block}${eol}`;
+    return text.endsWith('\n') ? `${text}${eol}${block}${eol}` : `${text}${eol}${eol}${block}`;
+  }
+
+  const header = own[own.length - 1];
+  const next = headers.find(i => i > header) ?? lines.length;
+  let after = header;
+  let prefix = '  - ';
+  for (let i = header + 1; i < next; i++) {
+    const match = clean(lines[i]).match(LIST_ITEM_PREFIX_RE);
+    if (match) {
+      after = i;
+      prefix = match[1];
     }
   }
-  doc.sections.push(section);
-  return section;
+  if (after === lines.length - 1) {
+    // Inserting after the final line of a file with no trailing newline.
+    lines[after] += crlf ? '\r' : '';
+    lines.splice(after + 1, 0, prefix + bullet);
+  } else {
+    lines.splice(after + 1, 0, prefix + bullet + (crlf ? '\r' : ''));
+  }
+  return lines.join('\n');
 }
 
 function skipAll(manifestPath: string, entries: ModuleRegistration[], skipReason: SkipReason): RegisterManifestModulesResult {
   return { manifestPath, written: false, registrations: entries.map(e => ({ ...e, status: 'skipped', skipReason })) };
 }
 
+function lastSectionIndex(doc: AdfDocument, key: string): number {
+  for (let i = doc.sections.length - 1; i >= 0; i--) {
+    if (doc.sections[i].key === key) return i;
+  }
+  return -1;
+}
+
+/** An existing entry, reported as the manifest has it: real section, triggers as spelled. */
+function alreadyRegistered(entry: ModuleRegistration, policy: LoadPolicy, triggers: readonly string[]): ModuleRegistration {
+  return {
+    module: entry.module,
+    loadPolicy: policy,
+    triggers: [...triggers],
+    reason: `already registered under ${policy}; existing entry kept, triggers not inferred`,
+    status: 'already-registered',
+    triggerSources: [],
+  };
+}
+
 /**
  * Register planned modules in manifest.adf. Append-only and idempotent: an
  * entry already present (matched by normalized parsed path, in either section)
- * is left untouched and reported 'already-registered'. Under dryRun nothing is
+ * is left untouched and reported 'already-registered' with its real placement.
+ *
+ * The manifest is parsed only to decide; new bullets are inserted as text, so
+ * every other byte (comments, ordering, line endings) survives. Before writing,
+ * the edited text is re-parsed and must equal the old document plus exactly
+ * the new entries; otherwise nothing is written. Under dryRun nothing is
  * written and would-be additions stay 'planned'.
  */
 export function registerManifestModules(
@@ -277,51 +331,90 @@ export function registerManifestModules(
 
   if (!fs.existsSync(manifestPath)) {
     if (entries.length > 0) {
-      warn(`${manifestPath} not found; ${entries.length} module(s) were written but not registered. Run: charter adf init`);
+      const verb = options.dryRun ? 'would be' : 'were';
+      warn(`${manifestPath} not found; ${entries.length} module(s) ${verb} written but not registered. Run: charter adf init`);
     }
     return skipAll(manifestPath, entries, 'manifest-missing');
   }
 
+  let text: string;
   let doc: AdfDocument;
   let manifest: ParsedManifest;
   try {
-    doc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
+    text = fs.readFileSync(manifestPath, 'utf-8');
+    doc = parseAdf(text);
     manifest = parseManifest(doc);
   } catch {
+    if (entries.length > 0) {
+      warn(`${manifestPath} could not be parsed; ${entries.length} module(s) were not registered. Fix the manifest or run: charter doctor`);
+    }
     return skipAll(manifestPath, entries, 'manifest-unparseable');
   }
 
-  const defaultLoad = new Set(manifest.defaultLoad.map(normalizeModulePath));
-  const onDemand = new Set(manifest.onDemand.map(m => normalizeModulePath(m.path)));
+  // DEFAULT_LOAD wins when a module is listed in both sections.
+  const existing = new Map<string, { policy: LoadPolicy; triggers: readonly string[] }>();
+  for (const mod of manifest.onDemand) existing.set(normalizeModulePath(mod.path), { policy: 'ON_DEMAND', triggers: mod.triggers });
+  for (const mod of manifest.defaultLoad) existing.set(normalizeModulePath(mod), { policy: 'DEFAULT_LOAD', triggers: [] });
+
+  const expected: AdfDocument = JSON.parse(JSON.stringify(doc));
   const registrations: ModuleRegistration[] = [];
-  let added = false;
+  const pending: number[] = [];
+  let next = text;
 
   for (const entry of entries) {
-    if (defaultLoad.has(entry.module) || onDemand.has(entry.module)) {
-      if (entry.loadPolicy === 'DEFAULT_LOAD' && !defaultLoad.has(entry.module)) {
+    const found = existing.get(entry.module);
+    if (found) {
+      if (entry.loadPolicy === 'DEFAULT_LOAD' && found.policy === 'ON_DEMAND') {
         warn(`${entry.module} is listed under ON_DEMAND in ${manifestPath}; not moved. Move ${entry.module} from ON_DEMAND to DEFAULT_LOAD in .ai/manifest.adf`);
       }
-      registrations.push({ ...entry, status: 'already-registered' });
+      registrations.push(alreadyRegistered(entry, found.policy, found.triggers));
       continue;
     }
 
-    const section = ensureSection(doc, entry.loadPolicy);
-    if (section.content.type !== 'list') {
-      warn(`${entry.loadPolicy} in ${manifestPath} is not a list; ${entry.module} was not registered`);
+    const key = entry.loadPolicy;
+    const idx = lastSectionIndex(expected, key);
+    const section = idx === -1 ? undefined : expected.sections[idx];
+    // A header with no items parses as empty text; it is an empty list.
+    const emptyText = section?.content.type === 'text' && section.content.value === '';
+    if (section && section.content.type !== 'list' && !emptyText) {
+      warn(`${key} in ${manifestPath} is not a list; ${entry.module} was not registered`);
       registrations.push({ ...entry, status: 'skipped', skipReason: 'section-not-list' });
       continue;
     }
 
-    section.content.items.push(entry.loadPolicy === 'DEFAULT_LOAD'
+    const bullet = key === 'DEFAULT_LOAD'
       ? entry.module
-      : formatTriggerEntry({ path: entry.module, triggers: entry.triggers, loadPolicy: 'ON_DEMAND' }));
-    (entry.loadPolicy === 'DEFAULT_LOAD' ? defaultLoad : onDemand).add(entry.module);
+      : formatTriggerEntry({ path: entry.module, triggers: entry.triggers, loadPolicy: 'ON_DEMAND' });
+    next = insertManifestBullet(next, key, bullet);
+    if (!section) {
+      expected.sections.push({ key, decoration: SECTION_DECORATION[key], content: { type: 'list', items: [bullet] } });
+    } else if (section.content.type === 'list') {
+      section.content.items.push(bullet);
+    } else {
+      section.content = { type: 'list', items: [bullet] };
+    }
+    existing.set(entry.module, { policy: key, triggers: entry.triggers });
+    pending.push(registrations.length);
     registrations.push({ ...entry, status: options.dryRun ? 'planned' : 'added' });
-    added = true;
   }
 
-  const written = added && !options.dryRun;
-  if (written) fs.writeFileSync(manifestPath, formatAdf(doc));
+  if (pending.length === 0) return { manifestPath, written: false, registrations };
+
+  // Guard: the edit must change nothing but the new entries.
+  let safe = false;
+  try {
+    safe = JSON.stringify(parseAdf(next)) === JSON.stringify(expected);
+  } catch {
+    safe = false;
+  }
+  if (!safe) {
+    warn(`${manifestPath} could not be updated without changing its other entries; ${pending.length} module(s) were not registered. Fix the manifest or run: charter doctor`);
+    for (const i of pending) registrations[i] = { ...registrations[i], status: 'skipped', skipReason: 'manifest-unparseable' };
+    return { manifestPath, written: false, registrations };
+  }
+
+  const written = !options.dryRun;
+  if (written) fs.writeFileSync(manifestPath, next);
   return { manifestPath, written, registrations };
 }
 
@@ -401,6 +494,7 @@ export function dedupePlannedRegistrations(
       continue;
     }
     reg.status = 'already-registered';
+    reg.reason = 'planned by an earlier source in this run; reported once';
     const action = result.actions.find((a): a is RegisterAction => a.type === 'REGISTER' && (a as RegisterAction).module === reg.module);
     if (action) {
       action.status = reg.status;

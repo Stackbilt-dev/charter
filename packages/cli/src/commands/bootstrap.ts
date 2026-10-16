@@ -229,8 +229,13 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       const manifestFilePath = path.join('.ai', 'manifest.adf');
       // Shared append-only writer (#239): core.adf and state.adf go to DEFAULT_LOAD,
       // everything else to ON_DEMAND with the module stem as its trigger.
+      // Writer warnings join phase 3's step so they also reach the JSON payload (#307).
       const { registrations } = registerModules(manifestFilePath, orphans, [], {
-        onWarning: w => { if (options.format === 'text') console.log(`  Warning: ${w}`); },
+        onWarning: w => {
+          adfResult.step.warnings.push(w);
+          warnings++;
+          if (options.format === 'text') console.log(`  Warning: ${w}`);
+        },
       });
       for (const policy of ['DEFAULT_LOAD', 'ON_DEMAND'] as const) {
         const added = registrations.filter(r => r.status === 'added' && r.loadPolicy === policy).length;

@@ -1,0 +1,35 @@
+ADF: 0.1
+
+🎯 ROLE: Charter Kit development context router
+
+📐 RULES:
+  - Prefer smallest relevant module set.
+  - Never assume unseen modules were loaded.
+  - Load-bearing constraints must reference measurable thresholds.
+
+📦 DEFAULT_LOAD:
+  - core.adf
+  - state.adf
+
+📂 ON_DEMAND:
+  - adf-dev.adf (Triggers on: ADF, parser, formatter, patcher, bundler, metric, weight)
+  - governance.adf (Triggers on: validate, drift, audit, trailer, risk, governance)
+  - classifier.adf (Triggers on: classifier, routing, auto-route, adf add, classify, rule placement)
+  - analysis.adf (Triggers on: blast, surface, dependency graph, blast radius, route extraction, schema extraction)
+  - typed-data-access.adf (Triggers on: tenant, user, subscription, quota, credit, mrr, pii, sensitivity, data registry, ontology, disambiguation, DATA_AUTHORITY, raw D1, service boundary, auth_scoped, billing_critical)
+
+💰 BUDGET:
+  MAX_TOKENS: 4000
+
+📊 METRICS:
+  ADF_COMMANDS_LOC: packages/cli/src/commands/adf.ts
+  ADF_BUNDLE_LOC: packages/cli/src/commands/adf-bundle.ts
+  ADF_SYNC_LOC: packages/cli/src/commands/adf-sync.ts
+  ADF_EVIDENCE_LOC: packages/cli/src/commands/adf-evidence.ts
+  ADF_MIGRATE_LOC: packages/cli/src/commands/adf-migrate.ts
+  BUNDLER_LOC: packages/adf/src/bundler.ts
+  PARSER_LOC: packages/adf/src/parser.ts
+  CLI_ENTRY_LOC: packages/cli/src/index.ts
+
+🔄 SYNC:
+  - core.adf -> CLAUDE.md

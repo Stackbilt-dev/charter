@@ -138,6 +138,11 @@ describe('adf migrate — manifest registration (#239)', () => {
       ['frontend.adf', 'already-registered'],
       ['core.adf', 'already-registered'],
     ]);
+    // Existing entries are reported as the manifest has them, not as inferred.
+    expect(src.actions.filter(a => a.type === 'REGISTER').map(a => a.detail)).toEqual([
+      'frontend.adf → ON_DEMAND: React, CSS, UI [already registered]',
+      'core.adf → DEFAULT_LOAD [already registered]',
+    ]);
     expect(fs.readFileSync(MANIFEST_PATH, 'utf-8')).toBe(MANIFEST);
   });
 
@@ -160,6 +165,7 @@ describe('adf migrate — manifest registration (#239)', () => {
     expect(await adfMigrateCommand(baseOptions, [])).toBe(0);
     expect(fs.readFileSync(MANIFEST_PATH, 'utf-8')).toBe(manifest);
     expect(logs.some(l => l.includes('core.adf is listed under ON_DEMAND') && l.includes('Move core.adf from ON_DEMAND to DEFAULT_LOAD'))).toBe(true);
+    expect(logs).toContain(`    REGISTER ${MANIFEST_PATH}  (core.adf → ON_DEMAND: core [already registered])`);
   });
 
   it('registers a module that two sources route to exactly once', async () => {
@@ -307,6 +313,48 @@ describe('bootstrap --yes — migrate registers its own modules (INV-4)', () => 
     expect(await bootstrapCommand({ ...baseOptions, yes: true }, args)).toBe(0);
     expect(logs.some(l => l.includes('unregistered .adf module'))).toBe(false);
     expect(fs.readFileSync(MANIFEST_PATH, 'utf-8')).toBe(manifestAfterFirst);
+  });
+
+  it('orphan registration leaves a hand-edited manifest byte-identical apart from the new line', async () => {
+    fs.mkdirSync('.ai');
+    const manifest = [
+      '# Team manifest: keep RULES last, ping @platform before editing',
+      'ADF: 0.1',
+      '',
+      '\u{1F4E6} DEFAULT_LOAD:',
+      '  - core.adf',
+      '  - state.adf',
+      '',
+      '\u{1F4C2} ON_DEMAND:',
+      '  - frontend.adf (Triggers on: React, CSS, UI)',
+      '  - backend.adf (Triggers on: API, Node, DB)',
+      '',
+      '\u{1F4CB} CONTEXT:',
+      '  Routing notes <!-- TODO: revisit after Q3 -->',
+      '  | module | owner |',
+      '  |--------|-------|',
+      '',
+      '\u{1F4D0} RULES:',
+      '  - Prefer smallest relevant module set.',
+      '',
+    ].join('\n');
+    fs.writeFileSync(MANIFEST_PATH, manifest);
+    fs.writeFileSync(path.join('.ai', 'Observability.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Old tracing notes\n');
+
+    expect(await bootstrapCommand({ ...baseOptions, yes: true }, args)).toBe(0);
+    const after = fs.readFileSync(MANIFEST_PATH, 'utf-8');
+    expect(after).toBe(manifest.replace('DB)\n', 'DB)\n  - Observability.adf (Triggers on: observability)\n'));
+  });
+
+  it('bootstrap --format json carries writer warnings in the phase 3 step', async () => {
+    fs.mkdirSync('.ai');
+    fs.writeFileSync(MANIFEST_PATH, 'ADF: 0.1\n\n\u{1F4E6} DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n\u{1F4C2} ON_DEMAND: load modules lazily\n');
+    fs.writeFileSync(path.join('.ai', 'ops.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Ops notes\n');
+
+    expect(await bootstrapCommand({ ...baseOptions, format: 'json', yes: true }, args)).toBe(0);
+    const out = JSON.parse(logs.join('\n')) as { steps: Array<{ name: string; warnings: string[] }> };
+    const all = out.steps.flatMap(s => s.warnings);
+    expect(all.some(w => w.includes('ON_DEMAND in') && w.includes('is not a list; ops.adf was not registered'))).toBe(true);
   });
 
   it('orphan registration goes through the shared writer: lowercase stem triggers, idempotent', async () => {
