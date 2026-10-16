@@ -7,7 +7,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CLIOptions } from '../index';
-import { EXIT_CODE } from '../index';
+import { CLIError, EXIT_CODE } from '../index';
+import { getFlag } from '../flags';
 import { loadPatterns, loadConfig } from '../config';
 import { parseAdf, parseManifest, stripCharterSentinels, evaluateLocBudgets, matchPath } from '@stackbilt/adf';
 import type { LocBudgetRule } from '@stackbilt/adf';
@@ -16,7 +17,7 @@ import { CHARTER_OWNED_MARKERS } from './adf';
 import { TARGET_FILENAMES } from '@stackbilt/adf';
 import type { CompileTarget } from '@stackbilt/adf';
 import { countExtractable } from './adf-tidy';
-import { legacyIndexEntries, legacyIndexKind, readVendorRecord, resolveVendorMode, resolveVendorModes, vendorFileGroups } from './adf-vendor';
+import { legacyIndexEntries, legacyIndexKind, readVendorRecord, resolveVendorMode, resolveVendorModes, VENDOR_FILES, vendorFileGroups } from './adf-vendor';
 import type { ModeSource, VendorEntryProblem, VendorFile, VendorMode } from './adf-vendor';
 import { checkGateEnforcement, checkPreCommitScope } from './doctor-gate-enforcement';
 import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
@@ -348,9 +349,58 @@ function checkVendorModes(aiDir: string, manifestPath: string): DoctorResult['ch
   };
 }
 
+// ============================================================================
+// Commit-scoped vendor bloat (#357)
+// ============================================================================
+
+export const BLOAT_SCOPE_MSG = {
+  tidySkippedNeedsStaged: '--tidy-skipped requires --staged.',
+  tidySkippedMissing: '--tidy-skipped requires a value: the vendor files the pre-commit hook skipped (may be empty, "").',
+  stagedPass: '{n} staged vendor file(s) checked, within bloat thresholds.',
+  stagedPassSkipped: ' {skipped} staged vendor file(s) skipped by auto-tidy are not checked here (see the INFO row).',
+  outsideHeader: 'Vendor file bloat outside this commit (not blocking under --staged; charter doctor --ci without --staged still fails on it):',
+  notStaged: '{file} (not staged)',
+  tidySkipped: '{file} (auto-tidy skipped for it in this commit)',
+  outsideRun: 'Run: charter adf tidy --source <file>, then git add the result',
+} as const;
+
+/**
+ * Which vendor files' bloat can fail doctor. `null` (no --staged) is the
+ * unscoped default: every vendor file, exactly as before #357.
+ * With --staged (the generated pre-commit hook's gate), only vendor files staged
+ * in the index, minus the ones listed in --tidy-skipped (the files the hook's
+ * tidy block deliberately skipped, CP-3/CP-4). Only the bloat check is scoped.
+ */
+interface BloatScope {
+  staged: ReadonlySet<string>;
+  skipped: ReadonlySet<string>;
+}
+
+function resolveBloatScope(args: string[]): BloatScope | null {
+  const hasSkipped = args.includes('--tidy-skipped');
+  if (!args.includes('--staged')) {
+    if (hasSkipped) throw new CLIError(BLOAT_SCOPE_MSG.tidySkippedNeedsStaged);
+    return null;
+  }
+  const skippedRaw = hasSkipped ? getFlag(args, '--tidy-skipped') : '';
+  if (skippedRaw === undefined || skippedRaw.startsWith('--')) throw new CLIError(BLOAT_SCOPE_MSG.tidySkippedMissing);
+  let stagedOut: string;
+  try {
+    stagedOut = runGit(['diff', '--cached', '--name-only', '--diff-filter=d']);
+  } catch {
+    // The index cannot be read: fall back to enforcing every vendor file.
+    return null;
+  }
+  const vendorNames = new Set<string>(VENDOR_FILES);
+  const staged = new Set(stagedOut.split(/\r?\n/).map(l => l.trim()).filter(l => vendorNames.has(l)));
+  const skipped = new Set(skippedRaw.split(/\s+/).filter(Boolean));
+  return { staged, skipped };
+}
+
 export async function doctorCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   const checks: DoctorResult['checks'] = [];
   const adfOnly = args.includes('--adf-only');
+  const bloatScope = resolveBloatScope(args);
   const mcpMode = args.includes('--mcp');
   const configFile = path.join(options.configPath, 'config.json');
   const inGitRepo = isGitRepo();
@@ -568,6 +618,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
       // Vendor file bloat detection: line count, section overlap, keyword density
       const BLOAT_LINE_THRESHOLD = 80;
       const bloatWarnings: string[] = [];
+      const bloatByFile: Array<{ file: string; warnings: string }> = [];
 
       // Collect ADF section keys for overlap detection
       const adfSectionKeys = new Set<string>();
@@ -650,10 +701,47 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
 
         if (fileWarnings.length > 0) {
           bloatWarnings.push(`${file}: ${fileWarnings.join('; ')}`);
+          bloatByFile.push({ file, warnings: fileWarnings.join('; ') });
         }
       }
 
-      if (bloatWarnings.length > 0) {
+      if (bloatScope) {
+        // Hook gate (#357): a file is matched under any spelling of its physical
+        // file, so a staged agents.md covers the AGENTS.md row on NTFS.
+        const groups = vendorFileGroups();
+        const namesOf = (file: string): string[] => groups.find(g => (g as string[]).includes(file)) ?? [file];
+        const scopeOf = (file: string): 'blocking' | 'skipped' | 'not-staged' => {
+          const names = namesOf(file);
+          if (names.some(n => bloatScope.skipped.has(n))) return 'skipped';
+          return names.some(n => bloatScope.staged.has(n)) ? 'blocking' : 'not-staged';
+        };
+        const blocking = bloatByFile.filter(b => scopeOf(b.file) === 'blocking');
+        const outside = bloatByFile.filter(b => scopeOf(b.file) !== 'blocking');
+        const skippedBloated = outside.filter(b => scopeOf(b.file) === 'skipped').length;
+        if (blocking.length > 0) {
+          checks.push({
+            name: 'adf vendor bloat',
+            status: 'WARN',
+            // Scoped advice: a whole-tree tidy would also rewrite files this commit leaves out.
+            details: `Vendor file bloat detected:\n    ${blocking.map(b => `${b.file}: ${b.warnings}`).join('\n    ')}\n    Run: charter adf tidy --dry-run${blocking.map(b => ` --source ${b.file}`).join('')}`,
+          });
+        } else if (pointerFiles.length > 0) {
+          checks.push({
+            name: 'adf vendor bloat',
+            status: 'PASS',
+            details: fill(BLOAT_SCOPE_MSG.stagedPass, { n: pointerFiles.filter(p => scopeOf(p.file) === 'blocking').length })
+              + (skippedBloated > 0 ? fill(BLOAT_SCOPE_MSG.stagedPassSkipped, { skipped: skippedBloated }) : ''),
+          });
+        }
+        if (outside.length > 0) {
+          const label = (file: string): string => fill(scopeOf(file) === 'skipped' ? BLOAT_SCOPE_MSG.tidySkipped : BLOAT_SCOPE_MSG.notStaged, { file });
+          checks.push({
+            name: 'adf vendor bloat (not blocking)',
+            status: 'INFO',
+            details: `${BLOAT_SCOPE_MSG.outsideHeader}\n    ${outside.map(b => `${label(b.file)}: ${b.warnings}`).join('\n    ')}\n    ${BLOAT_SCOPE_MSG.outsideRun}`,
+          });
+        }
+      } else if (bloatWarnings.length > 0) {
         checks.push({
           name: 'adf vendor bloat',
           status: 'WARN',

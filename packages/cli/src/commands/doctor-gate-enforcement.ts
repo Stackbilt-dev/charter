@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { runGit } from '../git-helpers';
-import { PRE_COMMIT_HOOK_MARKER, PRE_COMMIT_SCOPE_MARKER } from './hook';
+import { PRE_COMMIT_GATE_SCOPE_MARKER, PRE_COMMIT_HOOK_MARKER, PRE_COMMIT_SCOPE_MARKER } from './hook';
 
 interface GateEnforcementCheck {
   name: 'gate enforcement';
@@ -49,10 +49,12 @@ interface PreCommitScopeCheck {
 }
 
 export const DOCTOR_OLD_PRE_COMMIT_MSG = 'The Charter pre-commit hook at {hookPath} predates staged-only tidy: it tidies every vendor file and re-stages all of .ai/*.adf, which can sweep unrelated edits into a commit. Re-run: charter hook install --pre-commit';
+export const DOCTOR_UNSCOPED_GATE_MSG = 'The Charter pre-commit hook at {hookPath} predates the commit-scoped evidence gate: it blocks a commit on vendor bloat in files the commit does not include, and in files its tidy step skipped. Re-run: charter hook install --pre-commit';
 
 /**
  * INFO when the active pre-commit hook is a Charter-generated one from before
- * #320 (it carries PRE_COMMIT_HOOK_MARKER but not PRE_COMMIT_SCOPE_MARKER).
+ * #320 (it carries PRE_COMMIT_HOOK_MARKER but not PRE_COMMIT_SCOPE_MARKER), or
+ * from #320 but before #357 (no PRE_COMMIT_GATE_SCOPE_MARKER).
  * Undefined, so no row at all, for a current, foreign or missing hook.
  * INFO, not WARN: doctor --ci fails on WARN, and an old hook over-stages but
  * enforces nothing less, so warning would break CI on upgrade (#186).
@@ -60,11 +62,15 @@ export const DOCTOR_OLD_PRE_COMMIT_MSG = 'The Charter pre-commit hook at {hookPa
 export function checkPreCommitScope(): PreCommitScopeCheck | undefined {
   const hookPath = path.join(resolveHooksDir(), 'pre-commit');
   const content = readText(hookPath);
-  if (!content.includes(PRE_COMMIT_HOOK_MARKER) || content.includes(PRE_COMMIT_SCOPE_MARKER)) return undefined;
+  if (!content.includes(PRE_COMMIT_HOOK_MARKER)) return undefined;
+  const message = !content.includes(PRE_COMMIT_SCOPE_MARKER) ? DOCTOR_OLD_PRE_COMMIT_MSG
+    : !content.includes(PRE_COMMIT_GATE_SCOPE_MARKER) ? DOCTOR_UNSCOPED_GATE_MSG
+      : undefined;
+  if (!message) return undefined;
   return {
     name: 'pre-commit hook',
     status: 'INFO',
-    details: DOCTOR_OLD_PRE_COMMIT_MSG.replace('{hookPath}', displayPath(hookPath)),
+    details: message.replace('{hookPath}', displayPath(hookPath)),
   };
 }
 

@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import {
   HOOK_TIDY_BLOCK_TEMPLATE,
   hookCommand,
+  PRE_COMMIT_GATE_SCOPE_MARKER,
   PRE_COMMIT_HOOK_CONTENT,
   PRE_COMMIT_HOOK_MARKER,
   PRE_COMMIT_SCOPE_MARKER,
@@ -301,6 +302,37 @@ describe('hookCommand', () => {
         status: 'INFO',
         details: 'The Charter pre-commit hook at .git/hooks/pre-commit predates staged-only tidy: it tidies every vendor file and re-stages all of .ai/*.adf, which can sweep unrelated edits into a commit. Re-run: charter hook install --pre-commit',
       }]);
+    });
+
+    it('#357: INFO for a #356-era hook (staged-only tidy, unscoped gate)', async () => {
+      // The #356 hook: the current text without the gate marker and with its unscoped gate.
+      const hook356 = PRE_COMMIT_HOOK_CONTENT
+        .replace(`${PRE_COMMIT_GATE_SCOPE_MARKER}\n`, '')
+        .replace(/npx charter doctor --adf-only --ci --staged --tidy-skipped "\$TIDY_SKIPPED" --format text/, 'npx charter doctor --adf-only --ci --format text');
+      expect(hook356).toContain(PRE_COMMIT_SCOPE_MARKER);
+      expect(hook356).toContain('npx charter doctor --adf-only --ci --format text && ');
+      expect(hook356).not.toContain(PRE_COMMIT_GATE_SCOPE_MARKER);
+      writeHook(path.join(tempDir, '.git', 'hooks'), hook356);
+      const rows = (await doctorChecks()).filter(c => c.name === 'pre-commit hook');
+      expect(rows).toEqual([{
+        name: 'pre-commit hook',
+        status: 'INFO',
+        details: 'The Charter pre-commit hook at .git/hooks/pre-commit predates the commit-scoped evidence gate: it blocks a commit on vendor bloat in files the commit does not include, and in files its tidy step skipped. Re-run: charter hook install --pre-commit',
+      }]);
+
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      expect(await hookCommand(baseOptions, ['install', '--pre-commit'])).toBe(0);
+      vi.restoreAllMocks();
+      expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
+    });
+
+    it('#357: the generated gate passes --staged and the tidy skips, and no longer claims a skip caused the block', () => {
+      const gate = PRE_COMMIT_HOOK_CONTENT.slice(PRE_COMMIT_HOOK_CONTENT.indexOf('\n# ADF evidence gate'));
+      expect(gate).toContain(PRE_COMMIT_GATE_SCOPE_MARKER);
+      expect(gate).toContain('npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text && npx charter adf evidence --auto-measure --ci');
+      expect(gate).not.toContain('Blocked because');
+      expect(gate).not.toContain('totalExtracted');
+      expect(gate.match(/npx charter/g)?.length).toBe(5); // two calls, three echoed hints
     });
 
     it('re-running hook install --pre-commit replaces the old hook without --force, and the row goes away', async () => {
