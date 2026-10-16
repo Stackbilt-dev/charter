@@ -151,6 +151,7 @@ describe('inferVendorMode', () => {
     const { json } = await runJson<{ files: Array<{ status: string }> }>(['tidy', '--dry-run', '--source', file]);
     const status = json.files[0].status;
     if (status === 'compiled') return 'compiled';
+    if (status === 'unmanaged') return 'unmanaged';
     if (status === 'not-found') return fs.existsSync(file) ? 'unmanaged' : 'absent';
     return 'pointer';
   }
@@ -620,14 +621,16 @@ describe('implicit writers', () => {
     expect(manifestText()).toBe(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: compiled\n`);
   });
 
-  it('adf compile --write keeps an existing entry and only warns', async () => {
+  it('adf compile --write refuses a recorded pointer instead of keeping the entry and warning (#318 PR2)', async () => {
     scaffold(`${BASE_MANIFEST}${VENDORS_BLOCK}`);
     fs.writeFileSync('CLAUDE.md', POINTER_CLAUDE_MD);
     const before = manifestText();
     const r = await run(['compile', '--target', 'claude', '--write']);
-    expect(r.code).toBe(0);
-    expect(r.err).toContain('  [warn] CLAUDE.md is recorded as pointer but adf compile --write wrote it as compiled; record kept. To change it: charter adf vendor set CLAUDE.md compiled');
+    expect(r.code).toBe(1);
+    expect(r.err).not.toContain('record kept');
+    expect(r.err).toContain('Run: charter adf compile --target claude --write --mode compiled');
     expect(manifestText()).toBe(before);
+    expect(fs.readFileSync('CLAUDE.md', 'utf-8')).toBe(POINTER_CLAUDE_MD);
   });
 
   it('a record-write failure leaves the exit code and JSON unchanged (INV-9)', async () => {
@@ -637,7 +640,10 @@ describe('implicit writers', () => {
     scaffold(`${BASE_MANIFEST}\n\u{1F3F7} VENDORS: not a list\n`);
     const broken = await runJson(['compile', '--target', 'agents', '--write']);
     expect(broken.code).toBe(baseline.code);
-    expect(broken.json).toEqual(baseline.json);
+    // Legacy keys are unchanged; targets[].recordedMode honestly reports the missing entry.
+    const legacy = (j: Record<string, unknown>) => ({ written: j.written, refused: j.refused, skipped: j.skipped, nextActions: j.nextActions });
+    expect(legacy(broken.json)).toEqual(legacy(baseline.json));
+    expect((broken.json.targets as Array<{ recordedMode: unknown }>)[0].recordedMode).toBeNull();
     expect(broken.err).toContain('VENDORS in');
     expect(broken.err).toContain('does not read as a list');
     expect(broken.err).toContain('AGENTS.md was not recorded.');
@@ -689,10 +695,10 @@ describe('implicit writers', () => {
 });
 
 // ============================================================================
-// 7. No consumer behaviour change (INV-1)
+// 7. Consumers that do not read the record yet (INV-1)
 // ============================================================================
 
-describe('consumers ignore the record (INV-1)', () => {
+describe('doctor, score and compile stdout ignore the record (INV-1, until PR3)', () => {
   type Run = { code: number; out: string; err: string };
 
   /** Run `steps` in two fresh repos, identical except for a VENDORS section. */
@@ -733,27 +739,16 @@ describe('consumers ignore the record (INV-1)', () => {
     fs.writeFileSync('.cursorrules', 'hand-written rules\n');
   };
 
-  it('compile --check, --write and stdout are unchanged', async () => {
-    await compare(setupVendorFiles, [
-      () => run(['compile', '--target', 'all', '--check']),
-      () => run(['compile', '--target', 'all', '--check', '--format', 'json'], JSON_OPTS),
-      () => run(['compile', '--target', 'claude']),
-      () => run(['compile', '--target', 'all', '--write', '--format', 'json'], JSON_OPTS),
-      () => run(['compile', '--target', 'all', '--check']),
-    ]);
+  // compile --check/--write and tidy read the record since #318 PR2; their
+  // record-aware behaviour is pinned in adf-vendor-consumers.test.ts.
+  it('compile stdout is unchanged', async () => {
+    await compare(setupVendorFiles, [() => run(['compile', '--target', 'claude'])]);
   });
 
   it('compile output never contains VENDORS (INV-4)', async () => {
     scaffold(`${BASE_MANIFEST}${VENDORS_BLOCK}`);
     const r = await run(['compile', '--target', 'claude']);
     expect(r.out).not.toContain('VENDORS');
-  });
-
-  it('tidy is unchanged', async () => {
-    await compare(setupVendorFiles, [
-      () => run(['tidy', '--dry-run', '--format', 'json'], JSON_OPTS),
-      () => run(['tidy']),
-    ]);
   });
 
   it('doctor is unchanged', async () => {

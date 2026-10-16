@@ -302,14 +302,20 @@ describe('adf compile — --write mode', () => {
     expect(content).toBe('# My hand-written CLAUDE.md\n\nDo not overwrite me.\n');
   });
 
-  it('--force overwrites a file without the compile banner', async () => {
+  it('--mode compiled --force overwrites a file without the compile banner', async () => {
     const tmp = makeTmp();
     scaffoldAi(tmp);
 
     fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), '# Old hand-written content\n');
 
+    // --force alone never changes a file's mode (#318, INV-P2-2).
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--force'])).toBe(1);
+    spy.mockRestore();
+    expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toBe('# Old hand-written content\n');
+
     const exitCode = await adfCommand(TEXT_OPTIONS, [
-      'compile', '--target', 'claude', '--write', '--force',
+      'compile', '--target', 'claude', '--write', '--mode', 'compiled', '--force',
     ]);
 
     expect(exitCode).toBe(0);
@@ -362,7 +368,7 @@ describe('adf compile — --write overwrite guard', () => {
     const tmp = makeTmp();
     scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD });
 
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
 
     expect(exitCode).toBe(0);
     const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
@@ -374,7 +380,7 @@ describe('adf compile — --write overwrite guard', () => {
     const tmp = makeTmp();
     scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD_HYBRID });
 
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
 
     expect(exitCode).toBe(0);
     const content = fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8');
@@ -418,7 +424,7 @@ describe('adf compile — --write overwrite guard', () => {
     });
 
     const logs = await captureLog(() =>
-      adfCommand(JSON_OPTIONS, ['compile', '--target', 'all', '--write']),
+      adfCommand(JSON_OPTIONS, ['compile', '--target', 'all', '--write', '--mode', 'compiled']),
     );
 
     const result = JSON.parse(logs[0]);
@@ -436,7 +442,7 @@ describe('adf compile — --write overwrite guard', () => {
     );
     scaffoldAi(tmp, { 'CLAUDE.md': populated });
 
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
 
     expect(exitCode).toBe(0);
     expect(fs.readFileSync(path.join(tmp, 'CLAUDE.md'), 'utf-8')).toContain(COMPILE_BANNER_MARKER);
@@ -454,7 +460,7 @@ describe('adf compile — --write overwrite guard', () => {
     scaffoldAi(tmp, { 'CLAUDE.md': withNotes });
 
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']);
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
     const warning = spy.mock.calls.map(c => String(c[0])).join('\n');
     spy.mockRestore();
 
@@ -471,7 +477,7 @@ describe('adf compile — --write overwrite guard', () => {
     scaffoldAi(tmp, { 'AGENTS.md': withProtocol });
 
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'agents', '--write']);
+    const exitCode = await adfCommand(TEXT_OPTIONS, ['compile', '--target', 'agents', '--write', '--mode', 'compiled']);
     const warning = spy.mock.calls.map(c => String(c[0])).join('\n');
     spy.mockRestore();
 
@@ -489,7 +495,7 @@ describe('adf compile — --write overwrite guard', () => {
     scaffoldAi(tmp, { 'CLAUDE.md': withNotes });
 
     const exitCode = await adfCommand(TEXT_OPTIONS, [
-      'compile', '--target', 'claude', '--write', '--force',
+      'compile', '--target', 'claude', '--write', '--mode', 'compiled', '--force',
     ]);
 
     expect(exitCode).toBe(0);
@@ -503,10 +509,10 @@ describe('adf compile — --write overwrite guard', () => {
     scaffoldAi(tmp, { 'CLAUDE.md': POINTER_CLAUDE_MD_HYBRID });
 
     const logs = await captureLog(() =>
-      adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write']),
+      adfCommand(TEXT_OPTIONS, ['compile', '--target', 'claude', '--write', '--mode', 'compiled']),
     );
 
-    expect(logs.join('\n')).toContain('[ok] Written CLAUDE.md (replaced charter pointer stub)');
+    expect(logs.join('\n')).toContain('[ok] Written CLAUDE.md (mode: pointer -> compiled)');
   });
 
   it('does not flag a re-compile of an existing artifact', async () => {
@@ -519,7 +525,7 @@ describe('adf compile — --write overwrite guard', () => {
     );
 
     expect(logs.join('\n')).toContain('[ok] Written CLAUDE.md');
-    expect(logs.join('\n')).not.toContain('replaced charter pointer stub');
+    expect(logs.join('\n')).not.toContain('(mode:');
   });
 });
 

@@ -106,6 +106,7 @@ export function adfSync(options: CLIOptions, args: string[]): number {
         ...result,
         trackedSources: 0,
         note: 'No SYNC entries declared in manifest; lock tracks only manifest SYNC sources.',
+        nextActions: ['charter adf vendor status'],
       }, null, 2));
     } else {
       if (writeMode) {
@@ -114,6 +115,7 @@ export function adfSync(options: CLIOptions, args: string[]): number {
         console.log('  No SYNC entries in manifest. Nothing to check.');
         console.log('  SYNC only tracks manifest entries in the SYNC section.');
       }
+      console.log('  If `adf compile --check` reported a file as stale, that is about vendor modes, not SYNC. See: charter adf vendor status');
     }
     return EXIT_CODE.SUCCESS;
   }

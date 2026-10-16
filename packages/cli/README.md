@@ -16,7 +16,8 @@ When you are ready to adopt it:
 
 ```bash
 npx @stackbilt/cli bootstrap --yes
-npx charter adf compile --target all --write
+# bootstrap writes thin pointers; --mode compiled switches them to compiled output
+npx charter adf compile --target all --write --mode compiled
 ```
 
 `bootstrap` detects the stack, creates modular `.ai/` context, and migrates existing `CLAUDE.md`, `.cursorrules`, and `GEMINI.md` rules. The compiler produces each supported vendor file from that shared source.
@@ -40,7 +41,7 @@ Use with `npx` in each repository:
 ```bash
 npx charter score
 npx charter bootstrap --yes
-npx charter adf compile --target all --write
+npx charter adf compile --target all --write --mode compiled
 npx charter setup --detect-only --format json
 npx charter setup --ci github --yes
 npx charter doctor --format json
@@ -76,7 +77,9 @@ Requires Node >= 18.
 ```bash
 charter score          # read-only AI-readiness grade + prioritized fixes
 charter bootstrap      # detect stack, create .ai/, migrate existing agent rules
-charter adf compile --target all --write  # generate supported vendor files from .ai/
+charter adf compile --target all --write  # re-render compiled-mode vendor files from .ai/
+charter adf compile --target all --write --mode compiled  # switch pointer files to compiled output
+charter adf vendor status  # show each vendor file's mode (pointer, compiled, unmanaged)
 charter                # quick value/risk snapshot + next action
 charter why            # why teams adopt Charter and expected payoff
 charter setup          # bootstrap .charter/ directory + policy baseline

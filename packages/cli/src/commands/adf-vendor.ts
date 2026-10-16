@@ -11,9 +11,9 @@
  *
  * The record is intent; the markers in the file are evidence. With no valid
  * entry, a file's mode is inferred from its markers exactly as `adf tidy` sniffs
- * them today. No command acts on the record yet: this module only reads and
- * writes it (`adf vendor status|set|init`, plus the implicit writers that record
- * the mode of a vendor file they just wrote).
+ * them today. `adf compile` and `adf tidy` act on the record; this module reads
+ * and writes it (`adf vendor status|set|init`, plus the implicit writers that
+ * record the mode of a vendor file they just wrote).
  */
 
 import * as fs from 'node:fs';

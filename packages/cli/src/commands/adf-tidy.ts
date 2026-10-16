@@ -24,19 +24,58 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { POINTER_MARKERS, POINTER_CLAUDE_MD, POINTER_CURSORRULES, POINTER_AGENTS_MD, POINTER_GEMINI_MD, POINTER_COPILOT_MD } from './adf';
+import { discoverAgentConfigFiles } from './adf-migrate';
+import { isVendorFile, resolveVendorMode } from './adf-vendor';
+import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const VENDOR_FILES = [
-  'CLAUDE.md',
-  '.cursorrules',
-  'agents.md',
-  'AGENTS.md',
-  'GEMINI.md',
-  'copilot-instructions.md',
-];
+/** Compile target for each file `adf compile` can write, for remediation text. */
+const COMPILE_TARGET_OF: Record<string, string> = {
+  'CLAUDE.md': 'claude',
+  'AGENTS.md': 'agents',
+  '.cursorrules': 'cursor',
+  'GEMINI.md': 'gemini',
+};
+
+type TidySkipReason =
+  | 'banner'
+  | 'recorded-compiled'
+  | 'recorded-unmanaged'
+  | 'inferred-unmanaged'
+  | 'recorded-pointer-no-marker';
+
+export const TIDY_MSG = {
+  compiledBanner: '{file} is `charter adf compile` output, not a thin pointer — skipping. Its content is generated from {aiDir}/, so tidy will not ingest it. Edit the {aiDir}/ modules and re-run: charter adf compile --write',
+  recordedCompiledPointer: '{file} is recorded as compiled but has no compile banner — skipping. If it is meant to be a pointer: charter adf vendor set {file} pointer, then charter adf tidy --source {file}. To regenerate it as compiled output instead{discards}: charter adf compile --target {target} --write',
+  recordedCompiledHand: '{file} is recorded as compiled but has no compile banner — skipping. If it is hand-authored: charter adf vendor set {file} unmanaged. To regenerate it as compiled output instead (discards its hand-authored content): charter adf compile --target {target} --write --force',
+  unmanaged: '{file} is unmanaged ({source}) — skipping. To move its rules into {aiDir}/: charter adf migrate --source {file}',
+  pointerNoMarker: '{file} is recorded as a pointer but has no Charter pointer marker — skipping rather than guessing. See: charter adf vendor status',
+} as const;
+
+function fill(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => (key in values ? values[key] : whole));
+}
+
+/**
+ * The skip warning for a file recorded compiled that carries no banner. The
+ * content-preserving fix comes first: regenerating would discard what the file
+ * holds beyond .ai/ (#318).
+ */
+function recordedCompiledWarning(file: string, aiDir: string, target: string, hasMarker: boolean): string {
+  if (!hasMarker) return fill(TIDY_MSG.recordedCompiledHand, { file, target });
+  const n = countExtractable(file, aiDir);
+  const discards = n > 0 ? ` (discards ${n} item(s) not in ${aiDir}/)` : '';
+  return fill(TIDY_MSG.recordedCompiledPointer, { file, target, discards });
+}
+
+/** The repo-root vendor name `file` refers to, or null for any other path. */
+function vendorNameOf(file: string): VendorFile | null {
+  const name = path.relative(process.cwd(), path.resolve(file)).split(path.sep).join('/');
+  return isVendorFile(name) ? name : null;
+}
 
 /** Lazy-init to avoid circular dependency with adf.ts at module load time. */
 function getPointerTemplates(): Record<string, string> {
@@ -58,10 +97,60 @@ const SECTION_SIZE_WARN_THRESHOLD = 20;
 
 interface TidyFileResult {
   file: string;
-  /** `compiled` — the file is `adf compile` output; tidy leaves it alone (#296). */
-  status: 'clean' | 'tidied' | 'not-found' | 'compiled';
+  /**
+   * `compiled` — `adf compile` output (banner) or recorded compiled; tidy leaves it alone (#296).
+   * `unmanaged` — recorded unmanaged, or a hand-authored file with no Charter marker (#318).
+   */
+  status: 'clean' | 'tidied' | 'not-found' | 'compiled' | 'unmanaged';
   itemsExtracted: number;
   routing: Record<string, number>;
+  /** The repo-root vendor name, or null for any other --source path (old marker logic). */
+  vendorFile: VendorFile | null;
+  mode: VendorMode | null;
+  source: ModeSource | null;
+  /** Set iff status is compiled or unmanaged. */
+  skipReason: TidySkipReason | null;
+}
+
+interface TidyGate {
+  vendorFile: VendorFile | null;
+  mode: VendorMode | null;
+  source: ModeSource | null;
+  /** Set when the file must not be processed. */
+  skip?: { status: 'compiled' | 'unmanaged'; skipReason: TidySkipReason; warning: string | null };
+}
+
+/**
+ * Decide from the vendor-mode record whether tidy may process `file` (#318).
+ * Only a pointer that carries no banner and at least one POINTER_MARKERS is
+ * processed. The banner is checked first, whatever the record says (#296).
+ * A non-vendor path keeps today's marker logic. Never writes the record.
+ */
+function tidyGate(file: string, content: string, aiDir: string, named: boolean): TidyGate {
+  const vendorFile = vendorNameOf(file);
+  const r = vendorFile ? resolveVendorMode(aiDir, vendorFile) : null;
+  const gate: TidyGate = { vendorFile, mode: r?.mode ?? null, source: r?.source ?? null };
+  const skip = (status: 'compiled' | 'unmanaged', skipReason: TidySkipReason, warning: string | null): TidyGate =>
+    ({ ...gate, skip: { status, skipReason, warning } });
+
+  if (content.includes(COMPILE_BANNER_MARKER)) {
+    return skip('compiled', 'banner', fill(TIDY_MSG.compiledBanner, { file, aiDir }));
+  }
+  if (!r) return gate;
+  const hasMarker = POINTER_MARKERS.some(marker => content.includes(marker));
+  if (r.mode === 'compiled') {
+    return skip('compiled', 'recorded-compiled',
+      recordedCompiledWarning(file, aiDir, COMPILE_TARGET_OF[r.file] ?? 'all', hasMarker));
+  }
+  if (r.mode === 'unmanaged') {
+    // An unrecorded hand-authored file was silently 'not-found' before #318; it
+    // is explained only when named with --source, so whole-tree runs stay quiet.
+    const recorded = r.source === 'recorded';
+    return skip('unmanaged', recorded ? 'recorded-unmanaged' : 'inferred-unmanaged',
+      recorded || named ? fill(TIDY_MSG.unmanaged, { file, aiDir, source: r.source }) : null);
+  }
+  if (!hasMarker) return skip('unmanaged', 'recorded-pointer-no-marker', fill(TIDY_MSG.pointerNoMarker, { file }));
+  return gate;
 }
 
 interface ModuleSizeWarning {
@@ -102,10 +191,10 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
   const sourceFile = getFlag(args, '--source');
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
 
-  // Determine which files to scan
-  const targets = sourceFile
-    ? [sourceFile]
-    : VENDOR_FILES.filter(f => fs.existsSync(path.resolve(f)));
+  // Determine which files to scan. discoverAgentConfigFiles reports one physical
+  // file once, so AGENTS.md and agents.md on a case-insensitive mount are not
+  // walked twice (#302).
+  const targets = sourceFile ? [sourceFile] : discoverAgentConfigFiles();
 
   if (targets.length === 0) {
     if (options.format === 'json') {
@@ -124,29 +213,32 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
   const allModuleGroups: Record<string, Record<string, MigrationItem[]>> = {};
 
   for (const file of targets) {
-    const result = analyzeVendorFile(file, aiDir, triggerMap);
+    const fullPath = path.resolve(file);
+    const content = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : null;
+    const gate = content === null
+      ? { vendorFile: vendorNameOf(file), mode: null, source: null }
+      : tidyGate(file, content, aiDir, Boolean(sourceFile));
+    const base = { file, vendorFile: gate.vendorFile, mode: gate.mode, source: gate.source, skipReason: null };
 
-    if (!result) {
-      fileResults.push({ file, status: 'not-found', itemsExtracted: 0, routing: {} });
+    if (gate.skip) {
+      fileResults.push({ ...base, status: gate.skip.status, skipReason: gate.skip.skipReason, itemsExtracted: 0, routing: {} });
+      if (gate.skip.warning) warnings.push(gate.skip.warning);
       continue;
     }
 
-    if (result.compiled) {
-      fileResults.push({ file, status: 'compiled', itemsExtracted: 0, routing: {} });
-      warnings.push(
-        `${file} is \`charter adf compile\` output, not a thin pointer — skipping. ` +
-        `Its content is generated from ${aiDir}/, so tidy will not ingest it. ` +
-        `Edit the ${aiDir}/ modules and re-run: charter adf compile --write`,
-      );
+    const result = analyzeVendorFile(file, aiDir, triggerMap);
+
+    if (!result || result.compiled) {
+      fileResults.push({ ...base, status: 'not-found', itemsExtracted: 0, routing: {} });
       continue;
     }
 
     if (result.migrateItems.length === 0) {
       if (result.needsRestore) {
-        fileResults.push({ file, status: 'tidied', itemsExtracted: 0, routing: {} });
+        fileResults.push({ ...base, status: 'tidied', itemsExtracted: 0, routing: {} });
         if (!dryRun) restorePointer(file, result.stayItems);
       } else {
-        fileResults.push({ file, status: 'clean', itemsExtracted: 0, routing: {} });
+        fileResults.push({ ...base, status: 'clean', itemsExtracted: 0, routing: {} });
       }
       continue;
     }
@@ -166,7 +258,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     }
 
     fileResults.push({
-      file,
+      ...base,
       status: 'tidied',
       itemsExtracted: result.migrateItems.length,
       routing,
@@ -244,6 +336,17 @@ interface AnalysisResult {
   needsRestore: boolean;
   /** The file is `adf compile` output — nothing to ingest, nothing to restore. */
   compiled?: boolean;
+}
+
+/**
+ * How many items `adf tidy --dry-run` would extract from one pointer file into
+ * aiDir: what `adf compile --check` uses to tell a clean pointer from a bloated
+ * one (#318). 0 for a missing file, compile output, or a file with no pointer
+ * marker. Read-only.
+ */
+export function countExtractable(filePath: string, aiDir: string): number {
+  const result = analyzeVendorFile(filePath, aiDir, loadTriggerMap(aiDir));
+  return result && !result.compiled ? result.migrateItems.length : 0;
 }
 
 function analyzeVendorFile(

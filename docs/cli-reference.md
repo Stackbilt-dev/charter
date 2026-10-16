@@ -424,6 +424,8 @@ npx charter adf sync --write               # update .adf.lock
 npx charter adf sync --check --format json
 ```
 
+Sync tracks only manifest `SYNC` sources. With none declared, it says so and points to `charter adf vendor status` (also in JSON `nextActions`), since a stale `adf compile --check` is about vendor modes, not SYNC.
+
 ### charter adf evidence
 
 Validates metric constraints and produces a structured evidence report. The core of Charter's ADF governance pipeline.
@@ -475,27 +477,54 @@ Outbound compiler: renders the `.ai/*.adf` source tree into flat vendor agent-co
 
 ```bash
 npx charter adf compile --target claude                 # print to stdout
-npx charter adf compile --target all --write            # write all four vendor files
-npx charter adf compile --target all --check            # CI drift gate
-npx charter adf compile --target claude --write --force # overwrite regardless of guard
+npx charter adf compile --target all --write            # re-render targets in compiled mode (or absent)
+npx charter adf compile --target all --write --mode compiled # also switch pointer/unmanaged files to compiled
+npx charter adf compile --target all --check            # CI drift gate, by each file's mode
+npx charter adf compile --target claude --write --force # overwrite hand-authored content (never changes mode)
 ```
 
 - `--target <claude|agents|cursor|gemini|all>` — vendor target: `claude`→`CLAUDE.md`, `agents`→`AGENTS.md`, `cursor`→`.cursorrules`, `gemini`→`GEMINI.md`. `all` requires `--write` or `--check`.
-- `--write` — write output to the repo root, subject to the overwrite guard below
-- `--check` — diff compiled output against files on disk; exit 1 if stale
-- `--force` — with `--write`, bypass the overwrite guard entirely
+- `--write` — write output to the repo root for each target in compiled mode or absent, subject to the overwrite guard below
+- `--mode compiled` — with `--write`, also convert targets in `pointer` or `unmanaged` mode. The `VENDORS` record is set to `compiled` before the file is written; if it cannot be recorded, nothing is written (`refused-record`, exit 1). If the file write itself fails, that target's record is restored, the target is reported as `refused-record` with `writeError`, and the remaining targets are still processed (exit 1). `compiled` is the only accepted value: to make a file a pointer, run `charter adf vendor set <file> pointer`. `--mode` without `--write`, or another value, exits 2.
+- `--check` — verify each target by its mode; exit 1 on drift (see below)
+- `--force` — with `--write`, bypass the overwrite guard. It never changes a file's mode: a pointer or unmanaged target still needs `--mode compiled`.
 - `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
 
 Default with no `--write` or `--check` prints to stdout, single target only.
 
-**Overwrite guard.** With `--write` and no `--force`, compile writes a file only when it recognises it as Charter-owned — either compiler output (carrying the compile banner) or a Charter thin pointer. It refuses in two cases:
+**Modes.** Each target's mode comes from the `VENDORS` record in `manifest.adf` (see [`charter adf vendor`](#charter-adf-vendor)). A file with no entry is classified by its markers: the compile banner means `compiled`, a pointer marker means `pointer`, anything else is `unmanaged`. A missing file with no entry is compiled as before.
+
+`--write` per target:
+
+| Mode | `--target all` | single `--target` | with `--mode compiled` |
+|---|---|---|---|
+| compiled, or absent and unrecorded | written | written | written |
+| pointer | skipped (its `[skip]` line names the command), exit 0 | refused, exit 1 | record set to compiled, then written as `Written CLAUDE.md (mode: pointer -> compiled)` |
+| unmanaged | skipped, exit 0 | refused, exit 1 | as pointer, but an existing hand-authored file also needs `--force` |
+
+When every target is skipped, compile says that nothing was written and how to switch. JSON output keeps `written`, `refused` and `nextActions`, and adds `skipped` and `targets` (one row per target: `state`, `source`, `status`, `recordedMode`, `previousMode`, `remedy`, `writeError`).
+
+`--check` per target:
+
+| Status | When | Exit |
+|---|---|---|
+| `fresh` / `stale` | compiled: bytes equal / differ (remedy: `compile --target <t> --write`) | 0 / 1 |
+| `missing` | no file on disk (a recorded pointer suggests `git checkout -- <file>` or `adf vendor set <file> unmanaged`) | 1 |
+| `pointer-ok` | pointer with nothing `adf tidy` would extract | 0 |
+| `pointer-bloated` | pointer carrying content that belongs in `.ai/` (remedy: `adf tidy --source <file>`) | 1 |
+| `mode-drift` | recorded `compiled` or `pointer`, but the file looks like another mode. Both fixes are printed, the content-preserving one first; regenerating says how many items it would discard | 1 |
+| `skipped-unmanaged` | unmanaged: not checked | 0 |
+
+No `--check` remedy suggests `compile --write` for a pointer or unmanaged file. JSON output keeps `stale` (stale, bloated and drifted files), `current`, `missing`, `upToDate` and `nextActions`, and adds `skipped` and `targets`.
+
+**Overwrite guard.** With `--write` and no `--force`, compile writes an existing file only when it recognises it as Charter-owned — either compiler output (carrying the compile banner) or a Charter thin pointer. It refuses in two cases:
 
 - the file is hand-authored and carries no Charter marker
 - the file is a pointer carrying your own content under a retained heading (`## Environment` and the other headings `adf tidy` retains) that the pointer template does not have
 
 The second case matters because compiled output has no `## Environment` section and `.ai/` does not hold that content, so overwriting would lose it with no way back except git. Move such content into a `.ai/` module first, or pass `--force` to discard it.
 
-A file converted from pointer to compiled output is reported as `Written CLAUDE.md (replaced charter pointer stub)`, so the transition is visible rather than silent.
+Both refusals happen before the record is touched, so a refused target never changes `VENDORS`.
 
 ### charter adf tidy
 
@@ -515,7 +544,7 @@ npx charter adf tidy --source CLAUDE.md     # single file
 
 Retained headings (`## Environment`, `## Module Index`, `## Session*`, and operational protocol headings) are kept in the vendor file verbatim rather than routed into `.ai/`.
 
-Compiler output is skipped. A file carrying the `GENERATED by charter adf compile` banner is not a thin pointer — it is the full ruleset rendered *from* `.ai/` — so tidy reports it and leaves it alone rather than folding `.ai/` back into itself ([#296](https://github.com/Stackbilt-dev/charter/issues/296)). Edit the `.ai/` modules and re-run `charter adf compile --write` instead.
+Tidy reads each vendor file's mode from the `VENDORS` record and processes only pointers. Compiler output is skipped. A file carrying the `GENERATED by charter adf compile` banner is not a thin pointer — it is the full ruleset rendered *from* `.ai/` — so tidy reports it and leaves it alone rather than folding `.ai/` back into itself ([#296](https://github.com/Stackbilt-dev/charter/issues/296)). Edit the `.ai/` modules and re-run `charter adf compile --write` instead. The banner wins whatever the record says. A file recorded `compiled` without a banner is also skipped (status `compiled`); its warning names the content-preserving fix first (`adf vendor set <file> pointer`, then `adf tidy --source <file>`) and says how many items regenerating would discard, and an `unmanaged` file (recorded, or hand-authored with no Charter marker; it used to report `not-found`) gets status `unmanaged`. A file recorded `pointer` that has no pointer marker is skipped rather than guessed at. JSON rows add `vendorFile`, `mode`, `source` and `skipReason`. A `--source` path that is not a repo-root vendor name keeps the marker logic. `AGENTS.md` and `agents.md` that are one file on disk are tidied once. Tidy never writes the record.
 
 ### charter adf populate
 
@@ -594,9 +623,9 @@ One physical file has one entry. When two vendor names are the same file (`AGENT
 - `--all`: with `status`, also list vendor names that are absent and unrecorded
 - `--ai-dir <dir>`: custom `.ai/` directory (default: `.ai`)
 
-`bootstrap` and `adf init --emit-pointers` record `pointer` for each pointer file they write. `adf migrate` records `pointer` for each source it replaces with a pointer, and `adf compile --write` records `compiled` for each target it writes. These writers only add missing entries. If a file is already recorded with another mode, the entry is kept and a warning names `adf vendor set` as the way to change it. Nothing is recorded under `--dry-run`, and a failed record write is only a warning. Every manifest edit is text-level and keeps line endings and every other byte, and the block it writes is already in `adf fmt` canonical form. It is re-parsed before writing, and if the result would change anything else, nothing is written.
+`bootstrap` and `adf init --emit-pointers` record `pointer` for each pointer file they write. `adf migrate` records `pointer` for each source it replaces with a pointer, and `adf compile --write` records `compiled` for each target it writes (with `--mode compiled`, replacing the entry). The other writers only add missing entries. If a file is already recorded with another mode, the entry is kept and a warning names `adf vendor set` as the way to change it. Nothing is recorded under `--dry-run`, and a failed record write is only a warning, except under `adf compile --write --mode compiled`, where the target is refused (`refused-record`) and its file is not written. Every manifest edit is text-level and keeps line endings and every other byte, and the block it writes is already in `adf fmt` canonical form. It is re-parsed before writing, and if the result would change anything else, nothing is written.
 
-No command acts on the record yet: `adf compile --check`, `adf tidy`, `doctor` and the pre-commit hook still decide from the markers in each file, and `score` skips the section when it checks manifest path references. Later changes under [#318](https://github.com/Stackbilt-dev/charter/issues/318) make them read it.
+`adf compile` (`--check` and `--write`) and `adf tidy` act on the record; see their sections. `doctor` and the pre-commit hook still decide from the markers in each file, and `score` skips the section when it checks manifest path references. Later changes under [#318](https://github.com/Stackbilt-dev/charter/issues/318) make them read it.
 
 ### charter blast
 
