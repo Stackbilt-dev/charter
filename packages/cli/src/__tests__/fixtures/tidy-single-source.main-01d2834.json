@@ -1,0 +1,83 @@
+{
+  "dryText": {
+    "code": 0,
+    "out": "  Would tidy 1 vendor file(s):\n    CLAUDE.md: 3 items → qa.adf (2), frontend.adf (1)\n\n  Routing plan (run without --dry-run to apply, or adjust triggers first):\n    \"Always run pnpm test before pushing to main.\"\n      → qa.adf / CONSTRAINTS\n    \"Never skip the integration suite in CI.\"\n      → qa.adf / CONSTRAINTS\n    \"Use React hooks and CSS modules for styling.\"\n      → frontend.adf / CONSTRAINTS\n\n  Routing trace:\n    \"Always run pnpm test before pushing to main.\"\n      → qa.adf / CONSTRAINTS  [scores: frontend.adf=0]\n    \"Never skip the integration suite in CI.\"\n      → qa.adf / CONSTRAINTS  [scores: frontend.adf=0]\n    \"Use React hooks and CSS modules for styling.\"\n      → frontend.adf / CONSTRAINTS  [scores: frontend.adf=2]\n\n  Run without --dry-run to apply.",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n\n## Testing\n\n- Always run pnpm test before pushing to main.\n- Never skip the integration suite in CI.\n\n## Frontend\n\n- Use React hooks and CSS modules for styling.\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  },
+  "dryJson": {
+    "code": 0,
+    "out": "{\n  \"dryRun\": true,\n  \"files\": [\n    {\n      \"file\": \"CLAUDE.md\",\n      \"vendorFile\": \"CLAUDE.md\",\n      \"mode\": \"pointer\",\n      \"source\": \"inferred\",\n      \"skipReason\": null,\n      \"status\": \"tidied\",\n      \"itemsExtracted\": 3,\n      \"routing\": {\n        \"qa.adf\": 2,\n        \"frontend.adf\": 1\n      }\n    }\n  ],\n  \"totalExtracted\": 3,\n  \"modulesModified\": [\n    \"qa.adf\",\n    \"frontend.adf\"\n  ],\n  \"moduleWarnings\": [],\n  \"warnings\": [],\n  \"itemRoutes\": [\n    {\n      \"item\": \"Always run pnpm test before pushing to main.\",\n      \"targetModule\": \"qa.adf\",\n      \"targetSection\": \"CONSTRAINTS\",\n      \"headingModule\": \"qa.adf\",\n      \"candidateScores\": {\n        \"frontend.adf\": 0\n      }\n    },\n    {\n      \"item\": \"Never skip the integration suite in CI.\",\n      \"targetModule\": \"qa.adf\",\n      \"targetSection\": \"CONSTRAINTS\",\n      \"headingModule\": \"qa.adf\",\n      \"candidateScores\": {\n        \"frontend.adf\": 0\n      }\n    },\n    {\n      \"item\": \"Use React hooks and CSS modules for styling.\",\n      \"targetModule\": \"frontend.adf\",\n      \"targetSection\": \"CONSTRAINTS\",\n      \"headingModule\": \"frontend.adf\",\n      \"candidateScores\": {\n        \"frontend.adf\": 2\n      }\n    }\n  ]\n}",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n\n## Testing\n\n- Always run pnpm test before pushing to main.\n- Never skip the integration suite in CI.\n\n## Frontend\n\n- Use React hooks and CSS modules for styling.\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  },
+  "realText": {
+    "code": 0,
+    "out": "  Tidied 1 vendor file(s):\n    CLAUDE.md: 3 items → qa.adf (2), frontend.adf (1)",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/frontend.adf": "ADF: 0.1\n\n⚠️ CONSTRAINTS [advisory]:\n  - Use React hooks and CSS modules for styling.\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/qa.adf": "ADF: 0.1\n\n⚠️ CONSTRAINTS [advisory]:\n  - Always run pnpm test before pushing to main.\n  - Never skip the integration suite in CI.\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  },
+  "realJson": {
+    "code": 0,
+    "out": "{\n  \"dryRun\": false,\n  \"files\": [\n    {\n      \"file\": \"CLAUDE.md\",\n      \"vendorFile\": \"CLAUDE.md\",\n      \"mode\": \"pointer\",\n      \"source\": \"inferred\",\n      \"skipReason\": null,\n      \"status\": \"tidied\",\n      \"itemsExtracted\": 3,\n      \"routing\": {\n        \"qa.adf\": 2,\n        \"frontend.adf\": 1\n      }\n    }\n  ],\n  \"totalExtracted\": 3,\n  \"modulesModified\": [\n    \"qa.adf\",\n    \"frontend.adf\"\n  ],\n  \"moduleWarnings\": [],\n  \"warnings\": [],\n  \"itemRoutes\": [\n    {\n      \"item\": \"Always run pnpm test before pushing to main.\",\n      \"targetModule\": \"qa.adf\",\n      \"targetSection\": \"CONSTRAINTS\",\n      \"headingModule\": \"qa.adf\",\n      \"candidateScores\": {\n        \"frontend.adf\": 0\n      }\n    },\n    {\n      \"item\": \"Never skip the integration suite in CI.\",\n      \"targetModule\": \"qa.adf\",\n      \"targetSection\": \"CONSTRAINTS\",\n      \"headingModule\": \"qa.adf\",\n      \"candidateScores\": {\n        \"frontend.adf\": 0\n      }\n    },\n    {\n      \"item\": \"Use React hooks and CSS modules for styling.\",\n      \"targetModule\": \"frontend.adf\",\n      \"targetSection\": \"CONSTRAINTS\",\n      \"headingModule\": \"frontend.adf\",\n      \"candidateScores\": {\n        \"frontend.adf\": 2\n      }\n    }\n  ]\n}",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/frontend.adf": "ADF: 0.1\n\n⚠️ CONSTRAINTS [advisory]:\n  - Use React hooks and CSS modules for styling.\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/qa.adf": "ADF: 0.1\n\n⚠️ CONSTRAINTS [advisory]:\n  - Always run pnpm test before pushing to main.\n  - Never skip the integration suite in CI.\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  },
+  "missingText": {
+    "code": 0,
+    "out": "  All remaining vendor files are clean.",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n\n## Testing\n\n- Always run pnpm test before pushing to main.\n- Never skip the integration suite in CI.\n\n## Frontend\n\n- Use React hooks and CSS modules for styling.\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  },
+  "missingJson": {
+    "code": 0,
+    "out": "{\n  \"dryRun\": false,\n  \"files\": [\n    {\n      \"file\": \"GEMINI.md\",\n      \"vendorFile\": \"GEMINI.md\",\n      \"mode\": null,\n      \"source\": null,\n      \"skipReason\": null,\n      \"status\": \"not-found\",\n      \"itemsExtracted\": 0,\n      \"routing\": {}\n    }\n  ],\n  \"totalExtracted\": 0,\n  \"modulesModified\": [],\n  \"moduleWarnings\": [],\n  \"warnings\": [],\n  \"itemRoutes\": []\n}",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n\n## Testing\n\n- Always run pnpm test before pushing to main.\n- Never skip the integration suite in CI.\n\n## Frontend\n\n- Use React hooks and CSS modules for styling.\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  },
+  "wholeText": {
+    "code": 0,
+    "out": "  Would tidy 1 vendor file(s):\n    CLAUDE.md: 3 items → qa.adf (2), frontend.adf (1)\n\n  Routing plan (run without --dry-run to apply, or adjust triggers first):\n    \"Always run pnpm test before pushing to main.\"\n      → qa.adf / CONSTRAINTS\n    \"Never skip the integration suite in CI.\"\n      → qa.adf / CONSTRAINTS\n    \"Use React hooks and CSS modules for styling.\"\n      → frontend.adf / CONSTRAINTS\n\n  Routing trace:\n    \"Always run pnpm test before pushing to main.\"\n      → qa.adf / CONSTRAINTS  [scores: frontend.adf=0]\n    \"Never skip the integration suite in CI.\"\n      → qa.adf / CONSTRAINTS  [scores: frontend.adf=0]\n    \"Use React hooks and CSS modules for styling.\"\n      → frontend.adf / CONSTRAINTS  [scores: frontend.adf=2]\n\n  Run without --dry-run to apply.",
+    "err": "",
+    "files": {
+      "CLAUDE.md": "# CLAUDE.md\n\n> **DO NOT add rules, constraints, or context to this file.**\n> This file is auto-managed by Charter. All project rules live in `.ai/`.\n> New rules should be added to the appropriate `.ai/*.adf` module.\n> See `.ai/manifest.adf` for the module routing manifest.\n\n## Session Start\n\nCall `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.\n\nIf `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.\n\n## Environment\n<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->\n\n## Testing\n\n- Always run pnpm test before pushing to main.\n- Never skip the integration suite in CI.\n\n## Frontend\n\n- Use React hooks and CSS modules for styling.\n",
+      ".ai/core.adf": "ADF: 0.1\n\n📋 CONTEXT:\n  - TypeScript monorepo\n\n⚠️ CONSTRAINTS [load-bearing]:\n  - No secrets in commits\n",
+      ".ai/manifest.adf": "ADF: 0.1\n\n🎯 ROLE: Test project\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - frontend.adf (Triggers on: React, CSS)\n",
+      ".ai/state.adf": "ADF: 0.1\n\n🧠 STATE:\n  CURRENT: Active development\n"
+    }
+  }
+}

@@ -953,7 +953,7 @@ function printHelp(): void {
   console.log('      --no-backup: skip creating .pre-adf-migrate.bak backups');
   console.log('      --merge-strategy: append (always add), dedupe (skip duplicates, default), replace');
   console.log('');
-  console.log('    charter adf tidy [--dry-run] [--source <file>] [--ai-dir <dir>] [--ci]');
+  console.log('    charter adf tidy [--dry-run] [--source <file>]... [--print-paths] [--ai-dir <dir>] [--ci]');
   console.log('      Scan vendor config files for content added beyond the thin pointer,');
   console.log('      classify and route to ADF modules, restore thin pointer.');
   console.log('      --dry-run: preview without modifying files');
