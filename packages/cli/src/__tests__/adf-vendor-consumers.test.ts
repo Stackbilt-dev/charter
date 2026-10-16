@@ -179,7 +179,7 @@ describe('compile --check is mode-aware', () => {
     const r = await run(['compile', '--target', 'all', '--check']);
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/ {2}\[bloated\] CLAUDE\.md — thin pointer carries \d+ item\(s\) that belong in \.ai\/\.\n {10}Run: charter adf tidy --source CLAUDE\.md/);
-    expect(r.out).toContain('  [missing] AGENTS.md — recorded as a pointer but not found on disk.\n          Restore it (git checkout -- AGENTS.md), or stop tracking it: charter adf vendor set AGENTS.md unmanaged');
+    expect(r.out).toContain('  [missing] AGENTS.md — recorded as a pointer but not found on disk.\n          Restore it (charter adf vendor restore AGENTS.md), or stop tracking it: charter adf vendor set AGENTS.md unmanaged');
     expect(r.out).toContain('  [skip] .cursorrules is unmanaged (inferred); not checked');
     expect(r.out).toContain('  [drift] GEMINI.md — recorded as compiled but looks pointer on disk.\n          Keep the file as it is: charter adf vendor set GEMINI.md pointer\n          Or make it match the record: charter adf compile --target gemini --write');
   });
@@ -199,13 +199,13 @@ describe('compile --check is mode-aware', () => {
     expect(j.json.nextActions).toEqual([]);
   });
 
-  it('a recorded pointer carrying the compile banner is mode-drift, restored by git checkout', async () => {
+  it('a recorded pointer carrying the compile banner is mode-drift, restored by adf vendor restore', async () => {
     scaffold(vendors('CLAUDE.md: pointer'));
     fs.writeFileSync('CLAUDE.md', await compiledOutput('claude'));
     const r = await runJson<CheckJson>(['compile', '--target', 'claude', '--check']);
     expect(r.code).toBe(1);
     expect(r.json.targets[0]).toMatchObject({ status: 'mode-drift', mode: 'pointer', remedy: 'charter adf vendor set CLAUDE.md compiled' });
-    expect(r.json.nextActions).toEqual(['charter adf vendor set CLAUDE.md compiled', 'git checkout -- CLAUDE.md']);
+    expect(r.json.nextActions).toEqual(['charter adf vendor set CLAUDE.md compiled', 'charter adf vendor restore CLAUDE.md']);
   });
 
   it('recorded compiled that now looks hand-authored: the restore remedy needs --force', async () => {

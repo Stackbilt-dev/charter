@@ -7,15 +7,16 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseAdf, parseManifest } from '@stackbilt/adf';
-import type { AdfDocument } from '@stackbilt/adf';
+import { compileAdf, parseAdf, parseManifest } from '@stackbilt/adf';
+import type { AdfDocument, CompileTarget } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { detectPackageManager, inferProjectName, loadPackageContexts } from './setup';
 import { hasCommits, isGitRepo, runGit } from '../git-helpers';
 import { CHARTER_OWNED_MARKERS } from './adf';
-import { withoutVendorsSection } from './adf-vendor';
+import { resolveVendorMode, withoutVendorsSection } from './adf-vendor';
+import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 
 type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 type BadgeColor = 'brightgreen' | 'green' | 'yellowgreen' | 'yellow' | 'orange' | 'red';
@@ -61,11 +62,24 @@ interface ScoreCategory {
   summary: string;
 }
 
+/**
+ * One scored vendor file. mode, source and substantiveVia are additive (#318):
+ * a pointer is as substantive as the compiled file it routes to.
+ */
+interface AgentFileSignal {
+  exists: boolean;
+  substantive: boolean;
+  /** null when absent, or for a file with no mode (.cursor/rules/*). */
+  mode: VendorMode | null;
+  source: ModeSource | null;
+  substantiveVia: 'file' | 'ai-dir' | 'none';
+}
+
 interface ScoreSignals {
   agentConfig: {
-    claude: { exists: boolean; substantive: boolean };
-    cursorRules: { exists: boolean; substantive: boolean; files: string[] };
-    agents: { exists: boolean; substantive: boolean; file?: string };
+    claude: AgentFileSignal;
+    cursorRules: AgentFileSignal & { files: string[] };
+    agents: AgentFileSignal & { file?: string };
     manifest: { exists: boolean; path: string };
     alternateAgentFiles: string[];
   };
@@ -289,6 +303,7 @@ const MAX_TEXT_FILE_BYTES = 256 * 1024;
 const GIT_TIMESTAMP_FILE_LIMIT = 4000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const CI_MIN_SCORE = 60;
+export const SCORE_POPULATE_AI_DIR = '`{file}` routes to `{aiDir}/`, which has little project-specific content yet. Add repo commands and guardrails to `{aiDir}/core.adf` (or run: charter adf populate).';
 
 export async function scoreCommand(options: CLIOptions, args: string[] = []): Promise<number> {
   if (args.includes('--help') || args.includes('-h')) {
@@ -376,13 +391,18 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
   const alternateAgentFiles = AGENT_FILES.filter((file) => inventory.fileSet.has(file) && file !== 'CLAUDE.md' && !/^agents\.md$/i.test(file));
   const claudeContent = readText('CLAUDE.md');
   const claudeExists = inventory.fileSet.has('CLAUDE.md');
-  const claudeSubstantive = claudeExists && isSubstantiveInstruction(claudeContent);
+  const claude = agentFileSignal(claudeExists ? 'CLAUDE.md' : null, claudeContent, 'claude', aiDir);
+  const claudeSubstantive = claude.substantive;
   const cursorFiles = inventory.fileSet.has('.cursorrules')
     ? ['.cursorrules']
     : inventory.files.filter((file) => file.startsWith('.cursor/rules/'));
   const cursorContent = cursorFiles.map((file) => readText(file)).join('\n');
   const cursorExists = cursorFiles.length > 0;
-  const cursorSubstantive = cursorExists && isSubstantiveInstruction(cursorContent);
+  // Only .cursorrules has a mode; .cursor/rules/* is scored on its text as before.
+  const cursor = cursorFiles[0] === '.cursorrules'
+    ? agentFileSignal('.cursorrules', cursorContent, 'cursor', aiDir)
+    : agentFileSignal(null, cursorContent, 'cursor', aiDir, cursorExists);
+  const cursorSubstantive = cursor.substantive;
   const agentsFile = inventory.fileSet.has('AGENTS.md')
     ? 'AGENTS.md'
     : inventory.fileSet.has('agents.md')
@@ -390,7 +410,8 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
       : undefined;
   const agentsContent = agentsFile ? readText(agentsFile) : '';
   const agentsExists = !!agentsFile;
-  const agentsSubstantive = agentsExists && isSubstantiveInstruction(agentsContent);
+  const agents = agentFileSignal((agentsFile as VendorFile | undefined) ?? null, agentsContent, 'agents', aiDir);
+  const agentsSubstantive = agents.substantive;
   const manifestExists = manifestPathInInventory
     ? inventory.fileSet.has(manifestPathInInventory)
     : fileExists(manifestPath);
@@ -611,7 +632,7 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
       'Agent config',
       agentConfigScore,
       25,
-      agentConfigSummary(claudeExists, claudeSubstantive, cursorFiles, cursorSubstantive, agentsFile, agentsSubstantive, manifestExists, manifestPath),
+      agentConfigSummary(claude, cursorFiles, cursorSubstantive, agentsFile, agentsSubstantive, manifestExists, manifestPath, aiDir),
     ),
     createCategory(
       'grounding',
@@ -664,6 +685,7 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
       manifestPath,
       claudeExists,
       claudeSubstantive,
+      claudeMode: claude.mode,
       cursorFiles,
       agentsFile,
       manifestExists,
@@ -683,9 +705,9 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     }),
     signals: {
       agentConfig: {
-        claude: { exists: claudeExists, substantive: claudeSubstantive },
-        cursorRules: { exists: cursorExists, substantive: cursorSubstantive, files: cursorFiles },
-        agents: { exists: agentsExists, substantive: agentsSubstantive, file: agentsFile },
+        claude,
+        cursorRules: { ...cursor, files: cursorFiles },
+        agents: { ...agents, file: agentsFile },
         manifest: { exists: manifestExists, path: manifestPath },
         alternateAgentFiles,
       },
@@ -1082,6 +1104,38 @@ function hasDocumentedConstraints(content: string): boolean {
     || /\b(non-negotiable|must always|never do|guardrails?)\b/i.test(content);
 }
 
+/**
+ * Score one vendor file (#318). Unmanaged or compiled: its own text, as before.
+ * Pointer: its text OR the output compiling its target would give, so a pointer
+ * is as substantive as the compiled file it routes to. Monotonic: never less
+ * substantive than the text alone (INV-P3-7). The compile runs in memory with a
+ * read-only reader, so nothing is written; a compile error leaves the term false.
+ */
+function agentFileSignal(
+  file: VendorFile | null,
+  content: string,
+  target: CompileTarget,
+  aiDir: string,
+  existsWithoutMode = false,
+): AgentFileSignal {
+  if (!file) {
+    const substantive = existsWithoutMode && isSubstantiveInstruction(content);
+    return { exists: existsWithoutMode, substantive, mode: null, source: null, substantiveVia: substantive ? 'file' : 'none' };
+  }
+  const { mode, source } = resolveVendorMode(aiDir, file);
+  if (isSubstantiveInstruction(content)) return { exists: true, substantive: true, mode, source, substantiveVia: 'file' };
+  if (mode === 'pointer') {
+    let compiled = '';
+    try {
+      compiled = compileAdf({ target, aiDir, readFile: (p: string) => fs.readFileSync(p, 'utf-8') }).output;
+    } catch {
+      compiled = '';
+    }
+    if (isSubstantiveInstruction(compiled)) return { exists: true, substantive: true, mode, source, substantiveVia: 'ai-dir' };
+  }
+  return { exists: true, substantive: false, mode, source, substantiveVia: 'none' };
+}
+
 function isSubstantiveInstruction(content: string): boolean {
   if (!content) return false;
   let normalized = content;
@@ -1352,19 +1406,19 @@ function toCategoryStatus(score: number, max: number): CategoryStatus {
 }
 
 function agentConfigSummary(
-  claudeExists: boolean,
-  claudeSubstantive: boolean,
+  claude: AgentFileSignal,
   cursorFiles: string[],
   cursorSubstantive: boolean,
   agentsFile: string | undefined,
   agentsSubstantive: boolean,
   manifestExists: boolean,
   manifestPath: string,
+  aiDir: string,
 ): string {
   const parts: string[] = [];
-  parts.push(claudeExists
-    ? claudeSubstantive ? 'CLAUDE.md is substantive' : 'CLAUDE.md exists but is thin'
-    : 'CLAUDE.md missing');
+  parts.push(!claude.exists ? 'CLAUDE.md missing'
+    : claude.substantiveVia === 'ai-dir' ? `CLAUDE.md is a thin pointer to ${aiDir}/`
+      : claude.substantive ? 'CLAUDE.md is substantive' : 'CLAUDE.md exists but is thin');
   parts.push(cursorFiles.length > 0
     ? cursorSubstantive ? `${cursorFiles[0]} present` : `${cursorFiles[0]} exists but is thin`
     : '.cursorrules missing');
@@ -1441,6 +1495,7 @@ function buildRecommendations(input: {
   manifestPath: string;
   claudeExists: boolean;
   claudeSubstantive: boolean;
+  claudeMode: VendorMode | null;
   cursorFiles: string[];
   agentsFile: string | undefined;
   manifestExists: boolean;
@@ -1459,6 +1514,8 @@ function buildRecommendations(input: {
   freshnessSignals: ScoreSignals['freshness'];
 }): string[] {
   const recommendations: RecommendationCandidate[] = [];
+  // A pointer or compiled CLAUDE.md is never edited by hand (INV-P3-8).
+  const claudeEditable = input.claudeMode !== 'pointer' && input.claudeMode !== 'compiled';
 
   if (!input.manifestExists) {
     recommendations.push({
@@ -1480,7 +1537,9 @@ function buildRecommendations(input: {
   } else if (!input.claudeSubstantive) {
     recommendations.push({
       priority: 6,
-      text: 'Expand `CLAUDE.md` beyond a thin pointer so it captures the repo-specific commands and guardrails an agent needs on first read.',
+      text: !claudeEditable
+        ? SCORE_POPULATE_AI_DIR.replace('{file}', 'CLAUDE.md').replace(/\{aiDir\}/g, input.aiDir)
+        : 'Expand `CLAUDE.md` beyond a thin pointer so it captures the repo-specific commands and guardrails an agent needs on first read.',
     });
   }
 
@@ -1508,7 +1567,7 @@ function buildRecommendations(input: {
   if (input.commandSignals.length === 0) {
     recommendations.push({
       priority: 7,
-      text: 'Document at least one runnable setup/test command in `README.md`, `CLAUDE.md`, or your ADF files.',
+      text: `Document at least one runnable setup/test command in \`README.md\`${claudeEditable ? ', `CLAUDE.md`,' : ''} or your ADF files.`,
     });
   } else if (input.commandSignals.some((signal) => !signal.runnable)) {
     recommendations.push({
@@ -1527,7 +1586,7 @@ function buildRecommendations(input: {
   if (!input.constraintsDefined) {
     recommendations.push({
       priority: 7,
-      text: `Define non-negotiable constraints in \`${input.aiDir}/core.adf\` or \`CLAUDE.md\` so agents have explicit load-bearing rules.`,
+      text: `Define non-negotiable constraints in \`${input.aiDir}/core.adf\`${claudeEditable ? ' or `CLAUDE.md`' : ''} so agents have explicit load-bearing rules.`,
     });
   }
 
