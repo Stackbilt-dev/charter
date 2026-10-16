@@ -65,6 +65,9 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-doctor-staged-'));
   process.chdir(tmp);
   git('init', '-q');
+  // Repo-local identity: CI runners have no global one (commits would exit 128).
+  git('config', 'user.email', 'test@test.com');
+  git('config', 'user.name', 'Test');
   fs.mkdirSync('.ai');
   fs.writeFileSync('.ai/manifest.adf', 'ADF: 0.1\n\n📦 DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n📂 ON_DEMAND:\n  - backend.adf (Triggers on: database, API, migration)\n');
   fs.writeFileSync('.ai/core.adf', 'ADF: 0.1\n\n📐 RULES:\n  - All changes require tests\n');
