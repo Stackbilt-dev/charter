@@ -1,0 +1,410 @@
+/**
+ * Shared manifest.adf module registration (#239).
+ *
+ * One writer for every command that adds modules to `.ai/manifest.adf` on the
+ * user's behalf: `charter adf migrate` registers the modules it routes content
+ * into, and `charter bootstrap` registers orphaned modules. The writer is
+ * append-only: an entry whose parsed path is already in DEFAULT_LOAD or
+ * ON_DEMAND is never rewritten, moved, or merged with new triggers.
+ *
+ * ON_DEMAND triggers are inferred from the headings of the items routed to the
+ * module (see inferTriggers). `charter adf create` keeps its own upsert writer.
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { parseAdf, formatAdf, parseManifest, formatTriggerEntry } from '@stackbilt/adf';
+import type { AdfDocument, AdfSection, MigrationItem } from '@stackbilt/adf';
+import { classifyModuleLoad, normalizeModulePath } from './adf-wiring';
+import { NAMED_MODULE_DEFAULT_TRIGGERS } from './adf-named-scaffolds';
+
+// ============================================================================
+// Trigger inference constants
+// ============================================================================
+
+/** Hard cap on seeded + inferred triggers per ON_DEMAND module. */
+export const MAX_TRIGGERS = 6;
+
+/** Tokens shorter than this are dropped unless listed in ALLOWED_SHORT_TOKENS. */
+export const MIN_TOKEN_LEN = 3;
+
+/** Score multiplier for RoutingTrace.headingKeyword over plain heading tokens. */
+export const HEADING_KEYWORD_WEIGHT = 2;
+
+/** The 2-letter terms in the classifier's heading-route vocabulary. */
+export const ALLOWED_SHORT_TOKENS: readonly string[] = ['ui', 'ci', 'cd', 'db', 'kv', 'd1', 'r2'];
+
+/** Generic heading words that carry no routing signal. */
+export const GENERIC_HEADING_WORDS: readonly string[] = [
+  'rules', 'guidelines', 'notes', 'overview', 'section', 'project',
+];
+
+/**
+ * Generic English function words. Shared with `adf suggest`'s near-miss
+ * keyword detector so both filter the same list.
+ */
+export const STOPWORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'for', 'with',
+  'is', 'are', 'was', 'were', 'be', 'been', 'this', 'that', 'these', 'those',
+  'it', 'its', 'as', 'at', 'by', 'from', 'into', 'about', 'my', 'our', 'your',
+]);
+
+const ALLOWED_SHORT = new Set(ALLOWED_SHORT_TOKENS);
+const GENERIC = new Set(GENERIC_HEADING_WORDS);
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type LoadPolicy = 'DEFAULT_LOAD' | 'ON_DEMAND';
+
+/**
+ * planned            computed, not written (only appears under --dry-run).
+ * added              appended to manifest.adf in this run.
+ * already-registered the parsed path was already in DEFAULT_LOAD or ON_DEMAND.
+ * skipped            registration impossible; see skipReason.
+ */
+export type RegistrationStatus = 'planned' | 'added' | 'already-registered' | 'skipped';
+
+export type SkipReason = 'manifest-missing' | 'manifest-unparseable' | 'section-not-list';
+
+export type TriggerInferenceSource = 'named-seed' | 'heading-keyword' | 'heading-token' | 'stem-fallback';
+
+export interface ModuleRegistration {
+  /** Module path relative to the .ai directory, normalized. */
+  module: string;
+  loadPolicy: LoadPolicy;
+  /** Triggers written (or that would be written) after "Triggers on:". Empty for DEFAULT_LOAD. */
+  triggers: string[];
+  /** classifyModuleLoad(module).reason; for ON_DEMAND, the inference summary is appended. */
+  reason: string;
+  status: RegistrationStatus;
+  /** Present iff status is 'skipped'. */
+  skipReason?: SkipReason;
+  /** Where each trigger came from; same length and order as `triggers`. */
+  triggerSources: TriggerInferenceSource[];
+}
+
+export interface RegisterManifestModulesResult {
+  manifestPath: string;
+  /** True iff manifest.adf was rewritten (never under dry-run). */
+  written: boolean;
+  registrations: ModuleRegistration[];
+}
+
+export interface RegisterOptions {
+  dryRun?: boolean;
+  onWarning?: (message: string) => void;
+}
+
+type ParsedManifest = ReturnType<typeof parseManifest>;
+
+// ============================================================================
+// Trigger inference
+// ============================================================================
+
+/**
+ * Split text into trigger candidates: lowercase, split on anything but
+ * alphanumerics, keeping `.`, `-` and `_` only inside a word (`next.js`,
+ * `wasm-pack`, `auth_scoped`). Markdown punctuation and backticks are dropped.
+ */
+export function tokenizeTriggerText(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[._-]{2,}/g, ' ')
+    .split(/[^a-z0-9._-]+/)
+    .map(t => t.replace(/^[._-]+|[._-]+$/g, ''))
+    .filter(t => t.length > 0);
+}
+
+function isUsableToken(token: string): boolean {
+  if (STOPWORDS.has(token) || GENERIC.has(token)) return false;
+  return token.length >= MIN_TOKEN_LEN || ALLOWED_SHORT.has(token);
+}
+
+/** The stem fallback trigger: the module's file stem, lowercased and tokenized. */
+function stemTrigger(module: string): string {
+  const stem = path.posix.basename(module, '.adf');
+  return tokenizeTriggerText(stem).join('-') || stem.toLowerCase();
+}
+
+/**
+ * Infer ON_DEMAND triggers for `module` from the migrated items routed to it.
+ *
+ * Seeds from NAMED_MODULE_DEFAULT_TRIGGERS take the first slots. Then each
+ * item contributes its routing trace's heading keyword (weight
+ * HEADING_KEYWORD_WEIGHT, only when the heading route chose this module) and
+ * the tokens of its source heading (weight 1). Tokens that already trigger
+ * another ON_DEMAND module are dropped. Highest score first, ties by first
+ * appearance, capped at MAX_TRIGGERS. Falls back to the module stem.
+ */
+export function inferTriggers(
+  module: string,
+  items: readonly MigrationItem[],
+  manifest?: Pick<ParsedManifest, 'onDemand'>,
+): { triggers: string[]; triggerSources: TriggerInferenceSource[] } {
+  const target = normalizeModulePath(module);
+  const taken = new Set<string>();
+  for (const mod of manifest?.onDemand ?? []) {
+    if (normalizeModulePath(mod.path) === target) continue;
+    for (const t of mod.triggers) taken.add(t.trim().toLowerCase());
+  }
+
+  const triggers: string[] = [];
+  const triggerSources: TriggerInferenceSource[] = [];
+  const push = (t: string, source: TriggerInferenceSource): void => {
+    if (triggers.length < MAX_TRIGGERS && !triggers.includes(t)) {
+      triggers.push(t);
+      triggerSources.push(source);
+    }
+  };
+
+  const stem = path.posix.basename(target, '.adf');
+  for (const seed of NAMED_MODULE_DEFAULT_TRIGGERS[stem] ?? []) push(seed.trim().toLowerCase(), 'named-seed');
+
+  const scores = new Map<string, { score: number; source: TriggerInferenceSource; order: number }>();
+  for (const item of items) {
+    if (normalizeModulePath(item.classification.targetModule) !== target) continue;
+    const perItem = new Map<string, TriggerInferenceSource>();
+    const trace = item.classification.routingTrace;
+    if (trace?.headingKeyword && normalizeModulePath(trace.headingModule) === target) {
+      for (const t of tokenizeTriggerText(trace.headingKeyword)) perItem.set(t, 'heading-keyword');
+    }
+    for (const t of tokenizeTriggerText(item.sourceHeading)) {
+      if (!perItem.has(t)) perItem.set(t, 'heading-token');
+    }
+    for (const [token, source] of perItem) {
+      if (!isUsableToken(token) || taken.has(token)) continue;
+      const weight = source === 'heading-keyword' ? HEADING_KEYWORD_WEIGHT : 1;
+      const entry = scores.get(token);
+      if (entry) {
+        entry.score += weight;
+        if (source === 'heading-keyword') entry.source = source;
+      } else {
+        scores.set(token, { score: weight, source, order: scores.size });
+      }
+    }
+  }
+
+  const ranked = [...scores.entries()].sort(([, a], [, b]) => b.score - a.score || a.order - b.order);
+  for (const [token, { source }] of ranked) push(token, source);
+
+  if (triggers.length === 0) push(stemTrigger(target), 'stem-fallback');
+  return { triggers, triggerSources };
+}
+
+/** Plan one module's registration (status 'planned'); the writer resolves it. */
+export function planModuleRegistration(
+  module: string,
+  items: readonly MigrationItem[],
+  manifest?: Pick<ParsedManifest, 'onDemand'>,
+): ModuleRegistration {
+  const load = classifyModuleLoad(module);
+  if (load.defaultLoad) {
+    return { module: load.module, loadPolicy: 'DEFAULT_LOAD', triggers: [], reason: load.reason, status: 'planned', triggerSources: [] };
+  }
+  const { triggers, triggerSources } = inferTriggers(load.module, items, manifest);
+  return {
+    module: load.module,
+    loadPolicy: 'ON_DEMAND',
+    triggers,
+    reason: `${load.reason}; ${summarizeSources(triggerSources)}`,
+    status: 'planned',
+    triggerSources,
+  };
+}
+
+function summarizeSources(sources: readonly TriggerInferenceSource[]): string {
+  if (sources.length === 1 && sources[0] === 'stem-fallback') return 'triggers fall back to the module stem';
+  const counts: Array<[TriggerInferenceSource, string]> = [
+    ['named-seed', 'named-module seed(s)'],
+    ['heading-keyword', 'heading keyword(s)'],
+    ['heading-token', 'heading token(s)'],
+  ];
+  const parts = counts
+    .map(([src, label]) => [sources.filter(s => s === src).length, label] as const)
+    .filter(([n]) => n > 0)
+    .map(([n, label]) => `${n} ${label}`);
+  return `triggers inferred from ${parts.join(', ')}`;
+}
+
+// ============================================================================
+// Shared writer
+// ============================================================================
+
+const SECTION_DECORATION: Record<LoadPolicy, string> = { DEFAULT_LOAD: '\u{1F4E6}', ON_DEMAND: '\u{1F4C2}' };
+
+/** Find the section, creating it in canonical order (DEFAULT_LOAD before ON_DEMAND). */
+function ensureSection(doc: AdfDocument, key: LoadPolicy): AdfSection {
+  const existing = doc.sections.find(s => s.key === key);
+  if (existing) return existing;
+  const section: AdfSection = { key, decoration: SECTION_DECORATION[key], content: { type: 'list', items: [] } };
+  if (key === 'DEFAULT_LOAD') {
+    const onDemandIdx = doc.sections.findIndex(s => s.key === 'ON_DEMAND');
+    if (onDemandIdx !== -1) {
+      doc.sections.splice(onDemandIdx, 0, section);
+      return section;
+    }
+  } else {
+    const defaultIdx = doc.sections.findIndex(s => s.key === 'DEFAULT_LOAD');
+    if (defaultIdx !== -1) {
+      doc.sections.splice(defaultIdx + 1, 0, section);
+      return section;
+    }
+  }
+  doc.sections.push(section);
+  return section;
+}
+
+function skipAll(manifestPath: string, entries: ModuleRegistration[], skipReason: SkipReason): RegisterManifestModulesResult {
+  return { manifestPath, written: false, registrations: entries.map(e => ({ ...e, status: 'skipped', skipReason })) };
+}
+
+/**
+ * Register planned modules in manifest.adf. Append-only and idempotent: an
+ * entry already present (matched by normalized parsed path, in either section)
+ * is left untouched and reported 'already-registered'. Under dryRun nothing is
+ * written and would-be additions stay 'planned'.
+ */
+export function registerManifestModules(
+  manifestPath: string,
+  planned: readonly ModuleRegistration[],
+  options: RegisterOptions = {},
+): RegisterManifestModulesResult {
+  const warn = options.onWarning ?? (() => undefined);
+  // One registration per module: a repeated module keeps its first entry.
+  const entries = planned.filter((e, i) => planned.findIndex(o => o.module === e.module) === i);
+
+  if (!fs.existsSync(manifestPath)) {
+    if (entries.length > 0) {
+      warn(`${manifestPath} not found; ${entries.length} module(s) were written but not registered. Run: charter adf init`);
+    }
+    return skipAll(manifestPath, entries, 'manifest-missing');
+  }
+
+  let doc: AdfDocument;
+  let manifest: ParsedManifest;
+  try {
+    doc = parseAdf(fs.readFileSync(manifestPath, 'utf-8'));
+    manifest = parseManifest(doc);
+  } catch {
+    return skipAll(manifestPath, entries, 'manifest-unparseable');
+  }
+
+  const defaultLoad = new Set(manifest.defaultLoad.map(normalizeModulePath));
+  const onDemand = new Set(manifest.onDemand.map(m => normalizeModulePath(m.path)));
+  const registrations: ModuleRegistration[] = [];
+  let added = false;
+
+  for (const entry of entries) {
+    if (defaultLoad.has(entry.module) || onDemand.has(entry.module)) {
+      if (entry.loadPolicy === 'DEFAULT_LOAD' && !defaultLoad.has(entry.module)) {
+        warn(`${entry.module} is listed under ON_DEMAND in ${manifestPath}; not moved. Move ${entry.module} from ON_DEMAND to DEFAULT_LOAD in .ai/manifest.adf`);
+      }
+      registrations.push({ ...entry, status: 'already-registered' });
+      continue;
+    }
+
+    const section = ensureSection(doc, entry.loadPolicy);
+    if (section.content.type !== 'list') {
+      warn(`${entry.loadPolicy} in ${manifestPath} is not a list; ${entry.module} was not registered`);
+      registrations.push({ ...entry, status: 'skipped', skipReason: 'section-not-list' });
+      continue;
+    }
+
+    section.content.items.push(entry.loadPolicy === 'DEFAULT_LOAD'
+      ? entry.module
+      : formatTriggerEntry({ path: entry.module, triggers: entry.triggers, loadPolicy: 'ON_DEMAND' }));
+    (entry.loadPolicy === 'DEFAULT_LOAD' ? defaultLoad : onDemand).add(entry.module);
+    registrations.push({ ...entry, status: options.dryRun ? 'planned' : 'added' });
+    added = true;
+  }
+
+  const written = added && !options.dryRun;
+  if (written) fs.writeFileSync(manifestPath, formatAdf(doc));
+  return { manifestPath, written, registrations };
+}
+
+/**
+ * Plan and register `modules`. `items` are the migrated items that routed to
+ * them (empty for bootstrap orphans, which then get the stem fallback).
+ */
+export function registerModules(
+  manifestPath: string,
+  modules: readonly string[],
+  items: readonly MigrationItem[],
+  options: RegisterOptions = {},
+): RegisterManifestModulesResult {
+  let manifest: ParsedManifest | undefined;
+  try {
+    if (fs.existsSync(manifestPath)) manifest = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8')));
+  } catch {
+    // The writer reports an unparseable manifest as skipped.
+  }
+  const planned = modules.map(m => planModuleRegistration(
+    m,
+    items.filter(i => i.classification.targetModule === m),
+    manifest,
+  ));
+  return registerManifestModules(manifestPath, planned, options);
+}
+
+// ============================================================================
+// Migrate output
+// ============================================================================
+
+export interface RegisterAction {
+  type: 'REGISTER';
+  target: string;
+  detail: string;
+  module: string;
+  loadPolicy: LoadPolicy;
+  status: RegistrationStatus;
+}
+
+/** `infra.adf → ON_DEMAND: deploy, ci [planned]` */
+export function formatRegisterDetail(reg: ModuleRegistration): string {
+  const suffix = reg.status === 'planned' ? ' [planned]'
+    : reg.status === 'already-registered' ? ' [already registered]'
+    : reg.status === 'skipped' ? ` [skipped: ${reg.skipReason}]`
+    : '';
+  return reg.loadPolicy === 'ON_DEMAND'
+    ? `${reg.module} → ON_DEMAND: ${reg.triggers.join(', ')}${suffix}`
+    : `${reg.module} → DEFAULT_LOAD${suffix}`;
+}
+
+export function toRegisterAction(reg: ModuleRegistration, manifestPath: string): RegisterAction {
+  return {
+    type: 'REGISTER',
+    target: manifestPath,
+    detail: formatRegisterDetail(reg),
+    module: reg.module,
+    loadPolicy: reg.loadPolicy,
+    status: reg.status,
+  };
+}
+
+/**
+ * Dry-run only: report each planned module once across sources. A later
+ * source's planned registration of an already-planned module becomes
+ * 'already-registered'. Known gap: a later source's dry-run routing does not
+ * see the triggers planned by earlier sources; a real run does.
+ */
+export function dedupePlannedRegistrations(
+  result: { registrations: ModuleRegistration[]; actions: Array<{ type: string }> },
+  plannedSoFar: Set<string>,
+): void {
+  for (const reg of result.registrations) {
+    if (reg.status !== 'planned') continue;
+    if (!plannedSoFar.has(reg.module)) {
+      plannedSoFar.add(reg.module);
+      continue;
+    }
+    reg.status = 'already-registered';
+    const action = result.actions.find((a): a is RegisterAction => a.type === 'REGISTER' && (a as RegisterAction).module === reg.module);
+    if (action) {
+      action.status = reg.status;
+      action.detail = formatRegisterDetail(reg);
+    }
+  }
+}
