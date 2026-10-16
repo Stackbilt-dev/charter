@@ -88,7 +88,7 @@ async function fresh(target: string): Promise<string> {
   return (await run(['compile', '--target', target])).out;
 }
 
-interface WriteRow { file: string; status: string; previousMode: string | null; recordedMode: string | null; remedy: string | null; retainedSections: string[]; retainedSource: string }
+interface WriteRow { file: string; status: string; previousMode: string | null; recordedMode: string | null; remedy: string | null; retainedSections: string[]; retainedSource: string; retainedSkipped: string[] }
 interface WriteJson { written: string[]; refused: string[]; targets: WriteRow[]; nextActions: string[] }
 interface CheckRow { file: string; status: string; staleReason: string | null; remedy: string | null }
 interface CheckJson { upToDate: boolean; targets: CheckRow[]; nextActions: string[] }
@@ -495,4 +495,166 @@ describe('regression and structure', () => {
     expect(mod.composeCompiled(FRESH, notes, 'AGENTS.md')).toMatchObject({ retainedSource: 'pointer', retainedSections: ['## Release Protocol'] });
     expect(mod.composeCompiled(FRESH, POINTER_AGENTS_MD, 'AGENTS.md').output).toBe(FRESH);
   });
+});
+
+// ============================================================================
+// 6. Review round 1: rendered .ai/ text, markers in .ai/ text, code fences
+// ============================================================================
+
+const NOTES_CORE = (body: string): string =>
+  `ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - TypeScript monorepo\n\n\u{1F4DD} NOTES:\n${body.split('\n').map(l => `  ${l}`).join('\n')}\n`;
+const TARGET_OF_FILE: Record<string, string> = { 'CLAUDE.md': 'claude', 'AGENTS.md': 'agents', '.cursorrules': 'cursor', 'GEMINI.md': 'gemini' };
+type SkipJson = WriteJson;
+
+describe('rendered .ai/ text is never carried as the user\'s (review item 1)', () => {
+  const cases: Array<[string, string, string | null]> = [
+    ['edited', 'Intro line\n## Session notes\n- keep tabs', 'Intro line\n## Session notes\n- keep spaces'],
+    ['edited (## Environment)', '## Environment\nUse WSL.', '## Environment\nUse Docker.'],
+    ['removed', 'Intro line\n## Session notes\n- keep tabs', null],
+  ];
+  for (const [name, before, after] of cases) {
+    it(`does not carry the old rendered copy when the .ai/ value is ${name}, and reports it`, async () => {
+      scaffold();
+      fs.writeFileSync('.ai/core.adf', NOTES_CORE(before));
+      await run(['compile', '--target', 'all', '--write']);
+      fs.writeFileSync('.ai/core.adf', after === null ? 'ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - TypeScript monorepo\n' : NOTES_CORE(after));
+      const heading = before.split('\n').find(l => l.startsWith('## ')) as string;
+      const r = await runJson<SkipJson>(['compile', '--target', 'all', '--write']);
+      expect(r.code).toBe(0);
+      for (const t of r.json.targets) {
+        expect(t.retainedSkipped, t.file).toEqual([heading]);
+        expect(t.retainedSource, t.file).toBe('none');
+      }
+      expect(r.err).toContain(`CLAUDE.md: ${heading} was not carried: it looks like compiler output from .ai/. If it is yours, move it into the retained block.`);
+      for (const f of TARGET_FILES) {
+        expect(read(f), f).not.toContain(RETAINED_START);
+        expect(read(f), f).toBe(await fresh(TARGET_OF_FILE[f]));
+      }
+      const again = await runJson<SkipJson>(['compile', '--target', 'all', '--write']);
+      expect(again.json.targets.every(t => t.retainedSkipped.length === 0)).toBe(true);
+    });
+  }
+
+  it('does not carry a legacy section whose heading is in a current .ai/ module (rule b)', () => {
+    const c = composeCompiled(FRESH, `${FRESH}\n## Session notes\n- old\n`, 'CLAUDE.md', { aiLines: new Set(['## Session notes']) });
+    expect(c).toMatchObject({ output: FRESH, skipped: ['## Session notes'], retainedSource: 'none' });
+  });
+
+  it('still carries a genuine ## Environment appended after the last rendered section (no module index)', async () => {
+    scaffold(BASE_MANIFEST.replace(/\n\u{1F4C2} ON_DEMAND:\n.*\n/u, '\n'));
+    fs.writeFileSync('.ai/core.adf', NOTES_CORE('Intro line\n## Session notes\n- keep tabs'));
+    await run(['compile', '--target', 'claude', '--write']);
+    const render = read('CLAUDE.md');
+    expect(render).not.toContain('agents-modules');
+    fs.writeFileSync('CLAUDE.md', `${render}\n${ENV}\n`);
+    const r = await runJson<SkipJson>(['compile', '--target', 'claude', '--write']);
+    expect(r.json.targets[0]).toMatchObject({ retainedSections: ['## Environment'], retainedSource: 'legacy', retainedSkipped: [] });
+    expect(read('CLAUDE.md')).toBe(`${render.trimEnd()}\n\n${block(ENV)}`);
+  });
+});
+
+describe('a marker line inside rendered .ai/ text (review item 2)', () => {
+  it('is never taken as the block start: three --write runs are byte-identical and --check is fresh', async () => {
+    scaffold();
+    fs.writeFileSync('.ai/core.adf', NOTES_CORE(`Quoted marker:\n${RETAINED_START}\nend of quote`));
+    await run(['compile', '--target', 'all', '--write']);
+    for (const f of TARGET_FILES) fs.writeFileSync(f, `${read(f)}\n${ENV}\n`);
+    await run(['compile', '--target', 'all', '--write']);
+    const first = Object.fromEntries(TARGET_FILES.map(f => [f, read(f)]));
+    for (let i = 0; i < 3; i++) {
+      await run(['compile', '--target', 'all', '--write']);
+      for (const f of TARGET_FILES) expect(read(f), `${f} run ${i}`).toBe(first[f]);
+    }
+    for (const f of TARGET_FILES) expect(first[f].endsWith(block(ENV)), f).toBe(true);
+    expect((await run(['compile', '--target', 'all', '--check'])).code).toBe(0);
+  });
+
+  it('still finds the real block when the rendered part is stale and the render holds a marker', async () => {
+    scaffold();
+    fs.writeFileSync('.ai/core.adf', NOTES_CORE(`Quoted marker:\n${RETAINED_START}\nend of quote`));
+    await run(['compile', '--target', 'claude', '--write']);
+    fs.writeFileSync('CLAUDE.md', `${read('CLAUDE.md')}\n${ENV}\n`);
+    await run(['compile', '--target', 'claude', '--write']);
+    fs.writeFileSync('.ai/core.adf', NOTES_CORE(`Quoted marker, edited:\n${RETAINED_START}\nend of quote`));
+    await run(['compile', '--target', 'claude', '--write']);
+    const once = read('CLAUDE.md');
+    expect(once).toBe(`${(await fresh('claude')).trimEnd()}\n\n${block(ENV)}`);
+    await run(['compile', '--target', 'claude', '--write']);
+    expect(read('CLAUDE.md')).toBe(once);
+  });
+
+  it('ignores a marker the render holds when there is no block yet', async () => {
+    scaffold();
+    fs.writeFileSync('.ai/core.adf', NOTES_CORE(`${RETAINED_START}\n## Environment\nfrom .ai`));
+    await run(['compile', '--target', 'claude', '--write']);
+    const render = read('CLAUDE.md');
+    for (let i = 0; i < 3; i++) await run(['compile', '--target', 'claude', '--write']);
+    expect(read('CLAUDE.md')).toBe(render);
+  });
+});
+
+describe('code fences inside retained sections (review item 3)', () => {
+  const FENCED = '## Environment\n\n```sh\n## install deps\npnpm i\n<!-- agents-modules -->\n```\n\n~~~\n## also code\n~~~\n    ## indented code\n- after fence';
+
+  it('keeps a legacy section whole across ``` and ~~~ fences and indented code', () => {
+    const c = composeCompiled(FRESH, `${FRESH}\n${FENCED}\n`, 'CLAUDE.md');
+    expect(c.retainedSections).toEqual(['## Environment']);
+    expect(c.output).toBe(`${FRESH.trimEnd()}\n\n${block(FENCED)}`);
+    expect(composeCompiled(FRESH, c.output, 'CLAUDE.md').output).toBe(c.output);
+  });
+
+  it('reports only real headings from a block, and an end marker inside a fence is text', () => {
+    const withFencedEnd = `${FRESH}\n${RETAINED_START}\n${FENCED}\n\`\`\`\n${RETAINED_END}\n\`\`\`\n- still mine\n${RETAINED_END}\n`;
+    const c = composeCompiled(FRESH, withFencedEnd, 'CLAUDE.md');
+    expect(c.retainedSections).toEqual(['## Environment']);
+    expect(c.output).toBe(withFencedEnd);
+    expect(c.body).toContain('- still mine');
+  });
+
+  it('carries fenced content from a hand-authored file under --force', async () => {
+    scaffold();
+    fs.writeFileSync('CLAUDE.md', `# Mine\n\nHouse rules.\n\n${FENCED}\n`);
+    const r = await runJson<WriteJson>(['compile', '--target', 'claude', '--write', '--mode', 'compiled', '--force']);
+    expect(r.json.targets[0]).toMatchObject({ retainedSections: ['## Environment'], retainedSource: 'unmanaged' });
+    expect(read('CLAUDE.md')).toContain(block(FENCED));
+  });
+
+  it('restore keeps the fenced content and reports no fake heading', async () => {
+    scaffold(vendors('CLAUDE.md: pointer'));
+    fs.writeFileSync('CLAUDE.md', `${(await fresh('claude')).trimEnd()}\n\n${block(FENCED)}`);
+    const r = await run(['vendor', 'restore', 'CLAUDE.md', '--format', 'json'], JSON_OPTS);
+    expect(JSON.parse(r.out)).toMatchObject({ status: 'restored', keptSections: ['## Environment'] });
+    expect(read('CLAUDE.md').endsWith(`${FENCED}\n`)).toBe(true);
+  });
+});
+
+describe('marker matching agrees with stripCharterSentinels (review note 3)', () => {
+  it('composeCompiled sees a block exactly when the stripper strips it', () => {
+    const variants = [
+      RETAINED_START, '<!--charter:retained:start-->', '<!--   charter:retained:start   -->', `  ${RETAINED_START}  `,
+      '<!-- charter:retained:start --> x', '<!-- charter:retained:starts -->', '<!-- charter: retained:start -->',
+    ];
+    for (const v of variants) {
+      const file = `${FRESH}\n${v}\n## My Notes\n- kept\n${RETAINED_END}\n`;
+      const stripped = !stripCharterSentinels(file).includes('- kept');
+      const c = composeCompiled(FRESH, file, 'CLAUDE.md');
+      expect(c.retainedSource === 'block', v).toBe(stripped);
+    }
+  });
+});
+
+describe('restore of a block holding non-retained content (review note 1)', () => {
+  const cases = [['a non-retained heading', `${ENV}\n\n## My Notes\n- x`, '## My Notes'], ['text before the first heading', `loose line\n\n${ENV}`, '(text before the first heading)']] as const;
+  for (const [name, inner, named] of cases) {
+    it(`refuses (would-drop) for ${name}, naming it, and writes nothing`, async () => {
+      scaffold(vendors('CLAUDE.md: pointer'));
+      const file = `${(await fresh('claude')).trimEnd()}\n\n${block(inner)}`;
+      fs.writeFileSync('CLAUDE.md', file);
+      const r = await run(['vendor', 'restore', 'CLAUDE.md', '--format', 'json'], JSON_OPTS);
+      expect(JSON.parse(r.out)).toMatchObject({ status: 'refused', refusal: 'would-drop', remedy: 'charter adf vendor set CLAUDE.md compiled' });
+      expect(r.err).toContain(named);
+      expect(r.err).toContain('Keep the file as it is: charter adf vendor set CLAUDE.md compiled');
+      expect(read('CLAUDE.md')).toBe(file);
+    });
+  }
 });

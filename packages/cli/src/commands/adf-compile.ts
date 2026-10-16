@@ -46,7 +46,7 @@ import {
 import { countExtractable, readRetainedSections } from './adf-tidy';
 import { inferVendorMode, readVendorRecord, recordedSpelling, recordVendorModes, resolveVendorMode } from './adf-vendor';
 import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
-import { composeCompiled, linesConvertWouldDrop } from './adf-retained';
+import { composeCompiled, linesConvertWouldDrop, readAiModuleLines, RETAINED_MSG } from './adf-retained';
 import type { RetainedSource } from './adf-retained';
 
 // ============================================================================
@@ -331,6 +331,8 @@ interface WriteTargetOutcome {
   /** Retained headings carried into the written file, in order (#303). */
   retainedSections: string[];
   retainedSource: RetainedSource;
+  /** Legacy retained-heading sections not carried because they look like rendered .ai/ text. */
+  retainedSkipped: string[];
 }
 
 function runWriteMode(
@@ -355,7 +357,7 @@ function runWriteMode(
     const { state, source } = targetState(aiDir, filename);
     const row: WriteTargetOutcome = {
       target, file: filename, state, source, status: 'written', recordedMode: null, previousMode: null, remedy: null, writeError: null,
-      retainedSections: [], retainedSource: 'none',
+      retainedSections: [], retainedSource: 'none', retainedSkipped: [],
     };
     rows.push(row);
 
@@ -414,7 +416,7 @@ function runWriteMode(
     // under --force (W4). Converting a pointer refuses only over content the
     // output would NOT carry: bloat tidy can fold into .ai/, or other stray lines.
     const existing = fs.existsSync(filename) ? fs.readFileSync(filename, 'utf-8') : null;
-    const composed = composeCompiled(result.output, existing, filename);
+    const composed = composeCompiled(result.output, existing, filename, { aiLines: readAiModuleLines(aiDir) });
     // Decided by the file's markers, not by whether anything is carried: a
     // pointer with no retained sections can still hold bloat or stray lines.
     if (existing !== null && inferVendorMode(filename as VendorFile, existing).inferredMode === 'pointer' && !flags.force) {
@@ -485,6 +487,8 @@ function runWriteMode(
     if (state === 'pointer' || state === 'unmanaged') row.previousMode = state;
     row.retainedSections = composed.retainedSections;
     row.retainedSource = composed.retainedSource;
+    row.retainedSkipped = composed.skipped;
+    for (const heading of composed.skipped) warn(fill(RETAINED_MSG.skipped, { file: filename, heading }));
     for (const heading of composed.collisions) warn(fill(MSG.collision, { file: filename, heading }));
     if (!json) {
       const headings = composed.retainedSections.join(', ');
@@ -619,7 +623,7 @@ function runCheckMode(
       // file's own retained block, so an edit inside the block is never stale (#303).
       const onDisk = fs.readFileSync(file, 'utf-8');
       const result = compileAdf({ target, aiDir, displayAiDir, readFile });
-      const composed = composeCompiled(result.output, onDisk, file);
+      const composed = composeCompiled(result.output, onDisk, file, { aiLines: readAiModuleLines(aiDir) });
       if (onDisk === composed.output) {
         print(fill(MSG.checkFresh, { file }));
       } else {

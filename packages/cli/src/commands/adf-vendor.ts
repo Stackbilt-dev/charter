@@ -36,7 +36,7 @@ import {
 } from './adf';
 import { fileIdentity, generateModuleIndex } from './adf-migrate';
 import { divergentRetainedHeadings } from './adf-compile';
-import { composeCompiled, compiledMatchesFresh } from './adf-retained';
+import { composeCompiled, compiledMatchesFresh, readAiModuleLines } from './adf-retained';
 import { countExtractable, readRetainedSections } from './adf-tidy';
 import { insertManifestBullet, lastSectionIndex, replaceManifestBullet, sectionHeaders } from './adf-manifest-register';
 
@@ -153,6 +153,7 @@ export const MSG = {
   restoreHandAuthored: '  [warn] {file} has hand-authored content that .ai/ does not hold. Move it first: charter adf migrate --source {file}',
   restoreBloated: '  [warn] {file} carries {n} item(s) beyond the pointer. Fold them into .ai/ first: charter adf tidy --source {file}',
   restoreLost: '  [warn] {file} has {n} line(s) the pointer template would drop: {lines}. Move them into a .ai/ module (or under ## Environment), or delete them, first.',
+  restoreBlockOther: "  [warn] {file}'s retained block holds {headings}, which a pointer cannot keep as retained sections (adf tidy would move them out of it). Keep the file as it is: charter adf vendor set {file} compiled. Or move that content under ## Environment (or into a .ai/ module) first, then re-run restore.",
   restoreCompiledDiffers: '  [warn] {file} differs from what .ai/ compiles to (a hand edit, or .ai/ changed since), and restoring the pointer would lose that difference. Check it with: charter adf compile --target {target} --check. To keep the file as it is: charter adf vendor set {file} compiled',
   restoreRecord: '  [warn] {file} was not restored: its mode could not be recorded as pointer in {manifestPath}. Fix the manifest or run: charter adf vendor status',
   restoreWriteFailed: '  [warn] Could not write {file}: {error}.{note}',
@@ -755,6 +756,7 @@ export type RestoreRefusal =
   | 'hand-authored'
   | 'pointer-bloated'
   | 'compiled-differs'
+  | 'would-drop'
   | 'record-write'
   | 'write-failed';
 
@@ -932,11 +934,18 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
     } catch {
       fresh = null;
     }
-    if (fresh === null || !compiledMatchesFresh(fresh, current, file)) {
+    const opts = { aiLines: readAiModuleLines(aiDir) };
+    const composed = fresh === null ? null : composeCompiled(fresh, current, file, opts);
+    if (fresh === null || composed === null || !compiledMatchesFresh(fresh, current, file, opts)) {
       return refuse('compiled-differs', `charter adf vendor set ${file} compiled`,
         fill(MSG.restoreCompiledDiffers, { file, target: target ?? 'all' }));
     }
-    const composed = composeCompiled(fresh, current, file);
+    // A pointer keeps only retained sections; anything else in the block would
+    // become bloat there, so it is refused rather than half-carried.
+    if (composed.blockOther.length > 0) {
+      return refuse('would-drop', `charter adf vendor set ${file} compiled`,
+        fill(MSG.restoreBlockOther, { file, headings: composed.blockOther.join(', ') }));
+    }
     carried = composed.body;
     carriedSections = composed.retainedSections;
   }
