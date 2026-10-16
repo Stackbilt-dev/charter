@@ -44,7 +44,7 @@ import {
   POINTER_GEMINI_MD,
 } from './adf';
 import { countExtractable, readRetainedSections } from './adf-tidy';
-import { inferVendorMode, readVendorRecord, recordedSpelling, recordVendorModes, resolveVendorMode } from './adf-vendor';
+import { inferVendorMode, legacyKeyFor, MSG as VENDOR_MSG, readVendorRecord, recordedSpelling, recordVendorModes, resolveVendorMode } from './adf-vendor';
 import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 import { composeCompiled, linesConvertWouldDrop, readAiModuleLines, RETAINED_END, RETAINED_MSG, RETAINED_START } from './adf-retained';
 import type { RetainedSource } from './adf-retained';
@@ -322,7 +322,8 @@ type WriteStatus =
   | 'refused-bloated'
   | 'refused-would-drop'
   | 'refused-ambiguous'
-  | 'refused-record';
+  | 'refused-record'
+  | 'refused-legacy-spelling';
 // 'refused-retained' is retired (#303): retained sections are carried, not refused over.
 
 interface WriteTargetOutcome {
@@ -371,6 +372,16 @@ function runWriteMode(
     };
     rows.push(row);
 
+    // AGENTS.md still recorded (and tracked) as the legacy agents.md cannot become
+    // compiled output: name the rename, never the generic refused-record (#302).
+    const legacyKey = legacyKeyFor(manifestPath, filename as VendorFile);
+    if (legacyKey && flags.modeCompiled) {
+      row.status = 'refused-legacy-spelling';
+      row.remedy = VENDOR_MSG.legacyRemedy;
+      if (!json) console.error(VENDOR_MSG.refusedLegacySpelling);
+      continue;
+    }
+
     // A pointer or unmanaged file changes mode only under --mode compiled (#318).
     // --force alone never converts one: it means "overwrite hand-authored content".
     if ((state === 'pointer' || state === 'unmanaged') && !flags.modeCompiled) {
@@ -378,14 +389,15 @@ function runWriteMode(
       const handAuthored = state === 'unmanaged' && fs.existsSync(filename)
         && !CHARTER_OWNED_MARKERS.some(marker => fs.readFileSync(filename, 'utf-8').includes(marker));
       const force = handAuthored ? ' --force' : '';
-      row.remedy = `charter adf compile --target ${target} --write --mode compiled${force}`;
+      row.remedy = legacyKey ? VENDOR_MSG.legacyRemedy : `charter adf compile --target ${target} --write --mode compiled${force}`;
       const values = { file: filename, mode: state, source: source ?? 'inferred', target, force };
+      const legacyLine = legacyKey ? `\n${VENDOR_MSG.legacyFirst}` : '';
       if (flags.all) {
         row.status = 'skipped-mode';
-        if (!json) console.log(fill(MSG.skippedMode, values));
+        if (!json) console.log(fill(MSG.skippedMode, values) + legacyLine);
       } else {
         row.status = 'refused-mode-change';
-        if (!json) console.error(fill(MSG.refusedModeChange, values));
+        if (!json) console.error(fill(MSG.refusedModeChange, values) + legacyLine);
       }
       continue;
     }

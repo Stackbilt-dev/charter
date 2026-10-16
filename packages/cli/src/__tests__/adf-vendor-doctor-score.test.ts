@@ -291,7 +291,7 @@ describe('doctor: adf vendor mode rows', () => {
     fs.writeFileSync('.ai/manifest.adf', vendors('agents.md: pointer'));
     c = vendorCheck((await doctor(true)).json);
     expect(c.rows?.map(x => [x.kind, x.file, x.status])).toEqual([['recorded-ok', 'agents.md', 'PASS'], ['legacy-spelling', 'agents.md', 'INFO']]);
-    expect(c.details).toBe("VENDORS records the legacy name agents.md for the file AGENTS.md; `adf compile --target agents --mode compiled` cannot switch it. Change the line to '  - AGENTS.md: pointer' (an automatic rename comes with #302).");
+    expect(c.details).toBe('VENDORS records the legacy name agents.md for the file AGENTS.md, so `adf compile --target agents --mode compiled` cannot switch it. Run: charter adf vendor rename-legacy');
   });
 
   it('section-not-list WARNs once', async () => {

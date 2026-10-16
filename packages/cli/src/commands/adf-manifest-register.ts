@@ -324,6 +324,32 @@ export function replaceManifestBullet(text: string, key: string, itemIndex: numb
   return null;
 }
 
+/**
+ * Remove the line of list item `itemIndex` (0-based, as parseAdf counts the
+ * items) from the last `key` section. Returns null when the section or item is
+ * not found. Line endings and every other line are kept; when the removed line
+ * was the file's last, the trailing-newline state is kept too. Callers re-parse
+ * the result and compare it with the expected document (the same guard as
+ * insertManifestBullet and replaceManifestBullet).
+ */
+export function removeManifestBullet(text: string, key: string, itemIndex: number): string | null {
+  const lines = text.split('\n');
+  const { headers, own } = sectionHeaders(lines, key);
+  if (own.length === 0) return null;
+  const header = own[own.length - 1];
+  const next = headers.find(i => i > header) ?? lines.length;
+  let seen = 0;
+  for (let i = header + 1; i < next; i++) {
+    if (!LIST_ITEM_PREFIX_RE.test(cleanLine(lines[i]))) continue;
+    if (seen++ !== itemIndex) continue;
+    lines.splice(i, 1);
+    // The removed line had no newline of its own: the one before it now ends the file.
+    if (i === lines.length && i > 0) lines[i - 1] = lines[i - 1].replace(/\r$/, '');
+    return lines.join('\n');
+  }
+  return null;
+}
+
 function skipAll(manifestPath: string, entries: ModuleRegistration[], skipReason: SkipReason): RegisterManifestModulesResult {
   return { manifestPath, written: false, registrations: entries.map(e => ({ ...e, status: 'skipped', skipReason })) };
 }
