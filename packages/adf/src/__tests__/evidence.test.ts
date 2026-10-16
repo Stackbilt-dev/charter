@@ -12,6 +12,7 @@ function makeBundleResult(overrides: Partial<BundleResult> = {}): BundleResult {
       sync: [],
       cadence: [],
       metrics: [],
+      vendors: [],
     },
     resolvedModules: ['core.adf'],
     mergedDocument: {

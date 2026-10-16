@@ -36,6 +36,7 @@ import {
   POINTER_GEMINI_MD,
 } from './adf';
 import { readRetainedSections } from './adf-tidy';
+import { recordWrittenVendorModes } from './adf-vendor';
 
 // ============================================================================
 // Zod validation — at the CLI boundary per Zod-core-out architecture
@@ -290,6 +291,10 @@ function runWriteMode(
       );
     }
   }
+
+  // Record each written target as compiled, add-if-absent (#318). Warnings only.
+  recordWrittenVendorModes(aiDir, written, 'compiled', 'adf compile --write', w =>
+    options.format === 'json' ? console.warn(`Warning: ${w}`) : console.error(`  [warn] ${w}`));
 
   if (options.format === 'json') {
     console.log(JSON.stringify({

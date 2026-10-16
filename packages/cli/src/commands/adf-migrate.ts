@@ -35,6 +35,7 @@ import {
 } from './adf';
 import { registerModules, toRegisterAction, dedupePlannedRegistrations } from './adf-manifest-register';
 import type { ModuleRegistration, RegisterAction } from './adf-manifest-register';
+import { recordWrittenVendorModes } from './adf-vendor';
 
 // ============================================================================
 // Constants
@@ -60,7 +61,7 @@ export const AGENT_CONFIG_FILES = [
  * not canonicalise the final component's case (macOS APFS). Falls back to
  * realpathSync.native, then the resolved path, when the filesystem reports no ino.
  */
-function fileIdentity(fullPath: string): string {
+export function fileIdentity(fullPath: string): string {
   try {
     const st = fs.statSync(fullPath);
     if (st.ino) return `${st.dev}:${st.ino}`;
@@ -380,6 +381,7 @@ export function migrateSource(
 
     // Write pointer with retained STAY items (and optional architecture summary)
     writePointerWithRetained(fullPath, sourcePath, plan.stayItems, keepSummary ? plan : undefined, coexist, aiDir);
+    recordWrittenVendorModes(aiDir, [sourcePath], 'pointer', 'adf migrate', warn);
 
     // A non-CLAUDE.md source can add modules after CLAUDE.md's pointer was written.
     if (path.basename(sourcePath) !== 'CLAUDE.md' && registration.registrations.some(r => r.status === 'added')) {

@@ -48,6 +48,7 @@ import {
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
 import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
+import { recordWrittenVendorModes } from './adf-vendor';
 import { registerModules } from './adf-manifest-register';
 import type { SourceMigrationResult } from './adf-migrate';
 
@@ -1010,15 +1011,14 @@ function runAdfInitPhase(
       { name: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
     ];
 
+    const writtenPointers: string[] = [];
     for (const pf of pointerFiles) {
       const pointerPath = path.resolve(pf.name);
       const exists = fs.existsSync(pointerPath);
-      if (!exists) {
+      if (!exists || force) {
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
-      } else if (force) {
-        fs.writeFileSync(pointerPath, pf.content);
-        pointers.push(pf.label);
+        writtenPointers.push(pf.name);
       } else if (!isAlreadyThinPointer(pointerPath)) {
         // File has custom content — don't overwrite. Name the narrow remedy rather
         // than sending the user to --force, which also re-scaffolds .ai/*.adf and
@@ -1039,6 +1039,9 @@ function runAdfInitPhase(
         );
       }
     }
+
+    // Record the mode of each pointer written (#318); warnings join this step (CP-7).
+    recordWrittenVendorModes(aiDir, writtenPointers, 'pointer', 'bootstrap', w => warnings.push(w));
 
     // Populate module index in CLAUDE.md from manifest
     updateModuleIndex('CLAUDE.md', aiDir);

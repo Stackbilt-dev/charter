@@ -70,6 +70,7 @@ describe('buildTriggerReport', () => {
     sync: [],
     cadence: [],
     metrics: [],
+    vendors: [],
   };
 
   it('reports matched triggers with keywords', () => {

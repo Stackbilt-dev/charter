@@ -236,6 +236,7 @@ function renderToVendorFormat(
  *   - DEFAULT_LOAD / ON_DEMAND: module lists (rendered separately in the on-demand index)
  *   - RULES: manifest-level routing rules, not agent constraints
  *   - BUDGET / SYNC / CADENCE: plumbing directives
+ *   - VENDORS: vendor file mode record (#318); never agent-facing
  *
  * Keys like CONTEXT, CONSTRAINTS, METRICS, STATE, TASK, ROLE come from the
  * *module* files and carry real content — they are rendered normally.
@@ -247,6 +248,7 @@ const MANIFEST_PLUMBING_KEYS = new Set([
   'SYNC',
   'CADENCE',
   'RULES',
+  'VENDORS',
 ]);
 
 function renderSection(section: AdfSection): string | null {

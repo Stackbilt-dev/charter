@@ -240,27 +240,41 @@ const SECTION_HEADER_RE = /^(?:(\p{Emoji_Presentation}|\p{Extended_Pictographic}
 const VERSION_RE = /^ADF\s*:\s*(.+)$/i;
 const LIST_ITEM_PREFIX_RE = /^(\s*-\s+)\S/;
 
+const cleanLine = (line: string) => line.replace(/\r$/, '').trimEnd();
+
+/** Line indexes of every section header, and of the `key` headers among them. */
+export function sectionHeaders(lines: readonly string[], key: string): { headers: number[]; own: number[] } {
+  const start = lines.length > 0 && VERSION_RE.test(cleanLine(lines[0])) ? 1 : 0;
+  const headers: number[] = [];
+  for (let i = start; i < lines.length; i++) {
+    if (SECTION_HEADER_RE.test(cleanLine(lines[i]))) headers.push(i);
+  }
+  const own = headers.filter(i => cleanLine(lines[i]).match(SECTION_HEADER_RE)?.[2] === key);
+  return { headers, own };
+}
+
 /**
  * Insert one bullet into the last `key` section of the manifest text (the one
  * parseManifest reads), after its last list item and with that item's
  * indentation and bullet style. A missing section is appended as a new block
- * at the end of the file. Line endings (CRLF or LF) and the trailing-newline
- * state are kept; no other byte changes.
+ * at the end of the file, headed by `decoration` (the DEFAULT_LOAD and
+ * ON_DEMAND decorations by default). Line endings (CRLF or LF) and the
+ * trailing-newline state are kept; no other byte changes.
  */
-export function insertManifestBullet(text: string, key: LoadPolicy, bullet: string): string {
+export function insertManifestBullet(
+  text: string,
+  key: string,
+  bullet: string,
+  decoration: string | undefined = SECTION_DECORATION[key as LoadPolicy],
+): string {
   const crlf = text.includes('\r\n');
   const eol = crlf ? '\r\n' : '\n';
   const lines = text.split('\n');
-  const clean = (line: string) => line.replace(/\r$/, '').trimEnd();
-  const start = lines.length > 0 && VERSION_RE.test(clean(lines[0])) ? 1 : 0;
-  const headers: number[] = [];
-  for (let i = start; i < lines.length; i++) {
-    if (SECTION_HEADER_RE.test(clean(lines[i]))) headers.push(i);
-  }
-  const own = headers.filter(i => clean(lines[i]).match(SECTION_HEADER_RE)?.[2] === key);
+  const clean = cleanLine;
+  const { headers, own } = sectionHeaders(lines, key);
 
   if (own.length === 0) {
-    const block = `${SECTION_DECORATION[key]} ${key}:${eol}  - ${bullet}`;
+    const block = `${decoration ? `${decoration} ` : ''}${key}:${eol}  - ${bullet}`;
     if (text.length === 0) return `${block}${eol}`;
     return text.endsWith('\n') ? `${text}${eol}${block}${eol}` : `${text}${eol}${eol}${block}`;
   }
@@ -286,11 +300,35 @@ export function insertManifestBullet(text: string, key: LoadPolicy, bullet: stri
   return lines.join('\n');
 }
 
+/**
+ * Replace the text of list item `itemIndex` (0-based, as parseAdf counts the
+ * items) in the last `key` section, keeping that line's indentation, bullet
+ * and line ending. Returns null when the section or item is not found. No
+ * other byte changes.
+ */
+export function replaceManifestBullet(text: string, key: string, itemIndex: number, bullet: string): string | null {
+  const lines = text.split('\n');
+  const { headers, own } = sectionHeaders(lines, key);
+  if (own.length === 0) return null;
+  const header = own[own.length - 1];
+  const next = headers.find(i => i > header) ?? lines.length;
+  let seen = 0;
+  for (let i = header + 1; i < next; i++) {
+    const match = cleanLine(lines[i]).match(LIST_ITEM_PREFIX_RE);
+    if (!match) continue;
+    if (seen++ === itemIndex) {
+      lines[i] = match[1] + bullet + (lines[i].endsWith('\r') ? '\r' : '');
+      return lines.join('\n');
+    }
+  }
+  return null;
+}
+
 function skipAll(manifestPath: string, entries: ModuleRegistration[], skipReason: SkipReason): RegisterManifestModulesResult {
   return { manifestPath, written: false, registrations: entries.map(e => ({ ...e, status: 'skipped', skipReason })) };
 }
 
-function lastSectionIndex(doc: AdfDocument, key: string): number {
+export function lastSectionIndex(doc: AdfDocument, key: string): number {
   for (let i = doc.sections.length - 1; i >= 0; i--) {
     if (doc.sections[i].key === key) return i;
   }

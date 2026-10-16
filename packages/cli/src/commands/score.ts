@@ -15,6 +15,7 @@ import { getFlag } from '../flags';
 import { detectPackageManager, inferProjectName, loadPackageContexts } from './setup';
 import { hasCommits, isGitRepo, runGit } from '../git-helpers';
 import { CHARTER_OWNED_MARKERS } from './adf';
+import { withoutVendorsSection } from './adf-vendor';
 
 type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 type BadgeColor = 'brightgreen' | 'green' | 'yellowgreen' | 'yellow' | 'orange' | 'red';
@@ -413,8 +414,10 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
   const commandSignals: CommandSignal[] = [];
 
   for (const file of groundingFiles) {
-    const content = readText(file);
-    if (!content) continue;
+    const raw = readText(file);
+    if (!raw) continue;
+    // The VENDORS record names vendor files, not paths under .ai/ (#318).
+    const content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
 
     for (const candidate of extractPathCandidates(content)) {
       const reference = resolveReferencedPath(file, candidate);

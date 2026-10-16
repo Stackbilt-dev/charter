@@ -17,6 +17,9 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   STATE: '\u{1F9E0}',
   BUDGET: '\u{1F4B0}',
   SYNC: '\u{1F504}',
+  // Bare U+1F3F7, no U+FE0F: parseAdf drops the variation selector, so only the
+  // bare form round-trips through formatAdf byte for byte (#318).
+  VENDORS: '\u{1F3F7}',
   CADENCE: '\u{1F4CA}',
   GUIDE: '\u{1F4D6}',
 };
@@ -32,6 +35,7 @@ export const CANONICAL_KEY_ORDER: string[] = [
   'ON_DEMAND',
   'BUDGET',
   'SYNC',
+  'VENDORS',
   'CADENCE',
   'FILES',
   'TOOLS',
