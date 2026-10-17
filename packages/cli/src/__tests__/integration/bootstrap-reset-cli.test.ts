@@ -10,7 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CORE_SCAFFOLD, MANIFEST_BACKEND_SCAFFOLD } from '../../commands/adf';
+import { CORE_SCAFFOLD, MANIFEST_BACKEND_SCAFFOLD, STATE_SCAFFOLD } from '../../commands/adf';
 
 const CLI_BIN = path.resolve(__dirname, '../../../dist/bin.js');
 const tempDirs: string[] = [];
@@ -98,5 +98,100 @@ describe('bootstrap phase 6 populate is scaffold-only (built CLI, INV-10)', () =
     expect(r.status).toBe(0);
     const payload = JSON.parse(r.stdout);
     expect(payload.steps.find((s: { name: string }) => s.name === 'populate').status).toBe('pass');
+  });
+});
+
+// ============================================================================
+// Review of #372: populate writes in place, fills only untouched sections, and
+// the output says what happened.
+// ============================================================================
+
+const WORKER_PKG = JSON.stringify({ name: 'demo-354', dependencies: { hono: '^4.0.0' }, devDependencies: { wrangler: '^3.0.0' } });
+
+function workerRepo(): string {
+  const dir = repo();
+  fs.writeFileSync(path.join(dir, 'package.json'), WORKER_PKG);
+  fs.writeFileSync(path.join(dir, 'wrangler.toml'), 'name = "demo"\n');
+  return dir;
+}
+
+const read = (dir: string, rel: string): string => fs.readFileSync(path.join(dir, rel), 'utf-8');
+
+describe('populate never reformats or overwrites user content (built CLI)', () => {
+  it('CRLF, non-canonical order, no scaffold text, CF constraint missing: --force --yes changes only the inserted bullet', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+    const core = [
+      'ADF: 0.1',
+      '\u{1F4CA} METRICS:',
+      '  entry_loc: 120 / 150 [lines]',
+      '',
+      '\u{1F4CB} CONTEXT:',
+      '  - Hand-written context',
+      '',
+      '\u26A0\uFE0F CONSTRAINTS [load-bearing]:',
+      '    - Never commit secrets',
+      '',
+      '\u{1F4D6} GUIDE [advisory]:',
+      '  - mine',
+    ].join('\r\n') + '\r\n';
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
+    const r = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+    expect(r.status).toBe(0);
+    const after = read(dir, '.ai/core.adf');
+    const inserted = '    - No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)\r\n';
+    // The only change is populate's (pre-existing, #371) constraint re-add, inserted in place.
+    expect(after).toBe(core.replace('    - Never commit secrets\r\n', `    - Never commit secrets\r\n${inserted}`));
+    expect(r.stdout).toContain('  Unchanged by merge: .ai/core.adf');
+    expect(r.stdout).toContain('  Added CONSTRAINTS item in .ai/core.adf: No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)');
+    // A second run has nothing left to do.
+    const again = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+    expect(read(dir, '.ai/core.adf')).toBe(after);
+    expect(again.stdout).toContain('  No scaffold content to replace');
+  });
+
+  for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
+    it(`a partially edited CONTEXT and STATE survive bootstrap ${flags.join(' ') || '(no flags)'}`, () => {
+      const dir = workerRepo();
+      fs.mkdirSync(path.join(dir, '.ai'));
+      fs.writeFileSync(path.join(dir, '.ai', 'manifest.adf'), MANIFEST_BACKEND_SCAFFOLD);
+      const core = CORE_SCAFFOLD.replace("auto-fill from codebase)\n", 'auto-fill from codebase)\n  - CUSTOM: billing team owns src/pay\n')
+        .replace('  - Pure functions in library code; side effects only in entry points\n', '  - Pure functions in library code; side effects only in entry points\n  - No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)\n');
+      const state = STATE_SCAFFOLD.replace('  NEXT: Configure on-demand modules for your stack\n', '  NEXT: Configure on-demand modules for your stack\n  BLOCKED: waiting on legal sign-off for EU\n');
+      fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
+      fs.writeFileSync(path.join(dir, '.ai', 'state.adf'), state);
+      expect(run(dir, [...flags, '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+      expect(read(dir, '.ai/core.adf')).toBe(core);
+      expect(read(dir, '.ai/state.adf')).toBe(state);
+    });
+  }
+
+  it('a still-scaffold CONTEXT is filled, and the output says so after "Unchanged by merge"', () => {
+    const dir = workerRepo();
+    fs.mkdirSync(path.join(dir, '.ai'));
+    fs.writeFileSync(path.join(dir, '.ai', 'manifest.adf'), MANIFEST_BACKEND_SCAFFOLD);
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), CORE_SCAFFOLD.replace('entry_loc: 0 / 500', 'entry_loc: 120 / 150'));
+    const r = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+    expect(r.stdout).toContain('  Unchanged by merge: .ai/core.adf');
+    expect(r.stdout).toContain('  Filled CONTEXT in .ai/core.adf');
+    expect(read(dir, '.ai/core.adf')).toContain('entry_loc: 120 / 150 [lines]');
+    expect(read(dir, '.ai/core.adf')).toContain('project: demo-354');
+  });
+});
+
+describe('--reset-adf --yes loss report against the final files (built CLI)', () => {
+  it('does not report CONTEXT/STATE that populate refilled identically', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+    const state = read(dir, '.ai/state.adf');
+    const r = run(dir, ['--reset-adf', '--yes', '--format', 'json', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+    expect(r.status).toBe(0);
+    const init = JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'adf-init');
+    const stateOutcome = init.details.scaffolds.find((o: { file: string }) => o.file === '.ai/state.adf');
+    expect(stateOutcome.kind).toBe('replaced');
+    expect(stateOutcome.lost.itemsLost).toEqual([]);
+    expect(read(dir, '.ai/state.adf')).toBe(state);
+    const text = run(dir, ['--reset-adf', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').stdout;
+    expect(text).toMatch(/ {2}\.ai\/state\.adf \(backup: \S+\): nothing lost/);
   });
 });

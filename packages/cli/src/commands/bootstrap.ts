@@ -64,6 +64,7 @@ import {
 } from './adf-scaffold-merge';
 import type { AddedModule, ScaffoldMode, ScaffoldOutcome } from './adf-scaffold-merge';
 import type { SourceMigrationResult } from './adf-migrate';
+import type { PopulateResult } from './adf-populate';
 
 // ============================================================================
 // Types
@@ -249,13 +250,18 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     for (const o of outcomes) {
       if (o.kind === 'created') console.log(`  Created ${o.file}`);
       else if (o.kind === 'merged') console.log(`  ${describeMerge(o)}`);
-      else if (o.kind === 'unchanged' && scaffoldMode !== 'skip') console.log(`  Unchanged ${o.file}`);
-      else if (o.kind === 'replaced') {
-        console.log(`  Replaced ${o.file} (backup: ${o.backupPath})`);
-        for (const line of formatLossLines(o.lost, adfResult.replacedText.get(o.file) ?? '')) {
-          console.log(`    ${line}`);
-        }
-      }
+      // Scoped wording: phase 6 may still fill a scaffold section in this file (#354).
+      else if (o.kind === 'unchanged' && scaffoldMode === 'merge') console.log(`  Unchanged by merge: ${o.file}`);
+      else if (o.kind === 'unchanged' && scaffoldMode === 'reset') console.log(`  Already the template: ${o.file}`);
+      else if (o.kind === 'replaced') console.log(`  Replaced ${o.file} (backup: ${o.backupPath})`);
+    }
+    const notReset = adfResult.step.details.notReset as Array<{ file: string; detail: string }> | undefined;
+    if (notReset && notReset.length > 0) {
+      const requested = outcomes.filter(o => o.kind === 'replaced').length + notReset.length;
+      console.log(`  ${notReset.length} of ${requested} file(s) not reset: ${notReset.map(n => n.file).join(', ')} (see warnings)`);
+    }
+    if (outcomes.some(o => o.kind === 'replaced')) {
+      console.log('  The loss report follows the populate phase, compared with the final files.');
     }
     // Files phase 3 wrote that are not scaffolds (the sync lock).
     const scaffoldFiles = new Set(outcomes.map(o => o.file));
@@ -398,15 +404,34 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     : await runPopulatePhase(options);
   warnings += completePhase(result, options, populateResult.step, leanMode ? undefined : () => {
     console.log('[6/7] Auto-populating ADF modules...');
-    const populated = populateResult.step.details.populated as number;
-    const skipped = populateResult.step.details.skipped as number;
-    if (populated > 0) {
-      console.log(`  Populated ${populated} module(s), skipped ${skipped} (already customized)`);
-    } else {
-      console.log('  No scaffold content to replace');
+    const changes = (populateResult.step.details.changes as Array<{ file: string; change: string }> | undefined) ?? [];
+    for (const c of changes) {
+      console.log(c.change.startsWith('Filled ') ? `  ${c.change} in ${c.file}` : `  ${c.change.replace(/ item: /, ` item in ${c.file}: `)}`);
     }
+    if (changes.length === 0) console.log('  No scaffold content to replace');
     return [];
   });
+
+  // --reset-adf loss report (#354): compared with each file as the run left it,
+  // so content populate or orphan registration put back is not reported lost.
+  if (scaffoldMode === 'reset') {
+    const outcomes = (adfResult.step.details.scaffolds as ScaffoldOutcome[] | undefined) ?? [];
+    const replaced = outcomes.filter((o): o is Extract<ScaffoldOutcome, { kind: 'replaced' }> => o.kind === 'replaced');
+    for (const o of replaced) {
+      let finalText = '';
+      try { finalText = fs.readFileSync(o.file, 'utf-8'); } catch { /* removed mid-run: everything is lost */ }
+      o.lost = computeLoss(adfResult.replacedText.get(o.file) ?? '', finalText, o.file === '.ai/manifest.adf');
+    }
+    if (replaced.length > 0 && options.format === 'text') {
+      console.log('Reset report (--reset-adf): what each replaced file no longer holds (the backup has it):');
+      for (const o of replaced) {
+        const lines = formatLossLines(o.lost, adfResult.replacedText.get(o.file) ?? '');
+        console.log(`  ${o.file} (backup: ${o.backupPath})${lines.length === 0 ? ': nothing lost' : ''}`);
+        for (const line of lines) console.log(`    ${line}`);
+      }
+      console.log('');
+    }
+  }
 
   // ========================================================================
   // Phase 7: Doctor
@@ -604,7 +629,11 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     }
   }
 
-  return EXIT_CODE.SUCCESS;
+  // --reset-adf --yes that could not replace any file it had to (every backup failed) exits 1 (#354).
+  const resetNone = scaffoldMode === 'reset'
+    && ((adfResult.step.details.notReset as unknown[] | undefined)?.length ?? 0) > 0
+    && ((adfResult.step.details.replaced as unknown[] | undefined)?.length ?? 0) === 0;
+  return resetNone ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
 }
 
 // ============================================================================
@@ -912,7 +941,7 @@ function ensureProjectMcpConfig(
     return {
       created: false,
       updated: false,
-      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (edit it by hand, or use --force to replace it; --force merges .ai/*.adf and never replaces it).',
+      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (edit it by hand, or use --force to replace it; --force also rewrites every Charter-managed pointer and merges the preset template into .ai/*.adf without rewriting existing content).',
     };
   }
 
@@ -1181,6 +1210,11 @@ function runAdfInitPhase(
       }
     }
 
+    const replacedFiles = scaffoldResult.scaffolds.filter(o => o.kind === 'replaced').map(o => o.file);
+    const notReset = scaffoldResult.scaffolds
+      .filter((o): o is Extract<ScaffoldOutcome, { kind: 'skipped' }> => o.kind === 'skipped' && o.reason === 'backup-failed')
+      .map(o => ({ file: o.file, detail: o.detail }));
+
     // Generate pointer files (CLAUDE.md uses hybrid template with module index)
     const pointerFiles: Array<{ name: string; content: string; label: string }> = [
       { name: 'CLAUDE.md', content: POINTER_CLAUDE_MD_HYBRID, label: 'CLAUDE.md (hybrid pointer)' },
@@ -1224,8 +1258,9 @@ function runAdfInitPhase(
       } else {
         warnings.push(
           `${pf.name} is already Charter-managed; leaving it as is. ` +
-          `To regenerate it from the current template, delete ${pf.name} and re-run bootstrap, ` +
-          `or re-run with --force (which merges .ai/*.adf and never replaces it).`,
+          `To regenerate it from the current template, delete ${pf.name} and re-run bootstrap. ` +
+          `(--force also regenerates it, but it rewrites every Charter-managed pointer, replaces .mcp.json's mcpServers.charter entry, ` +
+          `and merges the preset template into .ai/*.adf without rewriting existing content.)`,
         );
       }
     }
@@ -1239,16 +1274,18 @@ function runAdfInitPhase(
     return {
       step: {
         name: 'adf-init',
-        status: 'pass',
+        // --reset-adf that replaced none of the files it had to: a failed step (#354).
+        status: notReset.length > 0 && replacedFiles.length === 0 ? 'fail' : 'pass',
         details: {
           files,
           pointers,
           backedUp: scaffoldResult.backedUp,
           orphans: detectedOrphans,
           scaffolds: scaffoldResult.scaffolds,
-          replaced: scaffoldResult.scaffolds.filter(o => o.kind === 'replaced').map(o => o.file),
+          replaced: replacedFiles,
           mode,
           backupGitignore,
+          ...(mode === 'reset' ? { notReset } : {}),
         },
         warnings,
       },
@@ -1459,13 +1496,22 @@ async function runPopulatePhase(
     const { adfPopulateCommand } = require('./adf-populate');
     // Scaffold-only (#354): a CONTEXT/STATE section is replaced only while it still
     // holds scaffold text, whatever bootstrap's own --yes/--force say.
-    const code = await adfPopulateCommand(options, [], { mode: 'scaffold-only', embedded: true });
+    let results: PopulateResult[] = [];
+    const code = await adfPopulateCommand(options, [], { mode: 'scaffold-only', embedded: true, report: (r: PopulateResult[]) => { results = r; } });
+    const label = (f: string) => f.split(path.sep).join('/');
+    for (const r of results) {
+      if (r.reason) warnings.push(`${label(r.file)} ${r.reason}; left as is.`);
+    }
 
     return {
       step: {
         name: 'populate',
         status: code === 0 ? 'pass' : 'fail',
-        details: { populated: code === 0 ? 1 : 0, skipped: 0 },
+        details: {
+          populated: results.filter(r => r.status === 'populated').length,
+          skipped: results.filter(r => r.status === 'skipped').length,
+          changes: results.flatMap(r => (r.changes ?? []).map(change => ({ file: label(r.file), change }))),
+        },
         warnings,
       },
     };

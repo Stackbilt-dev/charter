@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseAdf, parseManifest } from '@stackbilt/adf';
 import type { AdfDocument, AdfSection } from '@stackbilt/adf';
-import { lastSectionIndex, sectionHeaders } from './adf-manifest-register';
+import { sectionHeaders } from './adf-manifest-register';
 import type { LoadPolicy } from './adf-manifest-register';
 import { normalizeModulePath } from './adf-wiring';
 
@@ -39,6 +39,10 @@ export interface LossEntry {
   itemsLost: Array<{ section: string; item: string }>;
   metricsRows: Array<{ key: string; before: string; after: string | null }>;
   entries: Array<{ module: string; before: string; after: string | null }>;
+  /** A section whose decoration or weight differs, e.g. `CONSTRAINTS [advisory]` -> `⚠️ CONSTRAINTS [load-bearing]`. */
+  headerChanges: Array<{ section: string; before: string; after: string }>;
+  /** manifest.adf: VENDORS entries (as written) that the final file no longer has, e.g. invalid ones not carried over. */
+  vendorsDropped: string[];
   unparsed: boolean;
 }
 
@@ -189,75 +193,113 @@ function itemsOf(section: AdfSection): string[] {
   return rowText(section).map(r => `${r.key}: ${r.text}`);
 }
 
-function entryBullets(doc: AdfDocument): Map<string, { policy: LoadPolicy; bullet: string }> {
-  const out = new Map<string, { policy: LoadPolicy; bullet: string }>();
-  for (const key of ['ON_DEMAND', 'DEFAULT_LOAD'] as const) {
-    const idx = lastSectionIndex(doc, key);
-    const content = idx === -1 ? undefined : doc.sections[idx].content;
-    if (content?.type !== 'list') continue;
-    const parsed = parseManifest({ version: doc.version, sections: [doc.sections[idx]] });
-    content.items.forEach((item, i) => {
-      const mod = key === 'DEFAULT_LOAD' ? item : parsed.onDemand[i]?.path ?? item;
-      out.set(normalizeModulePath(mod), { policy: key, bullet: item.trim() });
+interface EntryBullet { module: string; policy: LoadPolicy; bullet: string }
+
+/** Every DEFAULT_LOAD/ON_DEMAND entry in every section with those keys, in file order. */
+function entryBullets(doc: AdfDocument): EntryBullet[] {
+  const out: EntryBullet[] = [];
+  for (const section of doc.sections) {
+    if (section.key !== 'ON_DEMAND' && section.key !== 'DEFAULT_LOAD') continue;
+    if (section.content.type !== 'list') continue;
+    const policy = section.key;
+    const parsed = parseManifest({ version: doc.version, sections: [section] });
+    section.content.items.forEach((item, i) => {
+      const mod = policy === 'DEFAULT_LOAD' ? item : parsed.onDemand[i]?.path ?? item;
+      out.push({ module: normalizeModulePath(mod), policy, bullet: item.trim() });
     });
   }
   return out;
 }
 
-/** What replacing `oldText` with `templateText` drops, compared at parse level. */
-export function computeLoss(oldText: string, templateText: string, isManifest: boolean): LossEntry {
-  const lost: LossEntry = { sectionsLost: [], itemsLost: [], metricsRows: [], entries: [], unparsed: false };
+const headerOf = (s: AdfSection): string => `${s.decoration ? `${s.decoration} ` : ''}${s.key}${s.weight ? ` [${s.weight}]` : ''}`;
+
+function byKey(doc: AdfDocument): Map<string, AdfSection[]> {
+  const out = new Map<string, AdfSection[]>();
+  for (const s of doc.sections) out.set(s.key, [...(out.get(s.key) ?? []), s]);
+  return out;
+}
+
+/**
+ * What `oldText` holds that `newText` does not, compared at parse level over
+ * every section of each key (duplicates included). Bootstrap passes the file as
+ * it stands after the whole run, so content a later phase put back (populate,
+ * orphan registration, the VENDORS carry-over) is not reported as lost.
+ */
+export function computeLoss(oldText: string, newText: string, isManifest: boolean): LossEntry {
+  const lost: LossEntry = { sectionsLost: [], itemsLost: [], metricsRows: [], entries: [], headerChanges: [], vendorsDropped: [], unparsed: false };
   let old: AdfDocument;
   try {
     old = parseAdf(oldText);
   } catch {
     return { ...lost, unparsed: true };
   }
-  const template = parseAdf(templateText);
+  let now: AdfDocument;
+  try {
+    now = parseAdf(newText);
+  } catch {
+    now = { version: '0.1', sections: [] };
+  }
   const skip = new Set(isManifest ? MANIFEST_EXCLUDED_KEYS : []);
-  const tByKey = new Map(template.sections.map(s => [s.key, s] as const));
+  const nowByKey = byKey(now);
 
-  for (const section of old.sections) {
-    if (skip.has(section.key)) continue;
-    const t = tByKey.get(section.key);
-    if (section.key === 'METRICS') {
-      const tRows = new Map((t ? rowText(t) : []).map(r => [r.key, r.text] as const));
-      for (const row of rowText(section)) {
-        const after = tRows.get(row.key) ?? null;
-        if (after !== row.text) lost.metricsRows.push({ key: row.key, before: row.text, after });
+  for (const [key, sections] of byKey(old)) {
+    if (skip.has(key)) continue;
+    const after = nowByKey.get(key) ?? [];
+    const oldRows = sections.flatMap(rowText);
+    if (key === 'METRICS') {
+      const nowRows = new Map(after.flatMap(rowText).map(r => [r.key, r.text] as const));
+      for (const row of oldRows) {
+        const a = nowRows.get(row.key) ?? null;
+        if (a !== row.text) lost.metricsRows.push({ key: row.key, before: row.text, after: a });
       }
     }
-    if (!t) {
-      lost.sectionsLost.push(section.key);
+    if (after.length === 0) {
+      lost.sectionsLost.push(key);
       continue;
     }
-    if (section.key === 'METRICS' && rowText(section).length > 0) continue;
-    const tItems = new Set(itemsOf(t));
-    for (const item of itemsOf(section)) {
-      if (!tItems.has(item)) lost.itemsLost.push({ section: section.key, item });
+    const nowHeaders = new Set(after.map(headerOf));
+    for (const section of sections) {
+      const h = headerOf(section);
+      if (!nowHeaders.has(h) && !lost.headerChanges.some(c => c.section === key && c.before === h)) {
+        lost.headerChanges.push({ section: key, before: h, after: headerOf(after[0]) });
+      }
+    }
+    if (key === 'METRICS' && oldRows.length > 0) continue;
+    const nowItems = new Set(after.flatMap(itemsOf));
+    const seen = new Set<string>();
+    for (const item of sections.flatMap(itemsOf)) {
+      if (nowItems.has(item) || seen.has(item)) continue;
+      seen.add(item);
+      lost.itemsLost.push({ section: key, item });
     }
   }
 
   if (isManifest) {
-    const tEntries = entryBullets(template);
-    for (const [module, before] of entryBullets(old)) {
-      const after = tEntries.get(module);
-      if (!after) {
-        lost.entries.push({ module, before: before.bullet, after: null });
-      } else if (after.policy !== before.policy) {
-        lost.entries.push({ module, before: `${before.bullet} [${before.policy}]`, after: `${after.bullet} [${after.policy}]` });
-      } else if (after.bullet !== before.bullet) {
-        lost.entries.push({ module, before: before.bullet, after: after.bullet });
-      }
+    const nowEntries = entryBullets(now);
+    const exact = new Set(nowEntries.map(e => `${e.policy}|${e.bullet}`));
+    const byModule = new Map(nowEntries.map(e => [e.module, e] as const));
+    const seen = new Set<string>();
+    for (const before of entryBullets(old)) {
+      const id = `${before.policy}|${before.bullet}`;
+      if (exact.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      const a = byModule.get(before.module);
+      if (!a) lost.entries.push({ module: before.module, before: before.bullet, after: null });
+      else if (a.policy !== before.policy) lost.entries.push({ module: before.module, before: `${before.bullet} [${before.policy}]`, after: `${a.bullet} [${a.policy}]` });
+      else lost.entries.push({ module: before.module, before: before.bullet, after: a.bullet });
     }
+    const vendors = (doc: AdfDocument): string[] => (byKey(doc).get('VENDORS') ?? []).flatMap(itemsOf).map(i => i.trim());
+    const kept = new Set(vendors(now));
+    lost.vendorsDropped = [...new Set(vendors(old).filter(v => !kept.has(v)))];
   }
   return lost;
 }
 
 function sectionSize(oldText: string, key: string): string {
   try {
-    const section = parseAdf(oldText).sections.find(s => s.key === key);
-    const n = section ? itemsOf(section).length : 0;
+    const sections = parseAdf(oldText).sections.filter(s => s.key === key);
+    const section = sections[0];
+    const n = sections.flatMap(itemsOf).length;
     const noun = section && (section.content.type === 'map' || section.content.type === 'metric') ? 'row' : 'item';
     return ` (${n} ${noun}${n === 1 ? '' : 's'})`;
   } catch {
@@ -276,12 +318,14 @@ export function formatLossLines(lost: LossEntry, oldText: string): string[] {
       ? `lost METRICS row ${row.key}: ${row.before}`
       : `changed METRICS ${row.key}: ${row.before} -> ${row.after}`);
   }
+  for (const c of lost.headerChanges) lines.push(`changed header: ${c.before} -> ${c.after}`);
   for (const { section, item } of lost.itemsLost) lines.push(`lost ${section} item: ${item}`);
   for (const e of lost.entries) {
     lines.push(e.after === null
-      ? `dropped entry: ${e.before} (an existing module file is re-registered with its stem as trigger)`
+      ? `dropped entry: ${e.before}`
       : `reset entry: ${e.before} -> ${e.after.startsWith(`${e.module} `) ? e.after.slice(e.module.length + 1) : e.after}`);
   }
+  for (const v of lost.vendorsDropped) lines.push(`dropped VENDORS entry: ${v}`);
   if (lines.length <= LOSS_TEXT_MAX_LINES_PER_FILE) return lines;
   const more = lines.length - LOSS_TEXT_MAX_LINES_PER_FILE;
   return [...lines.slice(0, LOSS_TEXT_MAX_LINES_PER_FILE), `... and ${more} more (see backup)`];

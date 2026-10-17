@@ -5,13 +5,17 @@
  * package.json, README.md, and stack detection.
  *
  * Replaces scaffold placeholder content with project-specific context.
- * Skips sections that have already been customized (unless --force).
+ * Skips sections that have already been customized (unless --force): a section
+ * counts as untouched only while it is exactly its template content (#354).
+ * Edits are made in place, keeping every other byte of the file.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseAdf, formatAdf, applyPatches } from '@stackbilt/adf';
+import { parseAdf } from '@stackbilt/adf';
 import type { AdfSection, PatchOperation } from '@stackbilt/adf';
+import { applyOpsAsText } from './adf-text-patch';
+import { BACKEND_SCAFFOLD, CORE_SCAFFOLD, FRONTEND_SCAFFOLD, STATE_SCAFFOLD } from './adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -24,25 +28,37 @@ import {
 } from './setup';
 
 // ============================================================================
-// Scaffold markers — used to detect un-authored placeholder content
+// Untouched scaffold detection
 // ============================================================================
 
-const SCAFFOLD_MARKERS = [
-  'Frontend module scaffold',
-  'Backend module scaffold',
-  'Module scaffold',
-  'Add framework-specific constraints',
-  'Add service/API/database constraints',
-  'Add project-specific rules',
-  "run 'charter adf populate'",
-  'Project context (run',
-  'Repository initialized with ADF context system',
-  'Configure on-demand modules for your stack',
-];
+/**
+ * The template a populated section starts from, per file. A section is filled
+ * only while it is absent, empty, or still exactly this template content (#354):
+ * one line of the user's own, anywhere in it, means hands off. Lines are compared
+ * trimmed, ignoring blank lines.
+ */
+function templateSection(file: string, key: string): AdfSection | undefined {
+  const template: Record<string, string> = {
+    'core.adf': CORE_SCAFFOLD,
+    'state.adf': STATE_SCAFFOLD,
+    'backend.adf': BACKEND_SCAFFOLD,
+    'frontend.adf': FRONTEND_SCAFFOLD,
+  };
+  const text = template[path.basename(file)];
+  return text === undefined ? undefined : parseAdf(text).sections.find(s => s.key === key);
+}
 
-function hasScaffoldContent(section: AdfSection): boolean {
-  const text = sectionText(section);
-  return SCAFFOLD_MARKERS.some(m => text.includes(m));
+function normalized(section: AdfSection): string[] {
+  return sectionText(section).split('\n').map(l => l.trim()).filter(l => l !== '');
+}
+
+export function isUntouchedScaffold(section: AdfSection, file: string): boolean {
+  const lines = normalized(section);
+  if (lines.length === 0) return true;
+  const template = templateSection(file, section.key);
+  if (!template) return false;
+  const want = normalized(template);
+  return lines.length === want.length && lines.every((l, i) => l === want[i]);
 }
 
 function sectionText(section: AdfSection): string {
@@ -66,10 +82,26 @@ function sectionText(section: AdfSection): string {
  */
 export type PopulateMode = 'scaffold-only' | 'force';
 
+export interface PopulateResult {
+  file: string;
+  ops: number;
+  status: 'populated' | 'skipped' | 'missing';
+  /** Why a file with pending operations was left as is. */
+  reason?: string;
+  /** One line per applied operation, e.g. "Filled CONTEXT". */
+  changes?: string[];
+}
+
+function describeOp(op: PatchOperation): string {
+  if (op.op === 'ADD_BULLET') return `Added ${op.section} item: ${op.value}`;
+  if (op.op === 'REPLACE_SECTION' || op.op === 'ADD_SECTION') return `Filled ${op.key}`;
+  return op.op;
+}
+
 export async function adfPopulateCommand(
   options: CLIOptions,
   args: string[],
-  internal: { mode?: PopulateMode; embedded?: boolean } = {},
+  internal: { mode?: PopulateMode; embedded?: boolean; report?: (results: PopulateResult[]) => void } = {},
 ): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const mode: PopulateMode = internal.mode ?? (options.yes || args.includes('--force') ? 'force' : 'scaffold-only');
@@ -89,7 +121,7 @@ export async function adfPopulateCommand(
   const description = rootPkg?.description;
   const readmeSummary = readReadmeSummary();
 
-  const results: Array<{ file: string; ops: number; status: 'populated' | 'skipped' | 'missing' }> = [];
+  const results: PopulateResult[] = [];
 
   const fileTasks: Array<{ file: string; build: () => PatchOperation[] | null }> = [
     {
@@ -122,18 +154,23 @@ export async function adfPopulateCommand(
       continue;
     }
 
-    if (!dryRun) {
-      const input = fs.readFileSync(task.file, 'utf-8');
-      const doc = parseAdf(input);
-      const patched = applyPatches(doc, ops);
-      fs.writeFileSync(task.file, formatAdf(patched));
+    // Edit in place (#354): only the affected lines change; a result that does not
+    // re-parse as exactly the intended change is not written.
+    const edit = applyOpsAsText(fs.readFileSync(task.file, 'utf-8'), ops);
+    if (edit.status === 'refused') {
+      results.push({ file: task.file, ops: 0, status: 'skipped', reason: `could not be edited in place without changing other content (${edit.reason})` });
+      continue;
     }
+    if (!dryRun) fs.writeFileSync(task.file, edit.next);
 
-    results.push({ file: task.file, ops: ops.length, status: 'populated' });
+    results.push({ file: task.file, ops: ops.length, status: 'populated', changes: ops.map(describeOp) });
   }
 
-  if (options.format === 'json' && internal.embedded) {
-    // Called by bootstrap: its own JSON report is the only document on stdout.
+  internal.report?.(results);
+
+  if (internal.embedded) {
+    // Called by bootstrap, which renders `results` itself; its own JSON report
+    // is the only document on stdout.
   } else if (options.format === 'json') {
     console.log(JSON.stringify({
       dryRun,
@@ -160,7 +197,7 @@ export async function adfPopulateCommand(
       const icon = r.status === 'populated' ? '[ok]' : '[skip]';
       const detail = r.status === 'populated'
         ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied`
-        : internal.mode === 'scaffold-only' ? 'already customized' : 'already customized — use --force to overwrite';
+        : r.reason ?? 'already customized — use --force to overwrite';
       console.log(`    ${icon} ${r.file}  (${detail})`);
     }
     if (dryRun) {
@@ -207,7 +244,7 @@ function buildCoreOps(
       decoration: '\u{1F4CB}',
       content: { type: 'list', items: contextItems },
     });
-  } else if (force || hasScaffoldContent(contextSection)) {
+  } else if (force || isUntouchedScaffold(contextSection, filePath)) {
     ops.push({
       op: 'REPLACE_SECTION',
       key: 'CONTEXT',
@@ -360,7 +397,7 @@ function buildStateOps(
 
   const stateSection = doc.sections.find(s => s.key === 'STATE');
   if (!stateSection) return null;
-  if (!force && !hasScaffoldContent(stateSection)) return null;
+  if (!force && !isUntouchedScaffold(stateSection, filePath)) return null;
 
   const stackSummary = [
     ...detection.runtime,
@@ -396,7 +433,7 @@ function buildBackendOps(
   const doc = parseAdf(input);
 
   const contextSection = doc.sections.find(s => s.key === 'CONTEXT');
-  if (contextSection && !force && !hasScaffoldContent(contextSection)) return null;
+  if (contextSection && !force && !isUntouchedScaffold(contextSection, filePath)) return null;
 
   const items: string[] = [];
   if (detection.signals.hasWorker || detection.signals.hasCloudflare) {
@@ -435,7 +472,7 @@ function buildFrontendOps(
   const doc = parseAdf(input);
 
   const contextSection = doc.sections.find(s => s.key === 'CONTEXT');
-  if (contextSection && !force && !hasScaffoldContent(contextSection)) return null;
+  if (contextSection && !force && !isUntouchedScaffold(contextSection, filePath)) return null;
 
   const items: string[] = [];
   if (detection.signals.hasReact) items.push('React component model (hooks-based, no class components)');

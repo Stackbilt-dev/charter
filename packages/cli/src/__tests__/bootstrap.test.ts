@@ -152,7 +152,7 @@ STATE:
   });
 
   // #354: --force no longer replaces .ai/*.adf, so it is a safe way to regenerate a pointer.
-  it('names delete-and-re-run, and --force as safe, when a pointer file is already Charter-managed', async () => {
+  it('names delete-and-re-run, and what --force also does, when a pointer file is already Charter-managed', async () => {
     const args = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
     expect(await bootstrapCommand(baseOptions, args)).toBe(0);
     logs.length = 0;
@@ -162,7 +162,9 @@ STATE:
     expect(warning).toBeDefined();
     expect(warning).not.toContain('use --force to overwrite');
     expect(warning).toContain('delete GEMINI.md and re-run bootstrap');
-    expect(warning).toContain('re-run with --force (which merges .ai/*.adf and never replaces it)');
+    expect(warning).toContain('--force also regenerates it, but it rewrites every Charter-managed pointer');
+    expect(warning).toContain("replaces .mcp.json's mcpServers.charter entry");
+    expect(warning).not.toContain('never replaces');
     expect(warning).not.toContain('re-scaffolds');
     expect(logs.some(l => l.includes('use --force to overwrite'))).toBe(false);
   });
