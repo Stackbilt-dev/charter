@@ -161,9 +161,35 @@ export function backupFile(source: string, backupDir: string, name: string, stam
   }
 }
 
-/** Keep `.ai/.backup/` out of git: a `.gitignore` inside it ignoring everything. */
-export function ensureBackupGitignore(aiDir: string): 'created' | 'present' | 'not-needed' {
-  const dir = path.join(aiDir, '.backup');
+/**
+ * `dir` as a display prefix with forward slashes and one trailing slash, e.g.
+ * `.ai/` or `.charter/` ('' for an empty dir). Trailing slashes are stripped
+ * with a loop, not a regex (CodeQL js/polynomial-redos).
+ */
+export function dirLabel(dir: string): string {
+  let d = dir.split(path.sep).join('/');
+  while (d.endsWith('/')) d = d.slice(0, -1);
+  if (d === '') return dir === '' ? '' : '/';
+  return `${d}/`;
+}
+
+/** ensureBackupGitignore that reports a failure as a warning instead of throwing (#369). */
+export function tryEnsureBackupGitignore(parentDir: string, onWarning: (w: string) => void): 'created' | 'present' | 'not-needed' | 'failed' {
+  try {
+    return ensureBackupGitignore(parentDir);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    onWarning(`Could not write ${dirLabel(parentDir)}.backup/.gitignore (${msg}); add ${dirLabel(parentDir)}.backup/ to .gitignore by hand so backups stay out of git.`);
+    return 'failed';
+  }
+}
+
+/**
+ * Keep `<parentDir>/.backup/` out of git: a `.gitignore` inside it ignoring
+ * everything. Used for `.ai/.backup/` (#354) and `.charter/.backup/` (#369).
+ */
+export function ensureBackupGitignore(parentDir: string): 'created' | 'present' | 'not-needed' {
+  const dir = path.join(parentDir, '.backup');
   try {
     if (!fs.statSync(dir).isDirectory()) return 'not-needed';
   } catch {

@@ -11,7 +11,7 @@ import type { CLIOptions } from '../index';
 import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { initializeCharter, type StackPreset } from './init';
+import { initExitCode, initializeCharter, printInitChanges, type StackPreset } from './init';
 import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -104,6 +104,12 @@ ${installStep}
 export interface SetupResult {
   configPath: string;
   initialized: boolean;
+  /** .charter/ files replaced under --force, each backed up first (#369). */
+  replaced?: Array<{ file: string; backup: string }>;
+  /** .charter/ files --force did not replace because the backup failed (#369). */
+  notReplaced?: Array<{ file: string; detail: string }>;
+  /** Non-fatal .charter/ write problems (e.g. a .backup/.gitignore that could not be written), when any (#369). */
+  warnings?: string[];
   detected: DetectionResult;
   selectedPreset: StackPreset;
   inferenceMode: 'auto' | 'preset-override' | 'fallback-conservative';
@@ -256,6 +262,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
+  // #369: without --force each missing file is created and existing ones are kept;
+  // --force replaces a differing file only after backing it up to .charter/.backup/.
   const initResult = initializeCharter(options.configPath, explicitForce, {
     preset: selectedPreset,
     projectName: inferProjectName(contexts),
@@ -277,6 +285,9 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const result: SetupResult = {
     configPath: options.configPath,
     initialized: initResult.created,
+    ...(initResult.replaced.length > 0 ? { replaced: initResult.replaced } : {}),
+    ...(initResult.notReplaced.length > 0 ? { notReplaced: initResult.notReplaced } : {}),
+    ...(initResult.warnings && initResult.warnings.length > 0 ? { warnings: initResult.warnings } : {}),
     detected: detection,
     selectedPreset,
     inferenceMode,
@@ -365,12 +376,14 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (options.format === 'json') {
     const jsonResult = hasAiManifest ? result : { ...result, suggestion: 'bootstrap' };
     console.log(JSON.stringify(jsonResult, null, 2));
-    return EXIT_CODE.SUCCESS;
+    return initExitCode(initResult);
   }
 
   console.log('  Governance guardrails are now active for this repo.');
   console.log(`  Baseline path: ${result.configPath}`);
   console.log(`  Baseline created: ${result.initialized ? 'yes' : 'already present'}`);
+  // #369: name what was created, replaced or kept, as charter init does.
+  printInitChanges(initResult, !initResult.created);
   console.log(`  Stack preset: ${result.selectedPreset} (${result.inferenceMode})`);
   console.log(`  Detection confidence: ${result.detected.confidence}`);
   if (result.detected.mixedStack) {
@@ -425,7 +438,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     console.log('  \u{1F4A1} No .ai/ found. Run `charter bootstrap` for full onboarding (ADF + CI + hooks).');
   }
 
-  return EXIT_CODE.SUCCESS;
+  // --force with every needed backup failed replaced nothing: exit 1, as charter init --force does.
+  return initExitCode(initResult);
 }
 
 export function detectStack(contexts: PackageContext[]): DetectionResult {
