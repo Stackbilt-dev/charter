@@ -456,3 +456,10 @@ describe('#374 setup --ci github: the workflow', () => {
     expect(result.workflow.kept).toBeUndefined();
   });
 });
+
+describe('bootstrap --preset validation', () => {
+  it('names all six presets in the invalid-preset error', async () => {
+    await expect(bootstrapCommand(YES, ['--yes', '--preset', 'nope', '--skip-install', '--skip-doctor']))
+      .rejects.toThrow('Use worker|frontend|backend|fullstack|docs|rust-wasm.');
+  });
+});

@@ -146,7 +146,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   }
 
   if (presetFlag && !isValidPreset(presetFlag)) {
-    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack|docs.`);
+    throw new CLIError(`Invalid --preset value: ${presetFlag}. Use worker|frontend|backend|fullstack|docs|rust-wasm.`);
   }
 
   const result: BootstrapResult = {
