@@ -20,7 +20,7 @@ import {
   STATE_SCAFFOLD,
 } from '../commands/adf';
 import { applyOpsAsText } from '../commands/adf-text-patch';
-import { isUntouchedScaffold } from '../commands/adf-populate';
+import { isUntouchedScaffold, normalizeValue } from '../commands/adf-populate';
 import {
   appendMissingSections,
   backupFile,
@@ -799,13 +799,34 @@ describe('applyOpsAsText (populate writes)', () => {
     expect(r.next).toBe('ADF: 0.1\r\nRULES:\r\n  - a\r\n\r\n\u{1F4CB} CONTEXT:\r\n  - p\r\n');
   });
 
-  it('refuses (guard) when the edit would not re-parse as exactly the intended change', () => {
+  it('refuses (guard) when the edit would not re-parse as exactly the intended change, naming where', () => {
     tamper = t => t.includes('GUARD-ME') && t.includes('added');
-    expect(applyOpsAsText('ADF: 0.1\nRULES:\n  - GUARD-ME\n', [{ op: 'ADD_BULLET', section: 'RULES', value: 'added' }])).toEqual({ status: 'refused', reason: 'guard' });
+    expect(applyOpsAsText('ADF: 0.1\nRULES:\n  - GUARD-ME\n', [{ op: 'ADD_BULLET', section: 'RULES', value: 'added' }])).toEqual({
+      status: 'refused', reason: 'guard', detail: 'after the edit, section TAMPERED would not re-parse as the intended content',
+    });
   });
 
   it('refuses an unsupported ADF version', () => {
-    expect(applyOpsAsText('ADF: 0.9\nRULES:\n  - a\n', [{ op: 'ADD_BULLET', section: 'RULES', value: 'b' }])).toEqual({ status: 'refused', reason: 'unparseable' });
+    expect(applyOpsAsText('ADF: 0.9\nRULES:\n  - a\n', [{ op: 'ADD_BULLET', section: 'RULES', value: 'b' }])).toMatchObject({ status: 'refused', reason: 'unparseable' });
+  });
+
+  it('a value the parser would read differently is refused, and the detail names the section', () => {
+    const r = applyOpsAsText('ADF: 0.1\nRULES:\n  - a\n', [{ op: 'ADD_BULLET', section: 'RULES', value: 'padded ' }]);
+    expect(r).toEqual({ status: 'refused', reason: 'guard', detail: 'after the edit, section RULES would not re-parse as the intended content' });
+  });
+
+  it('mixed endings: new lines take their neighbour\'s ending and no existing line changes', () => {
+    const text = 'ADF: 0.1\nCONTEXT:\n  - old\r\n\nCONSTRAINTS:\n  - a\n';
+    const r = applyOpsAsText(text, [
+      { op: 'REPLACE_SECTION', key: 'CONTEXT', content: { type: 'list', items: ['project: x'] } },
+      { op: 'ADD_BULLET', section: 'CONSTRAINTS', value: 'NEW' },
+    ]);
+    if (r.status !== 'applied') throw new Error(r.status);
+    expect(r.next).toBe('ADF: 0.1\nCONTEXT:\n  - project: x\r\n\nCONSTRAINTS:\n  - a\n  - NEW\n');
+    const lf = 'ADF: 0.1\r\nRULES:\n  - a\nX:\r\n  - b\r\n';
+    const r2 = applyOpsAsText(lf, [{ op: 'ADD_BULLET', section: 'RULES', value: 'c' }]);
+    if (r2.status !== 'applied') throw new Error(r2.status);
+    expect(r2.next).toBe('ADF: 0.1\r\nRULES:\n  - a\n  - c\nX:\r\n  - b\r\n');
   });
 });
 
@@ -852,8 +873,8 @@ describe('loss report, compared with the final file', () => {
     const old = 'ADF: 0.1\nCONSTRAINTS [advisory]:\n  - a\n';
     const now = 'ADF: 0.1\n\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - a\n';
     const lost = computeLoss(old, now, false);
-    expect(lost.headerChanges).toEqual([{ section: 'CONSTRAINTS', before: 'CONSTRAINTS [advisory]', after: '\u26A0 CONSTRAINTS [load-bearing]' }]);
-    expect(formatLossLines(lost, old)).toEqual(['changed header: CONSTRAINTS [advisory] -> \u26A0 CONSTRAINTS [load-bearing]']);
+    expect(lost.headerChanges).toEqual([{ section: 'CONSTRAINTS', before: 'CONSTRAINTS [advisory]', after: '\u26A0\uFE0F CONSTRAINTS [load-bearing]' }]);
+    expect(formatLossLines(lost, old)).toEqual(['changed header: CONSTRAINTS [advisory] -> \u26A0\uFE0F CONSTRAINTS [load-bearing]']);
   });
 
   it('reports VENDORS entries the final file no longer has (invalid ones are not carried over)', () => {
@@ -865,5 +886,54 @@ describe('loss report, compared with the final file', () => {
 
   it('does not report content the final file still holds (refilled by a later phase)', () => {
     expect(computeLoss(HAND_STATE, HAND_STATE.replace('ADF: 0.1\n', 'ADF: 0.1\n\n'), false).itemsLost).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Second review of #372
+// ============================================================================
+
+describe('populate normalizes generated values', () => {
+  it('normalizeValue trims, collapses whitespace/newlines and strips control characters', () => {
+    expect(normalizeValue('Demo app ')).toBe('Demo app');
+    expect(normalizeValue('Demo\nsecond line')).toBe('Demo second line');
+    expect(normalizeValue('Demo\tapp\u0007\r\n')).toBe('Demo app');
+  });
+
+  for (const description of ['Demo app ', 'Demo\nsecond line', 'Demo\tapp']) {
+    it(`fills CONTEXT for a description of ${JSON.stringify(description)}`, async () => {
+      write('package.json', JSON.stringify({ name: 'demo-354', description }));
+      write('.ai/manifest.adf', MANIFEST_BACKEND_SCAFFOLD);
+      write('.ai/core.adf', CORE_SCAFFOLD);
+      write('.ai/state.adf', STATE_SCAFFOLD);
+      let results: Array<{ status: string }> = [];
+      await adfPopulateCommand(TEXT, [], { mode: 'scaffold-only', embedded: true, report: r => { results = r; } });
+      expect(read('.ai/core.adf')).toContain(`  - project: demo-354 — ${normalizeValue(description)}\n`);
+      expect(results[0].status).toBe('populated');
+    });
+  }
+
+  it('a refused edit is reported as refused (not skipped) with what failed', async () => {
+    write('package.json', JSON.stringify({ name: 'demo-354' }));
+    write('.ai/manifest.adf', MANIFEST_BACKEND_SCAFFOLD);
+    write('.ai/core.adf', CORE_SCAFFOLD.replace('ADF: 0.1\n', 'ADF: 0.1\n# REFUSE-ME\n'));
+    write('.ai/state.adf', HAND_STATE);
+    tamper = t => t.includes('REFUSE-ME') && t.includes('project: demo-354');
+    out = [];
+    await adfPopulateCommand(JSON_OPTS, []);
+    const rows = JSON.parse(out.join('\n')).results as Array<{ file: string; status: string; reason?: string }>;
+    expect(rows[0]).toMatchObject({ status: 'refused', reason: 'could not be edited in place: after the edit, section TAMPERED would not re-parse as the intended content' });
+    expect(rows[1].status).toBe('skipped');
+  });
+});
+
+describe('reset report headers', () => {
+  it('reports a VENDORS decoration change and shows headers as written (U+FE0F kept)', () => {
+    const old = 'ADF: 0.1\n\u{1F50C} VENDORS:\n  - CLAUDE.md: pointer\n\nCONSTRAINTS [advisory]:\n  - a\n';
+    const now = 'ADF: 0.1\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: pointer\n\n\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - a\n';
+    expect(computeLoss(old, now, true).headerChanges).toEqual([
+      { section: 'VENDORS', before: '\u{1F50C} VENDORS', after: '\u{1F3F7} VENDORS' },
+      { section: 'CONSTRAINTS', before: 'CONSTRAINTS [advisory]', after: '\u26A0\uFE0F CONSTRAINTS [load-bearing]' },
+    ]);
   });
 });

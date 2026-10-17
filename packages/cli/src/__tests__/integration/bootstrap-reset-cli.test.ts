@@ -195,3 +195,22 @@ describe('--reset-adf --yes loss report against the final files (built CLI)', ()
     expect(text).toMatch(/ {2}\.ai\/state\.adf \(backup: \S+\): nothing lost/);
   });
 });
+
+describe('populate cleans generated values (built CLI, second review)', () => {
+  for (const description of ['Demo app ', 'Demo\nsecond line', 'Demo\tapp']) {
+    it(`bootstrap --yes fills CONTEXT and adds the stack constraint for description ${JSON.stringify(description)}`, () => {
+      const dir = repo();
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo-354', description, devDependencies: { wrangler: '^3.0.0' } }));
+      fs.writeFileSync(path.join(dir, 'wrangler.toml'), 'name = "demo"\n');
+      const r = run(dir, ['--yes', '--format', 'json', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+      expect(r.status).toBe(0);
+      const core = fs.readFileSync(path.join(dir, '.ai', 'core.adf'), 'utf-8');
+      expect(core).toContain(`  - project: demo-354 — ${description.replace(/\s+/g, ' ').trim()}\n`);
+      expect(core).toContain('No Node.js-specific APIs in Worker handlers');
+      expect(core).not.toContain("Project context (run 'charter adf populate'");
+      const populate = JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'populate');
+      expect(populate.details.refused).toEqual([]);
+      expect(populate.warnings).toEqual([]);
+    });
+  }
+});

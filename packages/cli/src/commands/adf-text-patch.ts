@@ -17,7 +17,7 @@ import { sectionHeaders } from './adf-manifest-register';
 
 export type TextPatchResult =
   | { status: 'applied'; next: string }
-  | { status: 'refused'; reason: 'unparseable' | 'unsupported' | 'guard' };
+  | { status: 'refused'; reason: 'unparseable' | 'unsupported' | 'guard'; detail: string };
 
 const LIST_ITEM_PREFIX_RE = /^(\s*-\s+)\S/;
 const clean = (line: string): string => line.replace(/\r$/, '').trimEnd();
@@ -39,7 +39,23 @@ function locate(lines: string[], key: string): { header: number; last: number; e
   return { header, last, end };
 }
 
-/** Insert or replace lines [from, to] (inclusive; to = from - 1 inserts) keeping CRLF and the final-newline state. */
+/** The file's dominant line ending: CRLF only when most of its line breaks are CRLF. */
+function dominantCr(text: string): boolean {
+  const crlf = (text.match(/\r\n/g) ?? []).length;
+  return crlf > (text.match(/\n/g) ?? []).length - crlf;
+}
+
+/** The ending of line `i` (`'\r'` for CRLF), or the dominant one when that line has no newline of its own. */
+function endingOf(lines: string[], i: number, fallbackCr: boolean): boolean {
+  if (i < 0 || i >= lines.length - 1) return fallbackCr;
+  return lines[i].endsWith('\r');
+}
+
+/**
+ * Insert or replace lines [from, to] (inclusive; to = from - 1 inserts). New lines
+ * take the ending of the line they sit next to (`crlf`); no existing line's ending
+ * changes, and the final-newline state is kept.
+ */
 function splice(lines: string[], from: number, to: number, add: string[], crlf: boolean): void {
   const cr = crlf ? '\r' : '';
   const atEof = to === lines.length - 1; // the last element has no newline after it
@@ -53,8 +69,8 @@ function splice(lines: string[], from: number, to: number, add: string[], crlf: 
 }
 
 function applyOne(text: string, op: PatchOperation): string | null {
-  const crlf = text.includes('\r\n');
-  const eol = crlf ? '\r\n' : '\n';
+  const dominant = dominantCr(text);
+  const eol = dominant ? '\r\n' : '\n';
   const lines = text.split('\n');
 
   if (op.op === 'ADD_BULLET') {
@@ -67,7 +83,7 @@ function applyOne(text: string, op: PatchOperation): string | null {
       if (m) { after = i; prefix = m[1]; }
     }
     if (after === -1) return null;
-    splice(lines, after + 1, after, [prefix + op.value], crlf);
+    splice(lines, after + 1, after, [prefix + op.value], endingOf(lines, after, dominant));
     return lines.join('\n');
   }
 
@@ -78,7 +94,9 @@ function applyOne(text: string, op: PatchOperation): string | null {
     const indent = firstBody?.match(/^\s*/)?.[0] ?? '  ';
     const add = bodyLines(op.content, indent || '  ');
     if (!add) return null;
-    splice(lines, loc.header + 1, loc.last, add, crlf);
+    // Replaced lines take the ending of the body's first line (or the header's, for an empty body).
+    const ref = loc.last > loc.header ? loc.header + 1 : loc.header;
+    splice(lines, loc.header + 1, loc.last, add, endingOf(lines, ref, dominant));
     return lines.join('\n');
   }
 
@@ -98,19 +116,33 @@ export function applyOpsAsText(text: string, ops: readonly PatchOperation[]): Te
   let expected;
   try {
     expected = applyPatches(parseAdf(text), [...ops]);
-  } catch {
-    return { status: 'refused', reason: 'unparseable' };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: 'refused', reason: 'unparseable', detail: `the file or the edit could not be parsed (${msg})` };
   }
   let next = text;
   for (const op of ops) {
     const edited = applyOne(next, op);
-    if (edited === null) return { status: 'refused', reason: 'unsupported' };
+    if (edited === null) return { status: 'refused', reason: 'unsupported', detail: `${op.op} cannot be applied as a text edit here` };
     next = edited;
   }
+  let actual;
   try {
-    if (JSON.stringify(parseAdf(next)) !== JSON.stringify(expected)) return { status: 'refused', reason: 'guard' };
-  } catch {
-    return { status: 'refused', reason: 'guard' };
+    actual = parseAdf(next);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: 'refused', reason: 'guard', detail: `the edited file does not parse (${msg})` };
+  }
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    const n = Math.max(actual.sections.length, expected.sections.length);
+    let at = 'the section list';
+    for (let i = 0; i < n; i++) {
+      if (JSON.stringify(actual.sections[i]) !== JSON.stringify(expected.sections[i])) {
+        at = `section ${expected.sections[i]?.key ?? actual.sections[i]?.key}`;
+        break;
+      }
+    }
+    return { status: 'refused', reason: 'guard', detail: `after the edit, ${at} would not re-parse as the intended content` };
   }
   return { status: 'applied', next };
 }

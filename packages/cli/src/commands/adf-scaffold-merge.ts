@@ -213,6 +213,22 @@ function entryBullets(doc: AdfDocument): EntryBullet[] {
 
 const headerOf = (s: AdfSection): string => `${s.decoration ? `${s.decoration} ` : ''}${s.key}${s.weight ? ` [${s.weight}]` : ''}`;
 
+/**
+ * Each parsed section's header as written in the file, up to its colon (the
+ * parser drops U+FE0F from decorations; the report shows the real bytes).
+ * Falls back to the parsed form when the header lines cannot be aligned.
+ */
+function rawHeaders(text: string, doc: AdfDocument): Map<AdfSection, string> {
+  const lines = text.split('\n').map(l => l.replace(/\r$/, '').trimEnd());
+  const { headers } = sectionHeaders(lines, '');
+  const out = new Map<AdfSection, string>();
+  doc.sections.forEach((section, i) => {
+    const line = headers.length === doc.sections.length ? lines[headers[i]] : undefined;
+    out.set(section, line !== undefined ? line.slice(0, line.indexOf(':')).trimEnd() : headerOf(section));
+  });
+  return out;
+}
+
 function byKey(doc: AdfDocument): Map<string, AdfSection[]> {
   const out = new Map<string, AdfSection[]>();
   for (const s of doc.sections) out.set(s.key, [...(out.get(s.key) ?? []), s]);
@@ -241,10 +257,24 @@ export function computeLoss(oldText: string, newText: string, isManifest: boolea
   }
   const skip = new Set(isManifest ? MANIFEST_EXCLUDED_KEYS : []);
   const nowByKey = byKey(now);
+  const oldRaw = rawHeaders(oldText, old);
+  const nowRaw = rawHeaders(newText, now);
 
   for (const [key, sections] of byKey(old)) {
-    if (skip.has(key)) continue;
     const after = nowByKey.get(key) ?? [];
+    // Decoration or weight changes are reported for every key, VENDORS and the
+    // module lists included; the parsed form decides, the file's bytes are shown.
+    if (after.length > 0) {
+      const nowHeaders = new Set(after.map(headerOf));
+      for (const section of sections) {
+        const h = headerOf(section);
+        const before = oldRaw.get(section) ?? h;
+        if (!nowHeaders.has(h) && !lost.headerChanges.some(c => c.section === key && c.before === before)) {
+          lost.headerChanges.push({ section: key, before, after: nowRaw.get(after[0]) ?? headerOf(after[0]) });
+        }
+      }
+    }
+    if (skip.has(key)) continue;
     const oldRows = sections.flatMap(rowText);
     if (key === 'METRICS') {
       const nowRows = new Map(after.flatMap(rowText).map(r => [r.key, r.text] as const));
@@ -256,13 +286,6 @@ export function computeLoss(oldText: string, newText: string, isManifest: boolea
     if (after.length === 0) {
       lost.sectionsLost.push(key);
       continue;
-    }
-    const nowHeaders = new Set(after.map(headerOf));
-    for (const section of sections) {
-      const h = headerOf(section);
-      if (!nowHeaders.has(h) && !lost.headerChanges.some(c => c.section === key && c.before === h)) {
-        lost.headerChanges.push({ section: key, before: h, after: headerOf(after[0]) });
-      }
     }
     if (key === 'METRICS' && oldRows.length > 0) continue;
     const nowItems = new Set(after.flatMap(itemsOf));

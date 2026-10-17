@@ -1510,6 +1510,7 @@ async function runPopulatePhase(
         details: {
           populated: results.filter(r => r.status === 'populated').length,
           skipped: results.filter(r => r.status === 'skipped').length,
+          refused: results.filter(r => r.status === 'refused').map(r => ({ file: label(r.file), reason: r.reason ?? '' })),
           changes: results.flatMap(r => (r.changes ?? []).map(change => ({ file: label(r.file), change }))),
         },
         warnings,

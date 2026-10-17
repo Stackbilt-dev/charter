@@ -85,11 +85,37 @@ export type PopulateMode = 'scaffold-only' | 'force';
 export interface PopulateResult {
   file: string;
   ops: number;
-  status: 'populated' | 'skipped' | 'missing';
+  /** 'skipped': nothing to do. 'refused': edits were due but could not be applied safely (see reason). */
+  status: 'populated' | 'skipped' | 'refused' | 'missing';
   /** Why a file with pending operations was left as is. */
   reason?: string;
   /** One line per applied operation, e.g. "Filled CONTEXT". */
   changes?: string[];
+}
+
+/**
+ * Generated values (package.json description, README summary, ...) become ADF
+ * list items or map values, which the parser reads as one trimmed line. Strip
+ * control characters and collapse whitespace and newlines to single spaces, so
+ * every value round-trips and the re-parse guard can accept it (#354).
+ */
+export function normalizeValue(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeOps(ops: PatchOperation[]): PatchOperation[] {
+  return ops.map(op => {
+    if (op.op === 'ADD_BULLET') return { ...op, value: normalizeValue(op.value) };
+    if (op.op !== 'REPLACE_SECTION' && op.op !== 'ADD_SECTION') return op;
+    const c = op.content;
+    const content = c.type === 'list'
+      ? { type: 'list' as const, items: c.items.map(normalizeValue).filter(i => i !== '') }
+      : c.type === 'map'
+        ? { type: 'map' as const, entries: c.entries.map(e => ({ key: e.key, value: normalizeValue(e.value) })) }
+        : c;
+    return { ...op, content };
+  }).filter(op => op.op !== 'ADD_BULLET' || op.value !== '');
 }
 
 function describeOp(op: PatchOperation): string {
@@ -148,7 +174,8 @@ export async function adfPopulateCommand(
       continue;
     }
 
-    const ops = task.build();
+    const built = task.build();
+    const ops = built ? normalizeOps(built) : null;
     if (!ops || ops.length === 0) {
       results.push({ file: task.file, ops: 0, status: 'skipped' });
       continue;
@@ -158,7 +185,7 @@ export async function adfPopulateCommand(
     // re-parse as exactly the intended change is not written.
     const edit = applyOpsAsText(fs.readFileSync(task.file, 'utf-8'), ops);
     if (edit.status === 'refused') {
-      results.push({ file: task.file, ops: 0, status: 'skipped', reason: `could not be edited in place without changing other content (${edit.reason})` });
+      results.push({ file: task.file, ops: 0, status: 'refused', reason: `could not be edited in place: ${edit.detail}` });
       continue;
     }
     if (!dryRun) fs.writeFileSync(task.file, edit.next);
@@ -194,7 +221,7 @@ export async function adfPopulateCommand(
     console.log('');
     for (const r of results) {
       if (r.status === 'missing') continue;
-      const icon = r.status === 'populated' ? '[ok]' : '[skip]';
+      const icon = r.status === 'populated' ? '[ok]' : r.status === 'refused' ? '[refused]' : '[skip]';
       const detail = r.status === 'populated'
         ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied`
         : r.reason ?? 'already customized — use --force to overwrite';
