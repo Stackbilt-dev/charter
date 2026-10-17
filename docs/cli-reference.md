@@ -404,7 +404,7 @@ npx charter adf create api-patterns --force                   # overwrite existi
 
 ### charter adf migrate
 
-Scans existing agent config files (`CLAUDE.md`, `.cursorrules`, `agents.md`, `GEMINI.md`, `copilot-instructions.md`), classifies their content, and migrates structured blocks into ADF modules. Replaces originals with thin pointers.
+Scans existing agent config files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` or legacy `agents.md`, `GEMINI.md`, `copilot-instructions.md`), classifies their content, and migrates structured blocks into ADF modules. Replaces originals with thin pointers.
 
 ```bash
 npx charter adf migrate --dry-run                # preview migration plan
