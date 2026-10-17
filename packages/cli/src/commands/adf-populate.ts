@@ -58,9 +58,22 @@ function sectionText(section: AdfSection): string {
 // Command Entry
 // ============================================================================
 
-export async function adfPopulateCommand(options: CLIOptions, args: string[]): Promise<number> {
+/**
+ * 'force' replaces CONTEXT/STATE even when customized; 'scaffold-only' replaces
+ * only sections that still hold scaffold text. The CLI picks 'force' under
+ * --force or --yes. `charter bootstrap` passes 'scaffold-only' explicitly, so its
+ * own --yes never re-enables force (#354).
+ */
+export type PopulateMode = 'scaffold-only' | 'force';
+
+export async function adfPopulateCommand(
+  options: CLIOptions,
+  args: string[],
+  internal: { mode?: PopulateMode; embedded?: boolean } = {},
+): Promise<number> {
   const dryRun = args.includes('--dry-run');
-  const force = options.yes || args.includes('--force');
+  const mode: PopulateMode = internal.mode ?? (options.yes || args.includes('--force') ? 'force' : 'scaffold-only');
+  const force = mode === 'force';
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const manifestPath = path.join(aiDir, 'manifest.adf');
 
@@ -119,7 +132,9 @@ export async function adfPopulateCommand(options: CLIOptions, args: string[]): P
     results.push({ file: task.file, ops: ops.length, status: 'populated' });
   }
 
-  if (options.format === 'json') {
+  if (options.format === 'json' && internal.embedded) {
+    // Called by bootstrap: its own JSON report is the only document on stdout.
+  } else if (options.format === 'json') {
     console.log(JSON.stringify({
       dryRun,
       projectName,
@@ -145,7 +160,7 @@ export async function adfPopulateCommand(options: CLIOptions, args: string[]): P
       const icon = r.status === 'populated' ? '[ok]' : '[skip]';
       const detail = r.status === 'populated'
         ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied`
-        : 'already customized — use --force to overwrite';
+        : internal.mode === 'scaffold-only' ? 'already customized' : 'already customized — use --force to overwrite';
       console.log(`    ${icon} ${r.file}  (${detail})`);
     }
     if (dryRun) {

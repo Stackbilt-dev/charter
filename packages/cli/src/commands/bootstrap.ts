@@ -51,7 +51,18 @@ import type { CompileTarget } from '@stackbilt/adf';
 import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
 import { inferVendorMode, readVendorRecord, recordedModeOf, recordVendorModes, recordWrittenVendorModes, resolveVendorMode } from './adf-vendor';
 import type { VendorFile } from './adf-vendor';
-import { registerModules } from './adf-manifest-register';
+import { registerManifestModules, registerModules } from './adf-manifest-register';
+import {
+  appendMissingSections,
+  backupFile,
+  computeLoss,
+  describeMerge,
+  ensureBackupGitignore,
+  formatLossLines,
+  MANIFEST_EXCLUDED_KEYS,
+  templateModules,
+} from './adf-scaffold-merge';
+import type { AddedModule, ScaffoldMode, ScaffoldOutcome } from './adf-scaffold-merge';
 import type { SourceMigrationResult } from './adf-migrate';
 
 // ============================================================================
@@ -72,7 +83,15 @@ interface BootstrapResult {
   status: 'success' | 'partial' | 'failure';
   steps: StepResult[];
   nextSteps: Array<{ cmd: string; required: boolean; reason: string }>;
+  /** Present only when --reset-adf was passed (#354). */
+  resetAdf?: ResetConfirmation;
 }
+
+type ResetConfirmation =
+  | { kind: 'confirmed-by-yes' }
+  | { kind: 'confirmed-by-prompt' }
+  | { kind: 'declined-at-prompt'; exitCode: 1 }
+  | { kind: 'refused-non-interactive'; exitCode: 1 };
 
 const NOT_IN_GIT_REPO_WARNING =
   "Not inside a git repository. Run 'git init && git add -A && git commit -m \"initial commit\"' before installing hooks. Continuing — governance files will be written but hooks cannot be installed yet.";
@@ -125,6 +144,9 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const skipInstall = args.includes('--skip-install');
   const skipDoctor = args.includes('--skip-doctor');
   const force = args.includes('--force');
+  // --reset-adf governs .ai/ scaffolds only; it does not imply --force (#354).
+  const resetAdf = args.includes('--reset-adf');
+  const scaffoldMode: ScaffoldMode = resetAdf ? 'reset' : force ? 'merge' : 'skip';
   const securitySensitive = args.includes('--security-sensitive');
   const nonInteractive = options.yes;
   const setupOverwrite = options.yes || force;
@@ -150,6 +172,23 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // Phase 1: Detect
   // ========================================================================
   const detectResult = runDetectPhase(options, presetFlag);
+
+  // --reset-adf preflight: confirm before any phase writes, so a refusal writes nothing.
+  if (resetAdf) {
+    result.resetAdf = await confirmReset(options, detectResult.selectedPreset);
+    if (result.resetAdf.kind === 'declined-at-prompt' || result.resetAdf.kind === 'refused-non-interactive') {
+      const message = result.resetAdf.kind === 'declined-at-prompt'
+        ? 'Aborted; nothing was written. Re-run with --force to merge the template into .ai/ instead.'
+        : resetRefusalMessage(detectResult.selectedPreset);
+      result.status = 'failure';
+      if (options.format === 'json') {
+        console.log(JSON.stringify({ ...result, message }, null, 2));
+      } else {
+        console.error(message);
+      }
+      return EXIT_CODE.POLICY_VIOLATION;
+    }
+  }
 
   const selectedPreset: StackPreset = detectResult.selectedPreset;
   const detection = detectResult.detection;
@@ -202,12 +241,27 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   // ========================================================================
   // Phase 3: ADF Init
   // ========================================================================
-  const adfResult = runAdfInitPhase(options, force, selectedPreset);
+  const adfResult = runAdfInitPhase(options, scaffoldMode, force, selectedPreset);
 
   warnings += completePhase(result, options, adfResult.step, () => {
     console.log(`[3/${leanMode ? '4' : '7'}] Initializing ADF context...`);
+    const outcomes = (adfResult.step.details.scaffolds as ScaffoldOutcome[] | undefined) ?? [];
+    for (const o of outcomes) {
+      if (o.kind === 'created') console.log(`  Created ${o.file}`);
+      else if (o.kind === 'merged') console.log(`  ${describeMerge(o)}`);
+      else if (o.kind === 'unchanged' && scaffoldMode !== 'skip') console.log(`  Unchanged ${o.file}`);
+      else if (o.kind === 'replaced') {
+        console.log(`  Replaced ${o.file} (backup: ${o.backupPath})`);
+        for (const line of formatLossLines(o.lost, adfResult.replacedText.get(o.file) ?? '')) {
+          console.log(`    ${line}`);
+        }
+      }
+    }
+    // Files phase 3 wrote that are not scaffolds (the sync lock).
+    const scaffoldFiles = new Set(outcomes.map(o => o.file));
     for (const f of (adfResult.step.details.files as string[] || [])) {
-      console.log(`  Created ${f}`);
+      if (scaffoldFiles.has(f)) continue;
+      console.log(`  ${f === '.ai/.adf.lock' && adfResult.lockExisted ? 'Updated' : 'Created'} ${f}`);
     }
     for (const f of (adfResult.step.details.pointers as string[] || [])) {
       console.log(`  Generated ${f}`);
@@ -227,6 +281,13 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       shouldRegister = true;
     } else if (options.format === 'text') {
       shouldRegister = await promptYesNo('  Register these modules now? (y/N) ');
+    }
+    if (!shouldRegister) {
+      // #347: name a command that exists. Printed only when the orphans were left unregistered.
+      const hint = 'Run `charter adf create <module> --load default|on-demand` for each to add them to the manifest, or re-run with --yes.';
+      adfResult.step.warnings.push(hint);
+      warnings++;
+      if (options.format === 'text') console.log(`  Warning: ${hint}`);
     }
     if (shouldRegister) {
       const manifestFilePath = path.join('.ai', 'manifest.adf');
@@ -262,7 +323,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
         const manifestDoc = parseAdf(fs.readFileSync(manifestCheckPath, 'utf-8'));
         const manifestParsed = parseManifest(manifestDoc);
         if (manifestParsed.defaultLoad.length === 0 && options.format === 'text') {
-          console.log("  Warning: manifest.adf parsed with 0 DEFAULT_LOAD entries — run 'charter adf register core.adf --load default' to repair.");
+          console.log("  Warning: manifest.adf parsed with 0 DEFAULT_LOAD entries — run 'charter adf create core.adf --load default' to repair.");
         }
       } catch {
         // Parse failure already flagged elsewhere
@@ -832,8 +893,8 @@ function ensureProjectMcpConfig(
     // machine's absolute path. That only harms anyone when the file is shared,
     // so gate on tracked-ness: an absolute path in an untracked or gitignored
     // .mcp.json is the documented escape hatch, not a defect to nag about.
-    // Name the fix rather than sending the user to --force, which also
-    // re-scaffolds .ai/*.adf and overwrites custom modules.
+    // Name the fix rather than sending the user to --force, which replaces the
+    // whole mcpServers.charter entry.
     const staleAbsolute = absoluteAiDirArg(existingCharter);
     if (staleAbsolute !== undefined && isTrackedByGit('.mcp.json')) {
       return {
@@ -844,14 +905,14 @@ function ensureProjectMcpConfig(
           `which breaks the MCP server for every other clone and for CI. ` +
           `Edit .mcp.json and replace that path with "${aiDir}", ` +
           `or, if this config is meant to stay machine-local, add .mcp.json to .gitignore and run 'git rm --cached .mcp.json'. ` +
-          `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
+          `Do not use --force for this: it replaces the whole mcpServers.charter entry, including any other settings in it.`,
       };
     }
 
     return {
       created: false,
       updated: false,
-      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (edit it by hand, or use --force to replace it — note that --force also re-scaffolds .ai/*.adf).',
+      warning: 'Skipped MCP config update: .mcp.json already defines mcpServers.charter (edit it by hand, or use --force to replace it; --force merges .ai/*.adf and never replaces it).',
     };
   }
 
@@ -909,81 +970,190 @@ function buildAdfLockContent(aiDir: string): string {
   return JSON.stringify(lockData, null, 2) + '\n';
 }
 
+interface ScaffoldWriteResult {
+  files: string[];
+  warnings: string[];
+  backedUp: number;
+  scaffolds: ScaffoldOutcome[];
+  /** Old text of each replaced file, for the loss report's section sizes. */
+  replacedText: Map<string, string>;
+  lockExisted: boolean;
+}
+
+/** The re-run hint for a scaffold the merge left as is. */
+function mergeSkipDetail(label: string, reason: 'unparseable' | 'guard'): string {
+  const why = reason === 'unparseable'
+    ? 'could not be parsed'
+    : 'could not be merged without changing its existing content (re-parse guard)';
+  return `${label} ${why}; left as is. Fix it by hand, or run 'charter bootstrap --reset-adf --yes' to replace it with the template (the old file is backed up first).`;
+}
+
 function writeAdfScaffolds(
   aiDir: string,
-  force: boolean,
+  mode: ScaffoldMode,
   preset?: StackPreset,
-): { files: string[]; warnings: string[]; backedUp: number } {
+): ScaffoldWriteResult {
   fs.mkdirSync(aiDir, { recursive: true });
 
   const files: string[] = [];
   const warnings: string[] = [];
+  const outcomes = new Map<string, ScaffoldOutcome>();
+  const replacedText = new Map<string, string>();
+  const createdThisRun = new Set<string>();
   let backedUp = 0;
-  let backupDir: string | undefined;
+  const backupDir = path.join(aiDir, '.backup');
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const scaffolds = getAdfScaffolds(preset);
 
-  for (const scaffold of getAdfScaffolds(preset)) {
+  for (const scaffold of scaffolds) {
     const targetPath = path.join(aiDir, scaffold.name);
     const label = `.ai/${scaffold.name}`;
 
     if (!fs.existsSync(targetPath)) {
       fs.writeFileSync(targetPath, scaffold.content);
       files.push(label);
+      createdThisRun.add(scaffold.name);
+      outcomes.set(scaffold.name, { kind: 'created', file: label });
       continue;
     }
 
     const existing = fs.readFileSync(targetPath, 'utf-8');
     if (existing.trim() === scaffold.content.trim()) {
+      outcomes.set(scaffold.name, { kind: 'unchanged', file: label });
       continue;
     }
 
-    const byteCount = Buffer.byteLength(existing, 'utf-8');
-
-    if (!force) {
-      warnings.push(`${label} has custom content (${byteCount} bytes); skipping scaffold overwrite`);
+    if (mode === 'skip') {
+      const detail = `${label} has custom content (${Buffer.byteLength(existing, 'utf-8')} bytes); skipping scaffold overwrite`;
+      warnings.push(detail);
+      outcomes.set(scaffold.name, { kind: 'skipped', file: label, reason: 'custom-content', detail });
       continue;
     }
 
-    backupDir ||= path.join(aiDir, '.backup');
-    fs.mkdirSync(backupDir, { recursive: true });
-    const backupName = `${scaffold.name}.${timestamp}`;
-    fs.copyFileSync(targetPath, path.join(backupDir, backupName));
-    warnings.push(`Backed up ${label} (${byteCount} bytes) → .ai/.backup/${backupName}`);
+    if (mode === 'merge') {
+      // Append-only (#354): whole missing sections, never a line inside an existing one.
+      const excluded = scaffold.name === 'manifest.adf' ? MANIFEST_EXCLUDED_KEYS : [];
+      const merged = appendMissingSections(existing, scaffold.content, excluded);
+      if (merged.status === 'refused') {
+        const detail = mergeSkipDetail(label, merged.reason);
+        warnings.push(detail);
+        outcomes.set(scaffold.name, { kind: 'skipped', file: label, reason: merged.reason, detail });
+      } else if (merged.status === 'appended') {
+        fs.writeFileSync(targetPath, merged.next);
+        files.push(label);
+        outcomes.set(scaffold.name, { kind: 'merged', file: label, addedSections: merged.added, addedModules: [] });
+      } else {
+        outcomes.set(scaffold.name, { kind: 'unchanged', file: label });
+      }
+      continue;
+    }
+
+    // --reset-adf: back up first; a file whose backup failed is not replaced (INV-4).
+    let backupName: string;
+    try {
+      backupName = backupFile(targetPath, backupDir, scaffold.name, timestamp);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const detail = `Could not back up ${label} to .ai/.backup/ (${msg}); not replaced.`;
+      warnings.push(detail);
+      outcomes.set(scaffold.name, { kind: 'skipped', file: label, reason: 'backup-failed', detail });
+      continue;
+    }
     backedUp++;
-
     fs.writeFileSync(targetPath, scaffold.content);
     files.push(label);
+    replacedText.set(label, existing);
+    outcomes.set(scaffold.name, {
+      kind: 'replaced',
+      file: label,
+      backupPath: `.ai/.backup/${backupName}`,
+      lost: computeLoss(existing, scaffold.content, scaffold.name === 'manifest.adf'),
+    });
+  }
+
+  // Template modules with no manifest entry are registered with the template's
+  // triggers, never the stem fallback (CP-3). Append-only, through the shared writer.
+  const manifestName = 'manifest.adf';
+  const manifestOutcome = outcomes.get(manifestName);
+  const canRegister = manifestOutcome !== undefined
+    && (manifestOutcome.kind !== 'skipped' || manifestOutcome.reason === 'custom-content');
+  if (canRegister) {
+    const moduleNames = scaffolds.map(s => s.name).filter(n => n !== manifestName);
+    const planned = templateModules(manifestForPreset(preset), moduleNames).map(m => ({
+      module: m.module,
+      loadPolicy: m.loadPolicy,
+      triggers: m.triggers,
+      reason: 'preset template module',
+      status: 'planned' as const,
+      triggerSources: [],
+    }));
+    const { registrations } = registerManifestModules(path.join(aiDir, manifestName), planned, { onWarning: w => warnings.push(w) });
+    const added: AddedModule[] = registrations
+      .filter(r => r.status === 'added')
+      .map(r => ({ module: r.module, loadPolicy: r.loadPolicy, triggers: r.triggers, fileCreated: createdThisRun.has(r.module) }));
+    const label = `.ai/${manifestName}`;
+    if (added.length > 0) {
+      const prev = outcomes.get(manifestName);
+      outcomes.set(manifestName, {
+        kind: 'merged',
+        file: label,
+        addedSections: prev?.kind === 'merged' ? prev.addedSections : [],
+        addedModules: added,
+      });
+      if (!files.includes(label)) files.push(label);
+    } else if (outcomes.get(manifestName)?.kind === 'unchanged') {
+      const skipped = registrations.find(r => r.status === 'skipped');
+      if (skipped) {
+        const reason = skipped.skipReason === 'section-not-list' ? 'not-a-list' : 'guard';
+        outcomes.set(manifestName, { kind: 'skipped', file: label, reason, detail: `${label}: template modules were not registered (${skipped.skipReason})` });
+      }
+    }
   }
 
   const lockPath = path.join(aiDir, '.adf.lock');
+  const lockExisted = fs.existsSync(lockPath);
   const lockContent = buildAdfLockContent(aiDir);
-  if (!fs.existsSync(lockPath) || fs.readFileSync(lockPath, 'utf-8') !== lockContent) {
+  if (!lockExisted || fs.readFileSync(lockPath, 'utf-8') !== lockContent) {
     fs.writeFileSync(lockPath, lockContent);
     files.push('.ai/.adf.lock');
   }
 
-  return { files, warnings, backedUp };
+  return {
+    files,
+    warnings,
+    backedUp,
+    scaffolds: scaffolds.map(s => outcomes.get(s.name)!),
+    replacedText,
+    lockExisted,
+  };
 }
 
 function runAdfInitPhase(
   options: CLIOptions,
+  mode: ScaffoldMode,
   force: boolean,
   preset?: StackPreset,
-): { step: StepResult } {
+): { step: StepResult; lockExisted: boolean; replacedText: Map<string, string> } {
   const warnings: string[] = [];
+  let lockExisted = false;
+  let replacedText = new Map<string, string>();
   const files: string[] = [];
   const pointers: string[] = [];
   const detectedOrphans: string[] = [];
 
   try {
     const aiDir = '.ai';
-    // --force re-scaffolds manifest.adf (backing it up), which would drop the
+    // --reset-adf replaces manifest.adf (backing it up), which would drop the
     // VENDORS record the pointer and migrate phases act on (#318). Carry its valid
-    // entries over through the shared writer, add-if-absent.
+    // entries over through the shared writer, add-if-absent. Under a merge the
+    // record is never touched and this is a no-op.
     const priorRecord = readVendorRecord(path.join(aiDir, 'manifest.adf')).recorded;
-    const scaffoldResult = writeAdfScaffolds(aiDir, force, preset);
+    const scaffoldResult = writeAdfScaffolds(aiDir, mode, preset);
     files.push(...scaffoldResult.files);
     warnings.push(...scaffoldResult.warnings);
+    lockExisted = scaffoldResult.lockExisted;
+    replacedText = scaffoldResult.replacedText;
+    const backupGitignore = ensureBackupGitignore(aiDir);
     if (priorRecord.size > 0) {
       const entries = [...priorRecord].sort((a, b) => a[1].index - b[1].index).map(([file, { mode }]) => ({ file, mode }));
       recordVendorModes(path.join(aiDir, 'manifest.adf'), entries, 'add-if-absent', { onWarning: w => warnings.push(w) });
@@ -1005,7 +1175,6 @@ function runAdfInitPhase(
         if (orphans.length > 0) {
           detectedOrphans.push(...orphans);
           warnings.push(`Found ${orphans.length} unregistered .adf module(s): ${orphans.join(', ')}`);
-          warnings.push('Run `charter adf register` to add them to the manifest.');
         }
       } catch {
         // Non-critical — manifest parse failure shouldn't block bootstrap
@@ -1043,21 +1212,20 @@ function runAdfInitPhase(
         warnings.push(fill(options.yes && recordedModeOf(aiDir, pf.name as VendorFile) === null ? BOOTSTRAP_MSG.skipCustomForceYes : BOOTSTRAP_MSG.skipCustomForce, { file: pf.name }));
       } else if (action === 'skip-custom') {
         // File has custom content — don't overwrite. Name the narrow remedy rather
-        // than sending the user to --force, which also re-scaffolds .ai/*.adf and
-        // overwrites custom modules (#305). --source scopes migration to the one
-        // file named here; a bare `adf migrate` would also take every other agent
-        // config file it discovers.
+        // than sending the user to --force, which skips a hand-authored file too
+        // (#305, #353). --source scopes migration to the one file named here; a
+        // bare `adf migrate` would also take every other agent config file it discovers.
         warnings.push(
           `${pf.name} has custom content; skipping pointer. ` +
           `Run 'charter adf migrate --source ${pf.name}' to move its rules into .ai/ and replace it with a thin pointer, ` +
           `or hand-edit or delete ${pf.name} and re-run bootstrap. ` +
-          `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
+          `Do not use --force for this: bootstrap never overwrites a hand-authored file, even with --force.`,
         );
       } else {
         warnings.push(
           `${pf.name} is already Charter-managed; leaving it as is. ` +
-          `To regenerate it from the current template, delete ${pf.name} and re-run bootstrap. ` +
-          `Do not use --force for this: it also re-scaffolds .ai/*.adf and would overwrite customized modules.`,
+          `To regenerate it from the current template, delete ${pf.name} and re-run bootstrap, ` +
+          `or re-run with --force (which merges .ai/*.adf and never replaces it).`,
         );
       }
     }
@@ -1072,9 +1240,20 @@ function runAdfInitPhase(
       step: {
         name: 'adf-init',
         status: 'pass',
-        details: { files, pointers, backedUp: scaffoldResult.backedUp, orphans: detectedOrphans },
+        details: {
+          files,
+          pointers,
+          backedUp: scaffoldResult.backedUp,
+          orphans: detectedOrphans,
+          scaffolds: scaffoldResult.scaffolds,
+          replaced: scaffoldResult.scaffolds.filter(o => o.kind === 'replaced').map(o => o.file),
+          mode,
+          backupGitignore,
+        },
         warnings,
       },
+      lockExisted,
+      replacedText,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1086,6 +1265,8 @@ function runAdfInitPhase(
         details: { files, pointers, orphans: detectedOrphans, error: msg },
         warnings,
       },
+      lockExisted,
+      replacedText,
     };
   }
 }
@@ -1276,7 +1457,9 @@ async function runPopulatePhase(
 
   try {
     const { adfPopulateCommand } = require('./adf-populate');
-    const code = await adfPopulateCommand(options, ['--force']);
+    // Scaffold-only (#354): a CONTEXT/STATE section is replaced only while it still
+    // holds scaffold text, whatever bootstrap's own --yes/--force say.
+    const code = await adfPopulateCommand(options, [], { mode: 'scaffold-only', embedded: true });
 
     return {
       step: {
@@ -1474,6 +1657,43 @@ export function pointerAction(aiDir: string, file: VendorFile, force: boolean): 
   if (!ev.exists) return 'write-pointer';
   if (ev.pointerMarkers.length === 0) return 'skip-custom';
   return force ? 'write-pointer' : 'keep-managed';
+}
+
+/** Scaffold files under .ai/ that `--reset-adf` would replace: present and not already the template. */
+function filesResetWouldReplace(preset: StackPreset): string[] {
+  return getAdfScaffolds(preset)
+    .filter(s => {
+      try {
+        return fs.readFileSync(path.join('.ai', s.name), 'utf-8').trim() !== s.content.trim();
+      } catch {
+        return false;
+      }
+    })
+    .map(s => `.ai/${s.name}`);
+}
+
+function resetRefusalMessage(preset: StackPreset): string {
+  const files = filesResetWouldReplace(preset);
+  const list = files.length > 0 ? files.join(', ') : getAdfScaffolds(preset).map(s => `.ai/${s.name}`).join(', ');
+  return `--reset-adf replaces ${list} with the preset template. ` +
+    'Re-run with --reset-adf --yes to confirm, or use --force to merge instead. Nothing was written.';
+}
+
+/**
+ * `--reset-adf` confirmation (#354): `--yes` confirms; an interactive text run
+ * asks y/N after listing the files; anything else (CI, pipes, --format json)
+ * is refused. Never waits on a non-TTY stdin.
+ */
+async function confirmReset(options: CLIOptions, preset: StackPreset): Promise<ResetConfirmation> {
+  if (options.yes) return { kind: 'confirmed-by-yes' };
+  if (!process.stdin.isTTY || options.format !== 'text') return { kind: 'refused-non-interactive', exitCode: 1 };
+  const files = filesResetWouldReplace(preset);
+  console.log('--reset-adf replaces these files with the preset template (each is backed up to .ai/.backup/ first):');
+  for (const f of files) console.log(`  ${f}`);
+  if (files.length === 0) console.log('  (none: every scaffold file is absent or already the template)');
+  return await promptYesNo('Replace them? (y/N) ')
+    ? { kind: 'confirmed-by-prompt' }
+    : { kind: 'declined-at-prompt', exitCode: 1 };
 }
 
 /**

@@ -35,8 +35,10 @@ charter - repo-level governance toolkit
 
 Usage:
   charter                          Show immediate governance value + risk snapshot
-  charter bootstrap [--ci github] [--preset <name>] [--yes] [--force] [--skip-install] [--skip-doctor] [--mode lean]
+  charter bootstrap [--ci github] [--preset <name>] [--yes] [--force] [--reset-adf] [--skip-install] [--skip-doctor] [--mode lean]
                                    One-command repo onboarding (detect + setup + ADF + install + doctor)
+                                   --reset-adf: replace .ai/*.adf with the preset template (backed up to .ai/.backup/,
+                                   loss report printed); needs --yes or an interactive y/N, else exits 1 having written nothing
                                    --mode lean: run only detect, setup, adf-init, doctor; skip migrate/install/populate
                                    --security-sensitive adds SECURITY.md, hard security drift denies, and a security test check
   charter context [--stdout-only] [--verbose] [--write]
@@ -86,7 +88,8 @@ Options:
   --format <type>    Output format: text, json, markdown (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
   --yes              Non-interactive bootstrap; accept default actions
-  --force            Overwrite existing custom files during bootstrap (.ai/*.adf are backed up first)
+  --force            Bootstrap: rewrite Charter thin pointers and .mcp.json's charter entry, and merge the preset
+                     template into .ai/*.adf (adds missing sections and modules; never replaces). Use --reset-adf to replace
   --preset <name>    Stack preset: worker, frontend, backend, fullstack
   --detect-only      Setup only: print detected stack/preset and exit
   --no-dependency-sync
