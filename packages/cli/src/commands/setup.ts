@@ -12,6 +12,7 @@ import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { initExitCode, initializeCharter, printInitChanges, type StackPreset } from './init';
+import { applyGovernanceWorkflow, isKnownCharterWorkflow } from './github-workflow';
 import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -118,6 +119,12 @@ export interface SetupResult {
     path?: string;
     created?: boolean;
     updated?: boolean;
+    /** A hand-edited workflow left as is: no --force, or its backup failed (#374). */
+    kept?: boolean;
+    /** Where a hand-edited workflow was backed up before --force replaced it (#374). */
+    backup?: string;
+    /** Why the workflow was kept, or a .backup/.gitignore problem (#374). */
+    warning?: string;
   };
   scripts: {
     packageJsonPath?: string;
@@ -258,7 +265,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const baselinePlan = planBaselineMutation(baselinePath, explicitForce);
   const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
   const workflowPlan = ciMode === 'github'
-    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager))
+    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager), explicitForce)
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
@@ -346,20 +353,27 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   };
 
   if (ciMode === 'github') {
-    const workflowWrite = applyManagedFile(
-      workflowPath,
-      getGithubWorkflow(packageManager),
-      force
-    );
+    // #374: refresh only a Charter-generated workflow; a hand-edited one is
+    // kept, or under --force backed up to .charter/.backup/ and replaced.
+    const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
+      force,
+      configDir: options.configPath,
+      forceHint: "'charter setup --ci github --force'",
+    });
+    const created = workflow.action === 'created';
+    const updated = workflow.action === 'updated' || workflow.action === 'replaced';
 
     result.workflow = {
       mode: 'github',
       path: workflowPath,
-      created: workflowWrite.created,
-      updated: workflowWrite.updated,
+      created,
+      updated,
+      ...(workflow.action === 'kept' || workflow.action === 'not-replaced' ? { kept: true } : {}),
+      ...(workflow.action === 'replaced' ? { backup: workflow.backup } : {}),
+      ...('warning' in workflow && workflow.warning ? { warning: workflow.warning } : {}),
     };
     result.appliedMutations.workflow = {
-      action: workflowWrite.created ? 'create' : workflowWrite.updated ? 'update' : 'noop',
+      action: created ? 'create' : updated ? 'update' : 'noop',
       path: workflowPath.replace(/\\/g, '/'),
     };
   }
@@ -397,10 +411,15 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (result.workflow.mode === 'github') {
     const workflowState = result.workflow.created
       ? 'enabled'
-      : result.workflow.updated
-        ? 'updated'
-        : 'already present';
+      : result.workflow.backup
+        ? `replaced, backup: ${result.workflow.backup}`
+        : result.workflow.updated
+          ? 'updated'
+          : result.workflow.kept
+            ? 'kept (not the Charter template)'
+            : 'already present';
     console.log(`  CI policy gate: ${workflowState} (${result.workflow.path})`);
+    if (result.workflow.warning) console.log(`  Warning: ${result.workflow.warning}`);
   }
   if (result.scripts.updated) {
     const added = result.scripts.added.length > 0 ? `added [${result.scripts.added.join(', ')}]` : '';
@@ -999,7 +1018,8 @@ function hashFileIfExists(targetPath: string): string | null {
   return createHash('sha256').update(content).digest('hex');
 }
 
-function planManagedFile(targetPath: string, content: string): { action: 'create' | 'update' | 'noop' } {
+/** What applyGovernanceWorkflow will do: a hand-edited file is updated only under --force (#374). */
+function planManagedFile(targetPath: string, content: string, force: boolean): { action: 'create' | 'update' | 'noop' } {
   const absolute = path.resolve(targetPath);
   const exists = fs.existsSync(absolute);
 
@@ -1011,29 +1031,7 @@ function planManagedFile(targetPath: string, content: string): { action: 'create
   if (current === content) {
     return { action: 'noop' };
   }
-  return { action: 'update' };
-}
-
-export function applyManagedFile(targetPath: string, content: string, force: boolean): { created: boolean; updated: boolean } {
-  const absolute = path.resolve(targetPath);
-  const exists = fs.existsSync(absolute);
-
-  if (!exists) {
-    fs.mkdirSync(path.dirname(absolute), { recursive: true });
-    fs.writeFileSync(absolute, content);
-    return { created: true, updated: false };
-  }
-
-  const current = fs.readFileSync(absolute, 'utf-8');
-  if (current === content) {
-    return { created: false, updated: false };
-  }
-  if (!force) {
-    return { created: false, updated: false };
-  }
-
-  fs.writeFileSync(absolute, content);
-  return { created: false, updated: true };
+  return { action: force || isKnownCharterWorkflow(current, content) ? 'update' : 'noop' };
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {

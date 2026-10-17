@@ -20,9 +20,9 @@ import {
   detectPackageManager,
   inferProjectName,
   getGithubWorkflow,
-  applyManagedFile,
   syncPackageManifest,
 } from './setup';
+import { applyGovernanceWorkflow } from './github-workflow';
 import {
   MANIFEST_SCAFFOLD,
   MANIFEST_DOCS_SCAFFOLD,
@@ -221,8 +221,13 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     for (const f of (setupResult.step.details.updated as string[] || [])) {
       console.log(`  Updated ${f}${f === '.mcp.json' && mcpBackup ? ` (backup: ${mcpBackup})` : ''}`);
     }
+    for (const r of (setupResult.step.details.replaced as Array<{ file: string; backup: string }> | undefined) ?? []) {
+      console.log(`  Replaced ${r.file} (backup: ${r.backup})`);
+    }
     // #369: bootstrap never overwrites .charter/; name what it kept rather than claiming it created it.
-    const kept = (setupResult.step.details.kept as string[] | undefined) ?? [];
+    // A kept hand-edited workflow (#374) is named by its own warning instead.
+    const workflowFile = path.join('.github', 'workflows', 'charter-governance.yml');
+    const kept = ((setupResult.step.details.kept as string[] | undefined) ?? []).filter(f => f !== workflowFile);
     if (kept.length > 0) console.log(`  Kept existing ${kept.join(', ')} (not overwritten; 'charter init --force' replaces them, with a backup)`);
     // Setup's warnings — such as the stale absolute --ai-dir in .mcp.json — are
     // printed by completePhase, in this same position (#304, #307).
@@ -728,6 +733,8 @@ function runSetupPhase(
   const created: string[] = [];
   const updated: string[] = [];
   const kept: string[] = [];
+  const replaced: Array<{ file: string; backup: string }> = [];
+  const notReplaced: Array<{ file: string; detail: string }> = [];
   let mcpBackup: string | undefined;
 
   try {
@@ -753,15 +760,26 @@ function runSetupPhase(
     // Generate CI workflow if requested
     if (ciTarget === 'github') {
       const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
-      const workflowWrite = applyManagedFile(
-        workflowPath,
-        getGithubWorkflow(packageManager),
-        true
-      );
-      if (workflowWrite.created) {
+      // #374: refresh only a Charter-generated workflow; a hand-edited one is
+      // kept, or under --force backed up to .charter/.backup/ and replaced.
+      const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
+        force,
+        configDir: options.configPath,
+        forceHint: "'charter bootstrap --ci github --force'",
+      });
+      if (workflow.action === 'created') {
         created.push(workflowPath);
-      } else if (workflowWrite.updated) {
+      } else if (workflow.action === 'updated') {
         updated.push(workflowPath);
+      } else if (workflow.action === 'kept') {
+        kept.push(workflowPath);
+        warnings.push(workflow.warning);
+      } else if (workflow.action === 'replaced') {
+        replaced.push({ file: workflowPath, backup: workflow.backup });
+        if (workflow.warning) warnings.push(workflow.warning);
+      } else if (workflow.action === 'not-replaced') {
+        notReplaced.push({ file: workflowPath, detail: workflow.warning });
+        warnings.push(workflow.warning);
       }
     }
 
@@ -789,7 +807,14 @@ function runSetupPhase(
       step: {
         name: 'setup',
         status: 'pass',
-        details: { created, updated, kept, ...(mcpBackup ? { mcpBackup } : {}) },
+        details: {
+          created,
+          updated,
+          kept,
+          ...(replaced.length > 0 ? { replaced } : {}),
+          ...(notReplaced.length > 0 ? { notReplaced } : {}),
+          ...(mcpBackup ? { mcpBackup } : {}),
+        },
         warnings,
       },
     };
@@ -857,8 +882,10 @@ function isTrackedByGit(relPath: string): boolean {
 /**
  * Adds mcpServers.charter to .mcp.json. An existing, differing entry is replaced
  * only under `bootstrap --force` (#369; `--yes` alone never replaces it), after
- * .mcp.json is copied to `<configDir>/.backup/mcp.json.<timestamp>`. A failed
- * backup leaves the file as is, with a warning.
+ * .mcp.json is copied to `<configDir>/.backup/mcp.json.<timestamp>`. Adding the
+ * entry re-serializes the file, so an existing .mcp.json that is not already in
+ * that exact formatting is backed up the same way first (#374). A failed backup
+ * leaves the file as is, with a warning.
  */
 function ensureProjectMcpConfig(
   aiDir: string,
@@ -875,9 +902,12 @@ function ensureProjectMcpConfig(
 
   const configExists = fs.existsSync(configPath);
   let root: Record<string, unknown> = {};
+  // True when re-serializing the file would change bytes other than the added entry (#374).
+  let reformats = false;
   if (configExists) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return {
           created: false,
@@ -886,6 +916,7 @@ function ensureProjectMcpConfig(
         };
       }
       root = { ...(parsed as Record<string, unknown>) };
+      reformats = raw !== JSON.stringify(parsed, null, 2) + '\n';
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
@@ -941,10 +972,11 @@ function ensureProjectMcpConfig(
     };
   }
 
-  // Replacing an existing entry (--force): back the file up first; no backup, no write.
+  // Replacing an existing entry (--force), or adding one to a file whose formatting
+  // the rewrite would change (#374): back the file up first; no backup, no write.
   let backup: string | undefined;
   let gitignoreWarning: string | undefined;
-  if (existingCharter !== undefined) {
+  if (existingCharter !== undefined || reformats) {
     const backupDir = path.join(configDir, '.backup');
     const prefix = dirLabel(configDir);
     try {
@@ -956,7 +988,10 @@ function ensureProjectMcpConfig(
       return {
         created: false,
         updated: false,
-        warning: `Skipped MCP config update: could not back up .mcp.json to ${prefix}.backup/ (${msg}); mcpServers.charter was not replaced.`,
+        warning: existingCharter !== undefined
+          ? `Skipped MCP config update: could not back up .mcp.json to ${prefix}.backup/ (${msg}); mcpServers.charter was not replaced.`
+          : `Skipped MCP config update: could not back up .mcp.json to ${prefix}.backup/ (${msg}); mcpServers.charter was not added, ` +
+            'because adding it rewrites the file in standard JSON formatting (2-space indent). Add the entry by hand, or fix the backup directory and re-run.',
       };
     }
     // A .gitignore that cannot be written is a warning, never a failed setup step.

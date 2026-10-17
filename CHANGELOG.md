@@ -6,6 +6,14 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- **`bootstrap --ci github` and `setup --ci github` no longer overwrite a hand-edited `.github/workflows/charter-governance.yml`** (`#374`). An existing workflow is refreshed to the current template only while it matches a workflow Charter generated: the current npm or pnpm template or an earlier Charter version of it (their hashes are listed in `commands/github-workflow.ts`), compared ignoring CRLF line endings, trailing whitespace and a pinned `@stackbilt/cli@<version>`. Any other workflow is kept byte for byte with a warning naming `--force`; bootstrap JSON lists it in `setup.details.kept`, setup JSON sets `workflow.kept`. Under `--force` it is first copied to `.charter/.backup/github-workflows-charter-governance.yml.<timestamp>` (gitignored) and then replaced, printed as `Replaced … (backup: …)` (`setup.details.replaced` in bootstrap JSON, `workflow.backup` in setup JSON); if the backup fails, it is not replaced and a warning says so. A missing workflow is still created and an identical one left alone. `setup --ci github` without `--force` now refreshes a Charter-generated workflow, which it used to leave stale, and setup's `mutationPlan.workflow.action` is `noop` for a hand-edited workflow it will keep.
+
+### Fixed
+
+- **`bootstrap` backs up `.mcp.json` before reformatting it** (`#374`). Adding `mcpServers.charter` to an existing `.mcp.json` that lacks it re-serializes the file as 2-space-indented JSON, which loses its key layout, indentation and trailing formatting (every key and value is kept). When the rewrite would change any byte besides the added entry, `.mcp.json` is first copied to `.charter/.backup/mcp.json.<timestamp>` and phase 2 prints `Updated .mcp.json (backup: …)` (`setup.details.mcpBackup` in JSON), as when `--force` replaces an entry. If the backup fails, the file is left as is with a warning. A file already in that formatting gets no backup.
+
 ## [2.1.0] - 2026-10-17
 
 **`charter bootstrap --force` no longer replaces `.ai/*.adf`; it merges.** In 2.0.0, `--force` replaced `manifest.adf`, `core.adf`, `state.adf` and the preset modules with the template, silently dropping custom triggers, `RULES` lines, constraints and `METRICS` ceilings (the copies only survived in `.ai/.backup/`). If a script relies on `--force` to reset `.ai/`, change it to `charter bootstrap --reset-adf --yes` (add `--force` as well to keep rewriting pointers and `.mcp.json`). See [#354](https://github.com/Stackbilt-dev/charter/issues/354).
