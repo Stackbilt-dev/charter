@@ -81,7 +81,8 @@ CONTEXT:
     expect(skipWarning).toMatch(/\d+ bytes/);
   });
 
-  it('backs up and overwrites custom ADF files when run with --force', async () => {
+  // #354: replacement moved from --force to --reset-adf (which needs --yes in a non-TTY run).
+  it('backs up and overwrites custom ADF files when run with --reset-adf --yes', async () => {
     fs.mkdirSync('.ai', { recursive: true });
     const customCore = `ADF: 0.1
 
@@ -96,8 +97,8 @@ STATE:
     fs.writeFileSync(path.join('.ai', 'state.adf'), customState);
 
     const exitCode = await bootstrapCommand(
-      baseOptions,
-      ['--force', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+      { ...baseOptions, yes: true },
+      ['--reset-adf', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
     );
 
     expect(exitCode).toBe(0);
@@ -119,8 +120,8 @@ STATE:
     expect(logs).toContain('  Backed up 2 files to .ai/.backup/');
   });
 
-  // #305: --force also re-scaffolds .ai/*.adf, so the pointer warnings must name
-  // the narrow remedy instead of sending the user to it.
+  // #305: --force does not help with a hand-authored pointer (bootstrap never
+  // overwrites one), so the warning must name the narrow remedy instead.
   it('names the narrow remedy, not --force, when a pointer file has custom content', async () => {
     const customAgents = '# Agents\n\n- Always run the linter before committing.\n';
     fs.writeFileSync('AGENTS.md', customAgents);
@@ -139,7 +140,8 @@ STATE:
     expect(warning).toContain("charter adf migrate --source AGENTS.md");
     expect(warning).toContain('delete AGENTS.md');
     expect(warning).toContain('Do not use --force');
-    expect(warning).toContain('re-scaffolds .ai/*.adf');
+    expect(warning).toContain('never overwrites a hand-authored file');
+    expect(warning).not.toContain('re-scaffolds .ai/*.adf');
 
     // The named remedy actually resolves the condition the warning fires on.
     const { adfMigrateCommand } = await import('../commands/adf-migrate');
@@ -149,7 +151,8 @@ STATE:
     expect(logs.find(l => l.includes('AGENTS.md has custom content'))).toBeUndefined();
   });
 
-  it('names the narrow remedy, not --force, when a pointer file is already Charter-managed', async () => {
+  // #354: --force no longer replaces .ai/*.adf, so it is a safe way to regenerate a pointer.
+  it('names delete-and-re-run, and what --force also does, when a pointer file is already Charter-managed', async () => {
     const args = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
     expect(await bootstrapCommand(baseOptions, args)).toBe(0);
     logs.length = 0;
@@ -159,7 +162,10 @@ STATE:
     expect(warning).toBeDefined();
     expect(warning).not.toContain('use --force to overwrite');
     expect(warning).toContain('delete GEMINI.md and re-run bootstrap');
-    expect(warning).toContain('Do not use --force');
+    expect(warning).toContain('--force also regenerates it, but it rewrites every Charter-managed pointer');
+    expect(warning).toContain("replaces .mcp.json's mcpServers.charter entry");
+    expect(warning).not.toContain('never replaces');
+    expect(warning).not.toContain('re-scaffolds');
     expect(logs.some(l => l.includes('use --force to overwrite'))).toBe(false);
   });
 

@@ -171,7 +171,7 @@ A pointer is no longer reported `[stale]` forever. `--check` now checks each fil
 
 ## `bootstrap --force` keeps your vendor files
 
-`charter bootstrap --force` still re-scaffolds `.ai/*.adf` (backups go to `.ai/.backup/`) and still rewrites Charter thin pointers from the current template. It no longer overwrites vendor files that are:
+`charter bootstrap --force` still rewrites Charter thin pointers from the current template. In 2.0.0 it also re-scaffolded `.ai/*.adf` (backups went to `.ai/.backup/`). From 2.1 it merges the template into `.ai/*.adf` instead and never replaces them; `charter bootstrap --reset-adf --yes` does the replacement ([#354](https://github.com/Stackbilt-dev/charter/issues/354), see the [CHANGELOG](../CHANGELOG.md)). It no longer overwrites vendor files that are:
 
 - hand-authored (no Charter marker);
 - compiled output;

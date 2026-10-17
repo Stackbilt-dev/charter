@@ -610,14 +610,24 @@ describe('bootstrap: pointer decision table', () => {
     const migrate = payload.steps.find(s => s.name === 'migrate');
     expect(migrate?.status).toBe('skip');
     expect(migrate?.warnings).toContain('CLAUDE.md is recorded as unmanaged; not migrating. To migrate it anyway: charter adf migrate --source CLAUDE.md');
-    // --force re-scaffolds manifest.adf; the record is carried over.
+    // --force merges manifest.adf (#354): the record is never touched, nothing is backed up.
+    expect(manifestText()).toContain('  - CLAUDE.md: unmanaged\n');
+    expect(fs.existsSync('.ai/.backup')).toBe(false);
+  });
+
+  it('INV-P3-6: --reset-adf replaces manifest.adf and carries the record over', async () => {
+    scaffold(vendors('CLAUDE.md: unmanaged'));
+    fs.writeFileSync('CLAUDE.md', HAND_WRITTEN);
+    out = [];
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--reset-adf', '--force', '--yes', '--skip-install', '--skip-doctor', '--format', 'json'])).toBe(0);
+    expect(read('CLAUDE.md')).toBe(HAND_WRITTEN);
     expect(manifestText()).toContain('  - CLAUDE.md: unmanaged\n');
     expect(fs.readdirSync('.ai/.backup').some(f => f.startsWith('manifest.adf.'))).toBe(true);
   });
 
-  it('--force carries every valid record entry over the re-scaffolded manifest', async () => {
+  it('--reset-adf carries every valid record entry over the replaced manifest', async () => {
     scaffold(vendors('GEMINI.md: compiled', 'AGENTS.md: unmanaged', 'CLAUDE.md: pointer'));
-    await bootstrapCommand({ ...TEXT, yes: true }, ['--force', '--yes', '--skip-install', '--skip-doctor']);
+    await bootstrapCommand({ ...TEXT, yes: true }, ['--reset-adf', '--force', '--yes', '--skip-install', '--skip-doctor']);
     const record = manifestText().slice(manifestText().indexOf('VENDORS:'));
     expect(record).toBe('VENDORS:\n  - GEMINI.md: compiled\n  - AGENTS.md: unmanaged\n  - CLAUDE.md: pointer\n  - .cursorrules: pointer\n  - copilot-instructions.md: pointer\n');
     expect(fs.existsSync('GEMINI.md')).toBe(false);
