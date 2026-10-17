@@ -20,6 +20,7 @@ import { countExtractable } from './adf-tidy';
 import { legacyIndexEntries, legacyIndexKind, readVendorRecord, resolveVendorMode, resolveVendorModes, VENDOR_FILES, vendorFileGroups } from './adf-vendor';
 import type { ModeSource, VendorEntryProblem, VendorFile, VendorMode } from './adf-vendor';
 import { checkGateEnforcement, checkPreCommitScope } from './doctor-gate-enforcement';
+import { HOOK_SCOPED_DOCTOR_ENV, HOOK_SCOPED_DOCTOR_FILE } from './hook-scope';
 import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
 
 interface DoctorResult {
@@ -362,6 +363,9 @@ export const BLOAT_SCOPE_MSG = {
   notStaged: '{file} (not staged)',
   tidySkipped: '{file} (auto-tidy skipped for it in this commit)',
   outsideRun: 'Run: charter adf tidy --source <file>, then git add the result',
+  hookChecked: `Not enforced in this run: the Charter pre-commit hook already checked vendor bloat for this commit (doctor --staged) and set ${HOOK_SCOPED_DOCTOR_ENV} for its verify:adf run. charter doctor --ci outside the hook, as CI runs it, checks every vendor file.`,
+  hookCheckedFound: 'Bloat this run would otherwise report:',
+  hookCheckedStderr: `[doctor] adf vendor bloat: not enforced in this run; the Charter pre-commit hook already checked it for this commit (${HOOK_SCOPED_DOCTOR_ENV}).`,
 } as const;
 
 /**
@@ -395,6 +399,25 @@ function resolveBloatScope(args: string[]): BloatScope | null {
   const staged = new Set(stagedOut.split(/\r?\n/).map(l => l.trim()).filter(l => vendorNames.has(l)));
   const skipped = new Set(skippedRaw.split(/\s+/).filter(Boolean));
   return { staged, skipped };
+}
+
+/**
+ * True only while the generated pre-commit hook runs verify:adf, after its own
+ * doctor --staged has checked vendor bloat for this commit. The hook sets
+ * HOOK_SCOPED_DOCTOR_ENV to a token and writes the same token to
+ * HOOK_SCOPED_DOCTOR_FILE in the git dir, removing it when the hook exits. Both
+ * must match: the variable alone (say, left in a CI environment) does nothing,
+ * and while it is unset git is not even asked. Only the bloat check is affected.
+ */
+function hookAlreadyCheckedBloat(): boolean {
+  const token = process.env[HOOK_SCOPED_DOCTOR_ENV]?.trim();
+  if (!token) return false;
+  try {
+    const file = runGit(['rev-parse', '--git-path', HOOK_SCOPED_DOCTOR_FILE]).trim();
+    return fs.readFileSync(file, 'utf-8').trim() === token;
+  } catch {
+    return false;
+  }
 }
 
 export async function doctorCommand(options: CLIOptions, args: string[] = []): Promise<number> {
@@ -741,6 +764,15 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
             details: `${BLOAT_SCOPE_MSG.outsideHeader}\n    ${outside.map(b => `${label(b.file)}: ${b.warnings}`).join('\n    ')}\n    ${BLOAT_SCOPE_MSG.outsideRun}`,
           });
         }
+      } else if (hookAlreadyCheckedBloat()) {
+        // Inside the hook's verify:adf run: reported, never a WARN, and said out loud.
+        console.error(BLOAT_SCOPE_MSG.hookCheckedStderr);
+        checks.push({
+          name: 'adf vendor bloat (checked by pre-commit hook)',
+          status: 'INFO',
+          details: BLOAT_SCOPE_MSG.hookChecked
+            + (bloatWarnings.length > 0 ? `\n    ${BLOAT_SCOPE_MSG.hookCheckedFound}\n    ${bloatWarnings.join('\n    ')}` : ''),
+        });
       } else if (bloatWarnings.length > 0) {
         checks.push({
           name: 'adf vendor bloat',

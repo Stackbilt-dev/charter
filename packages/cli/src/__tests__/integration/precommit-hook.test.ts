@@ -19,7 +19,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
+import { HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
+import { BLOAT_SCOPE_MSG } from '../../commands/doctor';
 
 // ============================================================================
 // Fixture Helpers
@@ -35,7 +36,17 @@ interface Repo {
   dir: string;
   /** One line per CLI call the hook made: its arguments, space-joined. */
   calls(): string[];
+  /** `git commit` with the repo's PATH (a failing pnpm first, when it has verify:adf). */
+  commit(message: string, env?: Record<string, string>): { status: number | null; output: string };
+  /** Lines the failing pnpm shim logged: one per time the hook ran pnpm. */
+  pnpmCalls(): string[];
 }
+
+/** Bootstrapped repos get this verify:adf, the one setup writes, with `charter` pointed at the shim. */
+const verifyAdfScript = (cli: string): string =>
+  `${cli} doctor --adf-only --ci --format json && ${cli} adf evidence --auto-measure --ci --format json`;
+
+const PATH_KEY = Object.keys(process.env).find(k => k.toUpperCase() === 'PATH') ?? 'PATH';
 
 function makeTempDir(label: string): string {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `charter integ hook-${label}-`));
@@ -89,12 +100,29 @@ const DB_BLOAT = `
  * Scaffold a git repo with ADF, the generated pre-commit hook (via a logging
  * shim around the built CLI) under core.hooksPath, and an initial clean commit.
  */
-function writeHookFixtureRepo(label: string, opts: { tidyOnly?: boolean } = {}): Repo {
+interface FixtureOpts {
+  tidyOnly?: boolean;
+  /**
+   * Give the repo a package.json with a verify:adf script (setup's, unless a
+   * string is passed: then `{CLI}` in it is the shim) and this lockfile. PATH
+   * gets a pnpm that logs and fails, so a hook that runs pnpm where it should not fails.
+   */
+  verifyAdf?: { script?: string; lockfile: 'package-lock.json' | 'pnpm-lock.yaml' };
+}
+
+function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
   const tmp = makeTempDir(label);
   const shimDir = makeTempDir(`${label}-shim`);
   const log = path.join(shimDir, 'calls.log');
   const shim = path.join(shimDir, 'charter shim.cjs');
+  const pnpmLog = path.join(shimDir, 'pnpm.log');
+  const binDir = path.join(shimDir, 'bin');
   fs.writeFileSync(log, '');
+  fs.writeFileSync(pnpmLog, '');
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(path.join(binDir, 'pnpm'), `#!/bin/sh\necho "pnpm $*" >> "${posix(pnpmLog)}"\necho 'fake pnpm: not installed' >&2\nexit 97\n`);
+  fs.chmodSync(path.join(binDir, 'pnpm'), 0o755);
+  fs.writeFileSync(path.join(binDir, 'pnpm.cmd'), `@echo pnpm %*>> "${pnpmLog}"\r\n@exit /b 97\r\n`);
   fs.writeFileSync(shim, [
     `const args = process.argv.slice(2);`,
     `require('fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');`,
@@ -135,6 +163,14 @@ function writeHookFixtureRepo(label: string, opts: { tidyOnly?: boolean } = {}):
   fs.writeFileSync(path.join(tmp, '.ai', 'backend.adf'), 'ADF: 0.1\n\n📐 RULES:\n  - Database access through repository pattern\n');
   fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER);
   fs.writeFileSync(path.join(tmp, 'GEMINI.md'), POINTER.replace('# CLAUDE.md', '# GEMINI.md'));
+  if (opts.verifyAdf) {
+    const cli = `node "${posix(shim)}"`;
+    const script = (opts.verifyAdf.script ?? verifyAdfScript('{CLI}')).split('{CLI}').join(cli);
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'fixture', private: true, scripts: { 'verify:adf': script } }, null, 2) + '\n');
+    fs.writeFileSync(path.join(tmp, opts.verifyAdf.lockfile), opts.verifyAdf.lockfile === 'package-lock.json'
+      ? JSON.stringify({ name: 'fixture', lockfileVersion: 3, requires: true, packages: { '': { name: 'fixture' } } }, null, 2) + '\n'
+      : "lockfileVersion: '9.0'\n");
+  }
 
   // The generated hook, as `charter hook install --pre-commit` writes it.
   const hookDir = path.join(tmp, '.githooks');
@@ -147,12 +183,16 @@ function writeHookFixtureRepo(label: string, opts: { tidyOnly?: boolean } = {}):
   git(tmp, 'config', 'core.hooksPath', '.githooks');
 
   git(tmp, 'add', '-A');
-  git(tmp, 'commit', '-m', 'initial');
+  if (opts.verifyAdf) git(tmp, 'commit', '--no-verify', '-m', 'initial');
+  else git(tmp, 'commit', '-m', 'initial');
   fs.writeFileSync(log, '');
 
+  const pathEnv = { [PATH_KEY]: `${binDir}${path.delimiter}${process.env[PATH_KEY] ?? ''}` };
   return {
     dir: tmp,
     calls: () => fs.readFileSync(log, 'utf-8').split('\n').filter(Boolean),
+    commit: (message, env = {}) => commit(tmp, message, { ...pathEnv, ...env }),
+    pnpmCalls: () => fs.readFileSync(pnpmLog, 'utf-8').split(/\r?\n/).filter(Boolean),
   };
 }
 
@@ -430,7 +470,10 @@ ${DB_BLOAT}`);
     expect(read(tmp, 'CLAUDE.md')).toContain('## Architecture');
   });
 
-  describe('full generated hook: the evidence gate is scoped to the commit (#357)', () => {
+  describe.each([
+    ['no verify:adf script', {}],
+    ['a verify:adf script (bootstrapped repo, npm lockfile, failing pnpm on PATH)', { verifyAdf: { lockfile: 'package-lock.json' } }],
+  ] as Array<[string, FixtureOpts]>)('full generated hook, %s: the evidence gate is scoped to the commit (#357)', (_flavor, flavor) => {
     const NOT_BLOCKING = '[info] adf vendor bloat (not blocking):';
     const BLOAT_WARN = '[warn] adf vendor bloat:';
 
@@ -455,17 +498,43 @@ ${DB_BLOAT}`);
 
     const head = (tmp: string): string => git(tmp, 'rev-parse', 'HEAD');
 
+    /**
+     * The gate went past the scoped doctor. With verify:adf: it ran (via npm,
+     * never pnpm), its doctor left bloat to the scoped gate, and the token file
+     * is gone. Without: the evidence check ran.
+     */
+    function expectRestOfGateRan(repo: Repo, output: string): void {
+      if (!flavor.verifyAdf) {
+        expect(repo.calls()).toContain('adf evidence --auto-measure --ci');
+        return;
+      }
+      expect(repo.calls()).toContain('doctor --adf-only --ci --format json');
+      expect(repo.calls()).toContain('adf evidence --auto-measure --ci --format json');
+      expect(output).toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
+      expect(output).toContain('"name": "adf vendor bloat (checked by pre-commit hook)"');
+      expect(repo.pnpmCalls()).toEqual([]);
+      expect(fs.existsSync(path.join(repo.dir, '.git', HOOK_SCOPED_DOCTOR_FILE))).toBe(false);
+    }
+
+    /** The scoped doctor blocked, so nothing after it ran. */
+    function expectGateStoppedAtScopedDoctor(repo: Repo): void {
+      expect(repo.calls().filter(c => c.startsWith('doctor ') && !c.includes('--staged'))).toEqual([]);
+      expect(repo.calls().filter(c => c.startsWith('adf evidence'))).toEqual([]);
+      expect(repo.pnpmCalls()).toEqual([]);
+    }
+
     it('B: unstaged GEMINI.md bloat does not block a clean staged CLAUDE.md edit, and is shown as INFO', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-b');
+      const repo = writeHookFixtureRepo('gate-b', flavor);
       const tmp = repo.dir;
       const gemini = read(tmp, 'GEMINI.md') + DB_BLOAT;
       fs.writeFileSync(path.join(tmp, 'GEMINI.md'), gemini);
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER.trimEnd() + '\n- pnpm 9\n');
       git(tmp, 'add', 'CLAUDE.md');
 
-      const result = commit(tmp, 'clean claude edit');
+      const result = repo.commit('clean claude edit');
 
       expect(result.status).toBe(0);
+      expectRestOfGateRan(repo, result.output);
       expect(result.output).toContain(NOT_BLOCKING);
       expect(result.output).toContain('GEMINI.md (not staged): ');
       expect(result.output).not.toContain(BLOAT_WARN);
@@ -477,16 +546,17 @@ ${DB_BLOAT}`);
     });
 
     it('B2: a staged bloated CLAUDE.md is tidied and committed while unstaged GEMINI.md bloat stays put', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-b2');
+      const repo = writeHookFixtureRepo('gate-b2', flavor);
       const tmp = repo.dir;
       const gemini = read(tmp, 'GEMINI.md') + DB_BLOAT;
       fs.writeFileSync(path.join(tmp, 'GEMINI.md'), gemini);
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
       git(tmp, 'add', 'CLAUDE.md');
 
-      const result = commit(tmp, 'bloated claude, unstaged gemini');
+      const result = repo.commit('bloated claude, unstaged gemini');
 
       expect(result.status).toBe(0);
+      expectRestOfGateRan(repo, result.output);
       expect(result.output).toContain('GEMINI.md (not staged): ');
       expect(show(tmp, 'HEAD:CLAUDE.md')).not.toContain('## Database Rules');
       expect(committedFiles(tmp)).not.toContain('GEMINI.md');
@@ -495,15 +565,16 @@ ${DB_BLOAT}`);
     });
 
     it('N: a commit staging no vendor file is not blocked by vendor bloat elsewhere', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-n');
+      const repo = writeHookFixtureRepo('gate-n', flavor);
       const tmp = repo.dir;
       fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
       fs.writeFileSync(path.join(tmp, 'notes.md'), 'hello\n');
       git(tmp, 'add', 'notes.md');
 
-      const result = commit(tmp, 'no vendor staged');
+      const result = repo.commit('no vendor staged');
 
       expect(result.status).toBe(0);
+      expectRestOfGateRan(repo, result.output);
       expect(result.output).toContain('GEMINI.md (not staged): ');
       expect(tidyCalls(repo)).toEqual([]);
       expect(committedFiles(tmp)).toEqual(['notes.md']);
@@ -511,16 +582,17 @@ ${DB_BLOAT}`);
     });
 
     it('C (CP-3): a partially staged bloated file is skipped by tidy and does not block; the skip is explained', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-partial');
+      const repo = writeHookFixtureRepo('gate-partial', flavor);
       const tmp = repo.dir;
       const staged = POINTER + DB_BLOAT;
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), staged);
       git(tmp, 'add', 'CLAUDE.md');
       fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '- not staged yet\n');
 
-      const result = commit(tmp, 'partial with full hook');
+      const result = repo.commit('partial with full hook');
 
       expect(result.status).toBe(0);
+      expectRestOfGateRan(repo, result.output);
       expect(result.output).toContain('[pre-commit] CLAUDE.md has unstaged changes, so auto-tidy is skipped for it in this commit.');
       expect(result.output).toContain('[pre-commit] Its bloat, if any, is left as-is; a plain charter doctor --ci (as CI runs it) still reports it.');
       expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
@@ -534,16 +606,17 @@ ${DB_BLOAT}`);
     });
 
     it('D (CP-4): planned-module WIP skips tidy and does not block', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-wip');
+      const repo = writeHookFixtureRepo('gate-wip', flavor);
       const tmp = repo.dir;
       const bloated = POINTER + DB_BLOAT;
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), bloated);
       git(tmp, 'add', 'CLAUDE.md');
       fs.appendFileSync(path.join(tmp, '.ai', 'backend.adf'), '  - wip rule\n');
 
-      const result = commit(tmp, 'wip with full hook');
+      const result = repo.commit('wip with full hook');
 
       expect(result.status).toBe(0);
+      expectRestOfGateRan(repo, result.output);
       expect(result.output).toContain('[pre-commit] Auto-tidy skipped for this commit: tidy would write into files with unstaged or untracked work: .ai/backend.adf');
       expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
       expect(result.output).not.toContain(BLOAT_WARN);
@@ -553,7 +626,7 @@ ${DB_BLOAT}`);
     });
 
     it('D3 (CP-4): an untracked planned module skips tidy and does not block', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-untracked');
+      const repo = writeHookFixtureRepo('gate-untracked', flavor);
       const tmp = repo.dir;
       // DB_BLOAT makes the file bloated in doctor's eyes, so the gate would block without --tidy-skipped.
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + '\n## Testing\n- Always run the test suite before pushing\n- Never skip flaky tests\n' + DB_BLOAT);
@@ -565,9 +638,10 @@ ${DB_BLOAT}`);
       fs.writeFileSync(path.join(tmp, created!), 'ADF: 0.1\n\n📐 RULES:\n  - my own untracked draft\n');
       expect(plainDoctor(tmp).status).toBe(1);
 
-      const result = commit(tmp, 'untracked planned module, full hook');
+      const result = repo.commit('untracked planned module, full hook');
 
       expect(result.status).toBe(0);
+      expectRestOfGateRan(repo, result.output);
       expect(result.output).toContain(`unstaged or untracked work: ${created}`);
       expect(result.output).not.toContain(BLOAT_WARN);
       expect(committedFiles(tmp)).toEqual(['CLAUDE.md']);
@@ -575,15 +649,16 @@ ${DB_BLOAT}`);
     });
 
     it('still blocks on staged bloat that tidy ran on but could not move (keyword density in a kept section)', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-unfixable');
+      const repo = writeHookFixtureRepo('gate-unfixable', flavor);
       const tmp = repo.dir;
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER.trimEnd() + ', the database is postgres and the database runs locally\n');
       git(tmp, 'add', 'CLAUDE.md');
       const before = head(tmp);
 
-      const result = commit(tmp, 'unfixable bloat');
+      const result = repo.commit('unfixable bloat');
 
       expect(result.status).toBe(1);
+      expectGateStoppedAtScopedDoctor(repo);
       expect(result.output).toContain('[pre-commit] Vendor config files are clean.');
       expect(result.output).toContain(BLOAT_WARN);
       expect(result.output).toContain('CLAUDE.md: trigger keywords [database (2x)]');
@@ -594,15 +669,16 @@ ${DB_BLOAT}`);
     });
 
     it('still blocks on a staged bloated file when tidy fails (not a deliberate skip)', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-tidy-fails');
+      const repo = writeHookFixtureRepo('gate-tidy-fails', flavor);
       const tmp = repo.dir;
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
       git(tmp, 'add', 'CLAUDE.md');
       const before = head(tmp);
 
-      const result = commit(tmp, 'tidy fails, full hook', { HOOK_TEST_FAIL_TIDY: '1' });
+      const result = repo.commit('tidy fails, full hook', { HOOK_TEST_FAIL_TIDY: '1' });
 
       expect(result.status).toBe(1);
+      expectGateStoppedAtScopedDoctor(repo);
       expect(result.output).toContain('[pre-commit] adf tidy --dry-run failed; skipping auto-tidy.');
       expect(result.output).toContain(BLOAT_WARN);
       expect(result.output).not.toContain(NOT_BLOCKING);
@@ -610,16 +686,17 @@ ${DB_BLOAT}`);
     });
 
     it('still blocks on a staged bloated file under CHARTER_SKIP_TIDY=1', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-skip-env');
+      const repo = writeHookFixtureRepo('gate-skip-env', flavor);
       const tmp = repo.dir;
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
       fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
       git(tmp, 'add', 'CLAUDE.md');
       const before = head(tmp);
 
-      const result = commit(tmp, 'skip tidy, full hook', { CHARTER_SKIP_TIDY: '1' });
+      const result = repo.commit('skip tidy, full hook', { CHARTER_SKIP_TIDY: '1' });
 
       expect(result.status).toBe(1);
+      expectGateStoppedAtScopedDoctor(repo);
       expect(result.output).toMatch(/\[warn\] adf vendor bloat: Vendor file bloat detected:\n {4}CLAUDE\.md: /);
       // Only the staged file blocks; the unstaged one is reported apart.
       expect(result.output).toContain('GEMINI.md (not staged): ');
@@ -627,7 +704,7 @@ ${DB_BLOAT}`);
     });
 
     it('a non-bloat doctor WARN (malformed VENDORS entry) still blocks, even alongside a skipped file', { timeout: 60000 }, () => {
-      const repo = writeHookFixtureRepo('gate-vendors');
+      const repo = writeHookFixtureRepo('gate-vendors', flavor);
       const tmp = repo.dir;
       fs.appendFileSync(path.join(tmp, '.ai', 'manifest.adf'), '\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: bogus\n');
       fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER + DB_BLOAT);
@@ -635,15 +712,88 @@ ${DB_BLOAT}`);
       fs.appendFileSync(path.join(tmp, 'CLAUDE.md'), '- not staged yet\n');
       const before = head(tmp);
 
-      const result = commit(tmp, 'malformed vendors');
+      const result = repo.commit('malformed vendors');
 
       expect(result.status).toBe(1);
+      expectGateStoppedAtScopedDoctor(repo);
       expect(result.output).toContain('[warn] adf vendor mode:');
       expect(result.output).toContain("VENDORS entry 'CLAUDE.md: bogus'");
       expect(result.output).toContain('CLAUDE.md (auto-tidy skipped for it in this commit): ');
       expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
       expect(result.output).toContain(' doctor --adf-only --ci --staged --tidy-skipped "CLAUDE.md" --format text');
       expect(head(tmp)).toBe(before);
+    });
+  });
+
+  describe('full generated hook with a verify:adf script', () => {
+    const head = (tmp: string): string => git(tmp, 'rev-parse', 'HEAD');
+    const withUnstagedGeminiBloat = (tmp: string): void => {
+      fs.writeFileSync(path.join(tmp, 'GEMINI.md'), read(tmp, 'GEMINI.md') + DB_BLOAT);
+      fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER.trimEnd() + '\n- pnpm 9\n');
+      git(tmp, 'add', 'CLAUDE.md');
+    };
+
+    it('a failing custom command in verify:adf still blocks, and the hint names npm', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('verify-custom', {
+        verifyAdf: { lockfile: 'package-lock.json', script: `${verifyAdfScript('{CLI}')} && node -e "process.exit(4)"` },
+      });
+      withUnstagedGeminiBloat(repo.dir);
+      const before = head(repo.dir);
+
+      const result = repo.commit('custom check fails');
+
+      expect(result.status).toBe(1);
+      expect(repo.calls()).toContain('adf evidence --auto-measure --ci --format json');
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      expect(result.output).toContain('  Run: npm run verify:adf (outside this hook');
+      expect(repo.pnpmCalls()).toEqual([]);
+      expect(fs.existsSync(path.join(repo.dir, '.git', HOOK_SCOPED_DOCTOR_FILE))).toBe(false);
+      expect(head(repo.dir)).toBe(before);
+    });
+
+    it('a non-bloat WARN that only the doctor inside verify:adf sees still blocks', { timeout: 60000 }, () => {
+      // Without --adf-only, doctor also wants .charter/config.json, which this repo lacks.
+      const repo = writeHookFixtureRepo('verify-nonbloat', {
+        verifyAdf: { lockfile: 'package-lock.json', script: '{CLI} doctor --ci --format json' },
+      });
+      withUnstagedGeminiBloat(repo.dir);
+      const before = head(repo.dir);
+
+      const result = repo.commit('config missing');
+
+      expect(result.status).toBe(1);
+      expect(repo.calls()).toContain('doctor --ci --format json');
+      expect(result.output).toContain('"name": "config file"');
+      expect(result.output).toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      expect(head(repo.dir)).toBe(before);
+    });
+
+    it('a pnpm-lock.yaml with pnpm on PATH runs verify:adf with pnpm', { timeout: 60000 }, () => {
+      // The pnpm on PATH is the failing shim, so the commit fails: that proves which runner the hook chose.
+      const repo = writeHookFixtureRepo('verify-pnpm', { verifyAdf: { lockfile: 'pnpm-lock.yaml' } });
+      withUnstagedGeminiBloat(repo.dir);
+
+      const result = repo.commit('pnpm repo');
+
+      expect(result.status).toBe(1);
+      expect(repo.pnpmCalls()).toEqual(['pnpm run verify:adf']);
+      expect(result.output).toContain('  Run: pnpm run verify:adf (outside this hook');
+      expect(fs.existsSync(path.join(repo.dir, '.git', HOOK_SCOPED_DOCTOR_FILE))).toBe(false);
+    });
+
+    it('verify:adf run by hand, outside the hook, still blocks on the unstaged bloat (as CI does)', { timeout: 60000 }, () => {
+      const repo = writeHookFixtureRepo('verify-by-hand', { verifyAdf: { lockfile: 'package-lock.json' } });
+      withUnstagedGeminiBloat(repo.dir);
+      expect(repo.commit('clean claude edit').status).toBe(0);
+
+      const r = spawnSync('npm', ['run', 'verify:adf'], {
+        cwd: repo.dir, encoding: 'utf-8', shell: process.platform === 'win32', env: { ...process.env, CHARTER_HOOK_SCOPED_DOCTOR: '1' },
+      });
+      expect(r.status).not.toBe(0);
+      expect(r.stdout).toContain('"name": "adf vendor bloat"');
+      expect(r.stdout).toContain('"status": "WARN"');
+      expect(`${r.stdout}${r.stderr}`).not.toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
     });
   });
 
