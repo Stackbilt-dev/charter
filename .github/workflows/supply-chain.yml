@@ -1,7 +1,13 @@
 name: Supply Chain
 
 # Ported from the organization's shared supply-chain workflows and inlined
-# here so the jobs run on this public repo. Action pins follow ci.yml.
+# here so the jobs run on this public repo. checkout, pnpm/action-setup and
+# setup-node use the same pins as ci.yml, upload-artifact the pin from
+# governance.yml; dependency-review-action is pinned here (v5.0.0).
+#
+# The SBOM generator (@cyclonedx/cdxgen) is installed from the committed
+# lockfile in .github/sbom/ with `npm ci`, so it and every transitive
+# dependency are pinned with integrity hashes.
 
 on:
   push:
@@ -18,8 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      sbom-sha256: ${{ steps.hash.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -31,14 +35,49 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Install pinned SBOM generator
+        run: npm ci --prefix .github/sbom --ignore-scripts --omit=optional --no-audit --no-fund
+
       - name: Generate CycloneDX SBOM
-        run: npx --yes @cyclonedx/cyclonedx-npm@4.2.1 --output-format JSON --output-file sbom.json
+        # Reads pnpm-lock.yaml; recurse (default) covers every workspace package.
+        run: >-
+          .github/sbom/node_modules/.bin/cdxgen
+          --type js
+          --no-install-deps
+          --output sbom.json
+          .
+
+      - name: Verify SBOM
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          let bom;
+          try {
+            bom = JSON.parse(fs.readFileSync('sbom.json', 'utf8'));
+          } catch (err) {
+            console.error(`sbom.json is missing or not valid JSON: ${err.message}`);
+            process.exit(1);
+          }
+          const components = bom.components || [];
+          const workspace = (bom.metadata?.component?.components || []).map((c) => (c.group ? `${c.group}/` : '') + c.name);
+          const names = new Set(components.map((c) => (c.group ? `${c.group}/` : '') + c.name));
+          console.log(`bomFormat: ${bom.bomFormat} ${bom.specVersion}`);
+          console.log(`SBOM components: ${components.length}`);
+          console.log(`Workspace packages: ${workspace.length} (${workspace.join(', ')})`);
+          const problems = [];
+          if (bom.bomFormat !== 'CycloneDX') problems.push('bomFormat is not CycloneDX');
+          if (components.length < 50) problems.push(`only ${components.length} components (expected >= 50)`);
+          if (workspace.length === 0) problems.push('no workspace packages recorded');
+          if (!names.has('@modelcontextprotocol/sdk')) problems.push('@modelcontextprotocol/sdk not found');
+          if (problems.length) {
+            console.error(`SBOM looks incomplete: ${problems.join('; ')}`);
+            process.exit(1);
+          }
+          EOF
 
       - name: Hash SBOM artifact
-        id: hash
         run: |
           SBOM_SHA=$(sha256sum sbom.json | awk '{print $1}')
-          echo "sha256=${SBOM_SHA}" >> "$GITHUB_OUTPUT"
           echo "SBOM SHA-256: ${SBOM_SHA}"
 
       - name: Upload SBOM artifact
@@ -56,6 +95,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high

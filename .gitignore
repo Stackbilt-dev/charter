@@ -14,6 +14,8 @@ plans/
 
 # npm lockfile — this repo uses pnpm (pnpm-lock.yaml); ignore npm-generated lockfile
 package-lock.json
+# ...except the lock for the pinned SBOM generator used by supply-chain.yml
+!.github/sbom/package-lock.json
 
 # local telemetry artifacts (root and per-package)
 .charter/telemetry/
