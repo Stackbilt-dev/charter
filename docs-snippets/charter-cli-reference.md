@@ -83,7 +83,7 @@ npx charter setup --preset fullstack --ci github --yes
 
 Setup-specific options:
 
-- `--ci github` — generate GitHub Actions governance workflow
+- `--ci github` — generate the GitHub Actions governance workflow (`.github/workflows/charter-governance.yml`). An existing workflow is refreshed only when it matches a Charter-generated version and the refresh widens no CI permissions or triggers; otherwise it is kept with a warning, and `--force` replaces it after backing it up to `.charter/.backup/`
 - `--preset <worker|frontend|backend|fullstack>` — stack preset
 - `--detect-only` — preview detection results without writing files
 - `--no-dependency-sync` — skip rewriting `@stackbilt/cli` devDependency

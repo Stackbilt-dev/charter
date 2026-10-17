@@ -23,6 +23,10 @@ import {
   syncPackageManifest,
 } from './setup';
 import { applyGovernanceWorkflow } from './github-workflow';
+import type { WorkflowKeepReason } from './github-workflow';
+
+/** The governance workflow as the #374 JSON fields and messages name it. */
+const WORKFLOW_FILE = '.github/workflows/charter-governance.yml';
 import {
   MANIFEST_SCAFFOLD,
   MANIFEST_DOCS_SCAFFOLD,
@@ -221,13 +225,16 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     for (const f of (setupResult.step.details.updated as string[] || [])) {
       console.log(`  Updated ${f}${f === '.mcp.json' && mcpBackup ? ` (backup: ${mcpBackup})` : ''}`);
     }
-    for (const r of (setupResult.step.details.replaced as Array<{ file: string; backup: string }> | undefined) ?? []) {
-      console.log(`  Replaced ${r.file} (backup: ${r.backup})`);
+    for (const r of (setupResult.step.details.replaced as Array<{ file: string; backup: string; widens?: string[] }> | undefined) ?? []) {
+      const widened = r.widens && r.widens.length > 0 ? `; widened ${r.widens.join('; ')}` : '';
+      console.log(`  Replaced ${r.file} (backup: ${r.backup}${widened})`);
+    }
+    for (const n of (setupResult.step.details.notReplaced as Array<{ file: string }> | undefined) ?? []) {
+      console.log(`  Not replaced ${n.file} (backup failed; see warning)`);
     }
     // #369: bootstrap never overwrites .charter/; name what it kept rather than claiming it created it.
-    // A kept hand-edited workflow (#374) is named by its own warning instead.
-    const workflowFile = path.join('.github', 'workflows', 'charter-governance.yml');
-    const kept = ((setupResult.step.details.kept as string[] | undefined) ?? []).filter(f => f !== workflowFile);
+    // A kept workflow (#374) is named by its own warning instead.
+    const kept = ((setupResult.step.details.kept as string[] | undefined) ?? []).filter(f => f !== WORKFLOW_FILE);
     if (kept.length > 0) console.log(`  Kept existing ${kept.join(', ')} (not overwritten; 'charter init --force' replaces them, with a backup)`);
     // Setup's warnings — such as the stale absolute --ai-dir in .mcp.json — are
     // printed by completePhase, in this same position (#304, #307).
@@ -623,7 +630,10 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
   const resetNone = scaffoldMode === 'reset'
     && ((adfResult.step.details.notReset as unknown[] | undefined)?.length ?? 0) > 0
     && ((adfResult.step.details.replaced as unknown[] | undefined)?.length ?? 0) === 0;
-  return resetNone ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+  // --force that could not replace the workflow because its backup failed exits 1,
+  // as an all-failed --reset-adf and `charter init --force` / `setup --force` do (#374).
+  const workflowNotReplaced = ((setupResult.step.details.notReplaced as unknown[] | undefined)?.length ?? 0) > 0;
+  return resetNone || workflowNotReplaced ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
 }
 
 // ============================================================================
@@ -733,8 +743,9 @@ function runSetupPhase(
   const created: string[] = [];
   const updated: string[] = [];
   const kept: string[] = [];
-  const replaced: Array<{ file: string; backup: string }> = [];
-  const notReplaced: Array<{ file: string; detail: string }> = [];
+  const replaced: Array<{ file: string; backup: string; reason: WorkflowKeepReason; widens?: string[] }> = [];
+  const notReplaced: Array<{ file: string; detail: string; reason: WorkflowKeepReason }> = [];
+  let workflowDetails: Record<string, unknown> | undefined;
   let mcpBackup: string | undefined;
 
   try {
@@ -760,27 +771,37 @@ function runSetupPhase(
     // Generate CI workflow if requested
     if (ciTarget === 'github') {
       const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
-      // #374: refresh only a Charter-generated workflow; a hand-edited one is
-      // kept, or under --force backed up to .charter/.backup/ and replaced.
+      // #374: refresh only a Charter-generated workflow whose refresh widens
+      // nothing; any other one is kept, or under --force backed up to
+      // .charter/.backup/ and replaced. created/updated keep the platform
+      // separator they always had; the #374 fields use '/', as backups do.
+      const workflowFile = WORKFLOW_FILE;
       const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
         force,
         configDir: options.configPath,
-        forceHint: "'charter bootstrap --ci github --force'",
+        command: 'bootstrap',
       });
       if (workflow.action === 'created') {
         created.push(workflowPath);
       } else if (workflow.action === 'updated') {
         updated.push(workflowPath);
       } else if (workflow.action === 'kept') {
-        kept.push(workflowPath);
+        kept.push(workflowFile);
         warnings.push(workflow.warning);
       } else if (workflow.action === 'replaced') {
-        replaced.push({ file: workflowPath, backup: workflow.backup });
+        replaced.push({ file: workflowFile, backup: workflow.backup, reason: workflow.reason, ...(workflow.widens ? { widens: workflow.widens } : {}) });
         if (workflow.warning) warnings.push(workflow.warning);
       } else if (workflow.action === 'not-replaced') {
-        notReplaced.push({ file: workflowPath, detail: workflow.warning });
+        notReplaced.push({ file: workflowFile, detail: workflow.warning, reason: workflow.reason });
         warnings.push(workflow.warning);
       }
+      workflowDetails = {
+        file: workflowFile,
+        action: workflow.action,
+        ...('reason' in workflow ? { reason: workflow.reason } : {}),
+        ...('widens' in workflow && workflow.widens ? { widens: workflow.widens } : {}),
+        ...(workflow.action === 'replaced' ? { backup: workflow.backup } : {}),
+      };
     }
 
     // Sync package.json scripts + devDependency
@@ -813,6 +834,7 @@ function runSetupPhase(
           kept,
           ...(replaced.length > 0 ? { replaced } : {}),
           ...(notReplaced.length > 0 ? { notReplaced } : {}),
+          ...(workflowDetails ? { workflow: workflowDetails } : {}),
           ...(mcpBackup ? { mcpBackup } : {}),
         },
         warnings,

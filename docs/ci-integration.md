@@ -10,6 +10,18 @@ charter setup --ci github --yes
 
 This writes `.github/workflows/charter-governance.yml` to your repo.
 
+### Re-running setup or bootstrap
+
+Re-running `charter setup --ci github` or `charter bootstrap --ci github` never silently overwrites a workflow you changed, and never silently widens what CI may do ([#374](https://github.com/Stackbilt-dev/charter/issues/374)):
+
+- **Missing:** the workflow is created.
+- **Identical to the current template:** left alone.
+- **A workflow Charter generated, with the same permissions:** refreshed to the current template. This covers switching between the npm and pnpm forms, and copies that differ only in a BOM, CRLF line endings, trailing whitespace or a pinned `@stackbilt/cli@x.y.z` version (a pin is treated as template text, so a pin you changed by hand is refreshed).
+- **An older Charter template whose refresh would widen permissions:** kept, with a warning. Templates before the score-badge steps ran on `pull_request` only with `permissions: contents: read`. The current template has `contents: write`, also runs on `push` to `main`/`master` and on `workflow_dispatch`, and has a step that commits `.charter/badge.json` and runs `git push`. Upgrading therefore grants the workflow's `GITHUB_TOKEN` write access, and on a protected default branch the push step fails unless the token may push. Review that, then run the command again with `--force` to upgrade.
+- **Edited by hand:** kept byte for byte, with a warning.
+
+With `--force`, a kept workflow is first copied to `.charter/.backup/github-workflows-charter-governance.yml.<timestamp>` (gitignored), then replaced. The output names the backup and, when it applies, what widened. If the backup fails, the workflow is not replaced and the command exits 1. To replace only the workflow without the rest of `--force`, delete it and re-run.
+
 ## What the Workflow Does
 
 On every push and pull request, the CI workflow runs:

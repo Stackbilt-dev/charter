@@ -12,7 +12,8 @@ import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { initExitCode, initializeCharter, printInitChanges, type StackPreset } from './init';
-import { applyGovernanceWorkflow, isKnownCharterWorkflow } from './github-workflow';
+import { applyGovernanceWorkflow, canRefreshSilently } from './github-workflow';
+import type { WorkflowKeepReason } from './github-workflow';
 import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -107,7 +108,7 @@ export interface SetupResult {
   initialized: boolean;
   /** .charter/ files replaced under --force, each backed up first (#369). */
   replaced?: Array<{ file: string; backup: string }>;
-  /** .charter/ files --force did not replace because the backup failed (#369). */
+  /** Files --force did not replace because the backup failed: .charter/ templates (#369) and the CI workflow (#374). */
   notReplaced?: Array<{ file: string; detail: string }>;
   /** Non-fatal .charter/ write problems (e.g. a .backup/.gitignore that could not be written), when any (#369). */
   warnings?: string[];
@@ -119,11 +120,17 @@ export interface SetupResult {
     path?: string;
     created?: boolean;
     updated?: boolean;
-    /** A hand-edited workflow left as is: no --force, or its backup failed (#374). */
+    /** An existing workflow left as is without --force (#374); `reason` says why. */
     kept?: boolean;
-    /** Where a hand-edited workflow was backed up before --force replaced it (#374). */
+    /** --force did not replace it because the backup failed; setup exits 1 (#374). */
+    notReplaced?: boolean;
+    /** Why it was kept or replaced: hand-edited, or an older template whose refresh would widen CI permissions (#374). */
+    reason?: WorkflowKeepReason;
+    /** What the refresh would widen, or widened (#374). */
+    widens?: string[];
+    /** Where the workflow was backed up before --force replaced it (#374). */
     backup?: string;
-    /** Why the workflow was kept, or a .backup/.gitignore problem (#374). */
+    /** Why the workflow was kept or not replaced, or a .backup/.gitignore problem (#374). */
     warning?: string;
   };
   scripts: {
@@ -352,26 +359,35 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     },
   };
 
+  let workflowNotReplaced = false;
   if (ciMode === 'github') {
-    // #374: refresh only a Charter-generated workflow; a hand-edited one is
-    // kept, or under --force backed up to .charter/.backup/ and replaced.
+    // #374: refresh only a Charter-generated workflow whose refresh widens
+    // nothing; any other one is kept, or under --force backed up to
+    // .charter/.backup/ and replaced.
     const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
       force,
       configDir: options.configPath,
-      forceHint: "'charter setup --ci github --force'",
+      command: 'setup',
     });
     const created = workflow.action === 'created';
     const updated = workflow.action === 'updated' || workflow.action === 'replaced';
+    workflowNotReplaced = workflow.action === 'not-replaced';
 
     result.workflow = {
       mode: 'github',
       path: workflowPath,
       created,
       updated,
-      ...(workflow.action === 'kept' || workflow.action === 'not-replaced' ? { kept: true } : {}),
+      ...(workflow.action === 'kept' ? { kept: true } : {}),
+      ...(workflow.action === 'not-replaced' ? { notReplaced: true } : {}),
+      ...('reason' in workflow ? { reason: workflow.reason } : {}),
+      ...('widens' in workflow && workflow.widens ? { widens: workflow.widens } : {}),
       ...(workflow.action === 'replaced' ? { backup: workflow.backup } : {}),
       ...('warning' in workflow && workflow.warning ? { warning: workflow.warning } : {}),
     };
+    if (workflow.action === 'not-replaced') {
+      result.notReplaced = [...(result.notReplaced ?? []), { file: workflowPath.split(path.sep).join('/'), detail: workflow.warning }];
+    }
     result.appliedMutations.workflow = {
       action: created ? 'create' : updated ? 'update' : 'noop',
       path: workflowPath.replace(/\\/g, '/'),
@@ -390,7 +406,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (options.format === 'json') {
     const jsonResult = hasAiManifest ? result : { ...result, suggestion: 'bootstrap' };
     console.log(JSON.stringify(jsonResult, null, 2));
-    return initExitCode(initResult);
+    return workflowNotReplaced ? EXIT_CODE.POLICY_VIOLATION : initExitCode(initResult);
   }
 
   console.log('  Governance guardrails are now active for this repo.');
@@ -412,12 +428,16 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     const workflowState = result.workflow.created
       ? 'enabled'
       : result.workflow.backup
-        ? `replaced, backup: ${result.workflow.backup}`
+        ? `replaced, backup: ${result.workflow.backup}${result.workflow.widens ? `; widened ${result.workflow.widens.join('; ')}` : ''}`
         : result.workflow.updated
           ? 'updated'
-          : result.workflow.kept
-            ? 'kept (not the Charter template)'
-            : 'already present';
+          : result.workflow.notReplaced
+            ? 'not replaced (backup failed)'
+            : result.workflow.kept
+              ? result.workflow.reason === 'would-widen-permissions'
+                ? 'kept (refreshing it would widen CI permissions)'
+                : 'kept (not the Charter template)'
+              : 'already present';
     console.log(`  CI policy gate: ${workflowState} (${result.workflow.path})`);
     if (result.workflow.warning) console.log(`  Warning: ${result.workflow.warning}`);
   }
@@ -458,7 +478,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   }
 
   // --force with every needed backup failed replaced nothing: exit 1, as charter init --force does.
-  return initExitCode(initResult);
+  // A workflow --force could not replace because its backup failed also exits 1 (#374).
+  return workflowNotReplaced ? EXIT_CODE.POLICY_VIOLATION : initExitCode(initResult);
 }
 
 export function detectStack(contexts: PackageContext[]): DetectionResult {
@@ -1018,7 +1039,7 @@ function hashFileIfExists(targetPath: string): string | null {
   return createHash('sha256').update(content).digest('hex');
 }
 
-/** What applyGovernanceWorkflow will do: a hand-edited file is updated only under --force (#374). */
+/** What applyGovernanceWorkflow will do: a hand-edited or widening file is updated only under --force (#374). */
 function planManagedFile(targetPath: string, content: string, force: boolean): { action: 'create' | 'update' | 'noop' } {
   const absolute = path.resolve(targetPath);
   const exists = fs.existsSync(absolute);
@@ -1031,7 +1052,7 @@ function planManagedFile(targetPath: string, content: string, force: boolean): {
   if (current === content) {
     return { action: 'noop' };
   }
-  return { action: force || isKnownCharterWorkflow(current, content) ? 'update' : 'noop' };
+  return { action: force || canRefreshSilently(current, content) ? 'update' : 'noop' };
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
