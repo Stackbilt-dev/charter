@@ -4,5 +4,8 @@
   "description": "Pinned SBOM generator for the Supply Chain workflow.",
   "dependencies": {
     "@cyclonedx/cdxgen": "12.8.5"
+  },
+  "overrides": {
+    "undici": "7.29.1"
   }
 }
