@@ -20,7 +20,7 @@ import { countExtractable } from './adf-tidy';
 import { legacyIndexEntries, legacyIndexKind, readVendorRecord, resolveVendorMode, resolveVendorModes, VENDOR_FILES, vendorFileGroups } from './adf-vendor';
 import type { ModeSource, VendorEntryProblem, VendorFile, VendorMode } from './adf-vendor';
 import { checkGateEnforcement, checkPreCommitScope } from './doctor-gate-enforcement';
-import { HOOK_SCOPED_DOCTOR_ENV, HOOK_SCOPED_DOCTOR_FILE } from './hook-scope';
+import { HOOK_SCOPED_DOCTOR_ENV, hookScopeFileName } from './hook-scope';
 import { findMissingDefaultLoad, formatMissingDefaultLoad, REQUIRED_DEFAULT_LOAD_MODULES } from './adf-wiring';
 
 interface DoctorResult {
@@ -404,16 +404,18 @@ function resolveBloatScope(args: string[]): BloatScope | null {
 /**
  * True only while the generated pre-commit hook runs verify:adf, after its own
  * doctor --staged has checked vendor bloat for this commit. The hook sets
- * HOOK_SCOPED_DOCTOR_ENV to a token and writes the same token to
- * HOOK_SCOPED_DOCTOR_FILE in the git dir, removing it when the hook exits. Both
+ * HOOK_SCOPED_DOCTOR_ENV to a token and writes the same token to its own file,
+ * hookScopeFileName(token), in the git dir, removing it when the hook exits. Both
  * must match: the variable alone (say, left in a CI environment) does nothing,
- * and while it is unset git is not even asked. Only the bloat check is affected.
+ * a value that is not a hook token never becomes a path, and while the variable
+ * is unset git is not even asked. Only the bloat check is affected.
  */
 function hookAlreadyCheckedBloat(): boolean {
   const token = process.env[HOOK_SCOPED_DOCTOR_ENV]?.trim();
-  if (!token) return false;
+  const name = token ? hookScopeFileName(token) : undefined;
+  if (!token || !name) return false;
   try {
-    const file = runGit(['rev-parse', '--git-path', HOOK_SCOPED_DOCTOR_FILE]).trim();
+    const file = runGit(['rev-parse', '--git-path', name]).trim();
     return fs.readFileSync(file, 'utf-8').trim() === token;
   } catch {
     return false;

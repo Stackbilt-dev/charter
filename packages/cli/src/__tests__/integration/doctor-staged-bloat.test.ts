@@ -195,7 +195,9 @@ describe('doctor --staged', () => {
 
 describe(`${HOOK_SCOPED_DOCTOR_ENV}: the hook's verify:adf run leaves bloat to the scoped gate`, () => {
   const TOKEN = '4242-1700000000';
-  const tokenFile = (): string => path.join(tmp, '.git', HOOK_SCOPED_DOCTOR_FILE);
+  const OTHER = '4243-1700000001';
+  /** The per-run file for a token (the hook names it after the token). */
+  const tokenFile = (token: string = TOKEN): string => path.join(tmp, '.git', `${HOOK_SCOPED_DOCTOR_FILE}-${token}`);
   const UNSCOPED_WARN = { name: 'adf vendor bloat', status: 'WARN', details: `Vendor file bloat detected:\n    ${CLAUDE_BLOAT}\n    ${GEMINI_BLOAT}\n    Run: charter adf tidy --dry-run` };
 
   async function withEnv<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
@@ -221,14 +223,21 @@ describe(`${HOOK_SCOPED_DOCTOR_ENV}: the hook's verify:adf run leaves bloat to t
     }
   }
 
-  it.each([
-    ['set to 1 with no token file (a CI misconfiguration)', '1', null],
-    ['set to the token with no token file', TOKEN, null],
-    ['set, with a token file holding a different token (a stale file)', '1', TOKEN],
-    ['unset, with a token file present', undefined, TOKEN],
-  ])('%s: full strictness, exactly as without it', async (_label, value, fileToken) => {
+  it.each<[string, string | undefined, Array<[string, string]>]>([
+    ['set to 1 with no token file (a CI misconfiguration)', '1', []],
+    ['set to the token with no token file', TOKEN, []],
+    ['set to the token, with only another run\'s file present', TOKEN, [[`${HOOK_SCOPED_DOCTOR_FILE}-${OTHER}`, OTHER]]],
+    ['set to the token, with its file holding a different token', TOKEN, [[`${HOOK_SCOPED_DOCTOR_FILE}-${TOKEN}`, OTHER]]],
+    ['set to the token, with only the old shared file name holding it', TOKEN, [[HOOK_SCOPED_DOCTOR_FILE, TOKEN]]],
+    ['set to a path-like value whose target holds it', '../x', [['../x', '../x'], [`${HOOK_SCOPED_DOCTOR_FILE}-../x`, '../x']]],
+    ['unset, with a token file present', undefined, [[`${HOOK_SCOPED_DOCTOR_FILE}-${TOKEN}`, TOKEN]]],
+  ])('%s: full strictness, exactly as without it', async (_label, value, files) => {
     const baseline = await withEnv(undefined, () => doctor(['--adf-only']));
-    if (fileToken !== null) fs.writeFileSync(tokenFile(), `${fileToken}\n`);
+    for (const [name, content] of files) {
+      const p = path.join(tmp, '.git', name);
+      if (name.includes('/')) fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, `${content}\n`);
+    }
     const r = await withEnv(value, () => doctorWithStderr(['--adf-only']));
     expect(r.code).toBe(EXIT_CODE.POLICY_VIOLATION);
     expect(bloatRows(r.checks)).toEqual([UNSCOPED_WARN]);
@@ -246,6 +255,16 @@ describe(`${HOOK_SCOPED_DOCTOR_ENV}: the hook's verify:adf run leaves bloat to t
       details: `${BLOAT_SCOPE_MSG.hookChecked}\n    ${BLOAT_SCOPE_MSG.hookCheckedFound}\n    ${CLAUDE_BLOAT}\n    ${GEMINI_BLOAT}`,
     }]);
     expect(r.stderr).toEqual([BLOAT_SCOPE_MSG.hookCheckedStderr]);
+  });
+
+  it('two hook runs\' files side by side: each token relaxes with its own file, and loses it when only that file goes', async () => {
+    fs.writeFileSync(tokenFile(TOKEN), `${TOKEN}\n`);
+    fs.writeFileSync(tokenFile(OTHER), `${OTHER}\n`);
+    expect((await withEnv(TOKEN, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.SUCCESS);
+    expect((await withEnv(OTHER, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.SUCCESS);
+    fs.rmSync(tokenFile(OTHER));
+    expect((await withEnv(TOKEN, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.SUCCESS);
+    expect((await withEnv(OTHER, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.POLICY_VIOLATION);
   });
 
   it('with the matching token file, every other WARN (malformed VENDORS, missing default module) still fails --ci', async () => {

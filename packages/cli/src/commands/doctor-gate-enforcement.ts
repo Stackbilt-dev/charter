@@ -50,14 +50,18 @@ interface PreCommitScopeCheck {
 
 export const DOCTOR_OLD_PRE_COMMIT_MSG = 'The Charter pre-commit hook at {hookPath} predates staged-only tidy: it tidies every vendor file and re-stages all of .ai/*.adf, which can sweep unrelated edits into a commit. Re-run: charter hook install --pre-commit';
 export const DOCTOR_UNSCOPED_GATE_MSG = 'The Charter pre-commit hook at {hookPath} predates the commit-scoped evidence gate: it blocks a commit on vendor bloat in files the commit does not include, and in files its tidy step skipped. Re-run: charter hook install --pre-commit';
-export const DOCTOR_VERIFY_ADF_GATE_MSG = 'The Charter pre-commit hook at {hookPath} predates the commit-scoped gate for repos with a verify:adf script: there it runs pnpm run verify:adf instead, whose doctor blocks a commit on vendor bloat in files the commit does not include, and which fails where pnpm is not installed. Re-run: charter hook install --pre-commit';
+export const DOCTOR_VERIFY_ADF_GATE_MSG = 'The Charter pre-commit hook at {hookPath} predates the commit-scoped gate for repos with a verify:adf script, as this one has: it runs pnpm run verify:adf in place of that gate, so its doctor blocks a commit on vendor bloat in files the commit does not include, and the gate fails where pnpm is not installed. Re-run: charter hook install --pre-commit';
 
 /**
  * INFO when the active pre-commit hook is a Charter-generated one from before
  * #320 (it carries PRE_COMMIT_HOOK_MARKER but not PRE_COMMIT_SCOPE_MARKER), or
- * from #320 but before #357 (no PRE_COMMIT_GATE_SCOPE_MARKER), or from #360,
- * which left the gate unscoped in repos with a verify:adf script (no
- * PRE_COMMIT_VERIFY_SCOPE_MARKER).
+ * from #320 but before #357 (no PRE_COMMIT_GATE_SCOPE_MARKER), or from #360
+ * (no PRE_COMMIT_VERIFY_SCOPE_MARKER) in a repo whose package.json has a
+ * verify:adf script. A #360 hook without that script already runs the scoped
+ * doctor and then adf evidence, exactly as the current hook does there, so it
+ * gets no row: there is nothing to fix. The script test is the hook's own
+ * (`grep '"verify:adf"' package.json` at the repo root), so the row appears as
+ * soon as the hook would take the unscoped path.
  * Undefined, so no row at all, for a current, foreign or missing hook.
  * INFO, not WARN: doctor --ci fails on WARN, and an old hook over-stages but
  * enforces nothing less, so warning would break CI on upgrade (#186).
@@ -68,7 +72,7 @@ export function checkPreCommitScope(): PreCommitScopeCheck | undefined {
   if (!content.includes(PRE_COMMIT_HOOK_MARKER)) return undefined;
   const message = !content.includes(PRE_COMMIT_SCOPE_MARKER) ? DOCTOR_OLD_PRE_COMMIT_MSG
     : !content.includes(PRE_COMMIT_GATE_SCOPE_MARKER) ? DOCTOR_UNSCOPED_GATE_MSG
-      : !content.includes(PRE_COMMIT_VERIFY_SCOPE_MARKER) ? DOCTOR_VERIFY_ADF_GATE_MSG
+      : !content.includes(PRE_COMMIT_VERIFY_SCOPE_MARKER) && repoHasVerifyAdfScript() ? DOCTOR_VERIFY_ADF_GATE_MSG
         : undefined;
   if (!message) return undefined;
   return {
@@ -76,6 +80,12 @@ export function checkPreCommitScope(): PreCommitScopeCheck | undefined {
     status: 'INFO',
     details: message.replace('{hookPath}', displayPath(hookPath)),
   };
+}
+
+/** The hook's own test: package.json at the repo root mentions "verify:adf". */
+function repoHasVerifyAdfScript(): boolean {
+  const repoRoot = getGitPath(['rev-parse', '--show-toplevel']) || process.cwd();
+  return readText(path.join(repoRoot, 'package.json')).includes('"verify:adf"');
 }
 
 function resolveHooksDir(): string {

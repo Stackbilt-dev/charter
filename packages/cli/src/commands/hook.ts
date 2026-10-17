@@ -269,16 +269,18 @@ if [ -f ".ai/manifest.adf" ]; then
     fi
     # The doctor inside verify:adf would re-check vendor bloat in every file. The
     # scoped doctor above has checked it for this commit, so verify:adf gets a
-    # one-time token, matched against a file in the git dir that is removed on
-    # exit: with both, doctor reports the bloat check as INFO. Every other check,
-    # and the rest of verify:adf, still blocks.
-    SCOPE_FILE=$(git rev-parse --git-path ${HOOK_SCOPED_DOCTOR_FILE})
+    # one-time token, matched against a file in the git dir named after it (one
+    # per hook run) and removed on exit: with both, doctor reports the bloat check
+    # as INFO. Every other check, and the rest of verify:adf, still blocks.
     SCOPE_TOKEN="$$-$(date +%s)"
+    SCOPE_FILE=$(git rev-parse --git-path "${HOOK_SCOPED_DOCTOR_FILE}-$SCOPE_TOKEN" 2>/dev/null) || SCOPE_FILE=""
     trap 'rm -f "$SCOPE_FILE"' EXIT
     trap 'rm -f "$SCOPE_FILE"; exit 1' HUP INT TERM
-    if printf '%s\\n' "$SCOPE_TOKEN" > "$SCOPE_FILE" 2>/dev/null; then
+    if [ -n "$SCOPE_FILE" ] && { printf '%s\\n' "$SCOPE_TOKEN" > "$SCOPE_FILE"; } 2>/dev/null; then
       ${HOOK_SCOPED_DOCTOR_ENV}="$SCOPE_TOKEN"
       export ${HOOK_SCOPED_DOCTOR_ENV}
+    else
+      echo "[pre-commit] Could not write the scope token in the git dir, so this time the doctor inside verify:adf checks vendor bloat in every file, as CI does."
     fi
     "$PM" run verify:adf || {
       echo ''

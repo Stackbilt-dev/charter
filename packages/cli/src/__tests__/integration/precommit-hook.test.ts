@@ -17,7 +17,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
 import { BLOAT_SCOPE_MSG } from '../../commands/doctor';
@@ -40,6 +40,10 @@ interface Repo {
   commit(message: string, env?: Record<string, string>): { status: number | null; output: string };
   /** Lines the failing pnpm shim logged: one per time the hook ran pnpm. */
   pnpmCalls(): string[];
+  /** A directory on the hook's PATH ahead of everything else. */
+  binDir: string;
+  /** Run the pre-commit hook alone (`git hook run`), asynchronously. */
+  runHook(env?: Record<string, string>, direct?: boolean): Promise<{ status: number | null; output: string }>;
 }
 
 /** Bootstrapped repos get this verify:adf, the one setup writes, with `charter` pointed at the shim. */
@@ -193,8 +197,22 @@ function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
     calls: () => fs.readFileSync(log, 'utf-8').split('\n').filter(Boolean),
     commit: (message, env = {}) => commit(tmp, message, { ...pathEnv, ...env }),
     pnpmCalls: () => fs.readFileSync(pnpmLog, 'utf-8').split(/\r?\n/).filter(Boolean),
+    binDir,
+    runHook: (env = {}, direct = false) => new Promise(resolve => {
+      // `git hook run` runs the hook as `git commit` would, without committing, so two can overlap.
+      // direct: plain `sh`, so binDir really comes first on PATH (git puts its own dirs ahead of it).
+      const [cmd, args] = direct ? ['sh', ['.githooks/pre-commit']] : ['git', ['hook', 'run', 'pre-commit']];
+      const child = spawn(cmd, args, { cwd: tmp, env: { ...process.env, ...GIT_ENV, ...pathEnv, ...env } });
+      let output = '';
+      child.stdout.on('data', (d: Buffer) => { output += d.toString(); });
+      child.stderr.on('data', (d: Buffer) => { output += d.toString(); });
+      child.on('close', status => resolve({ status, output }));
+    }),
   };
 }
+
+/** The hook's per-run scope token files left in the git dir. */
+const scopeFiles = (dir: string): string[] => fs.readdirSync(path.join(dir, '.git')).filter(n => n.startsWith(HOOK_SCOPED_DOCTOR_FILE));
 
 /** Only the tidy calls (the evidence gate after the block calls the CLI too). */
 const tidyCalls = (repo: Repo): string[] => repo.calls().filter(c => c.startsWith('adf tidy'));
@@ -513,7 +531,7 @@ ${DB_BLOAT}`);
       expect(output).toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
       expect(output).toContain('"name": "adf vendor bloat (checked by pre-commit hook)"');
       expect(repo.pnpmCalls()).toEqual([]);
-      expect(fs.existsSync(path.join(repo.dir, '.git', HOOK_SCOPED_DOCTOR_FILE))).toBe(false);
+      expect(scopeFiles(repo.dir)).toEqual([]);
     }
 
     /** The scoped doctor blocked, so nothing after it ran. */
@@ -747,7 +765,7 @@ ${DB_BLOAT}`);
       expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
       expect(result.output).toContain('  Run: npm run verify:adf (outside this hook');
       expect(repo.pnpmCalls()).toEqual([]);
-      expect(fs.existsSync(path.join(repo.dir, '.git', HOOK_SCOPED_DOCTOR_FILE))).toBe(false);
+      expect(scopeFiles(repo.dir)).toEqual([]);
       expect(head(repo.dir)).toBe(before);
     });
 
@@ -779,7 +797,7 @@ ${DB_BLOAT}`);
       expect(result.status).toBe(1);
       expect(repo.pnpmCalls()).toEqual(['pnpm run verify:adf']);
       expect(result.output).toContain('  Run: pnpm run verify:adf (outside this hook');
-      expect(fs.existsSync(path.join(repo.dir, '.git', HOOK_SCOPED_DOCTOR_FILE))).toBe(false);
+      expect(scopeFiles(repo.dir)).toEqual([]);
     });
 
     it('verify:adf run by hand, outside the hook, still blocks on the unstaged bloat (as CI does)', { timeout: 60000 }, () => {
@@ -794,6 +812,83 @@ ${DB_BLOAT}`);
       expect(r.stdout).toContain('"name": "adf vendor bloat"');
       expect(r.stdout).toContain('"status": "WARN"');
       expect(`${r.stdout}${r.stderr}`).not.toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
+    });
+
+    const SCOPE_NOTICE = '[pre-commit] Could not write the scope token in the git dir, so this time the doctor inside verify:adf checks vendor bloat in every file, as CI does.';
+
+    /** A `git` on the hook's PATH that answers the token's rev-parse its own way and passes everything else through. */
+    function shimGitPath(repo: Repo, answer: string): void {
+      const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf-8' }).trim();
+      fs.writeFileSync(path.join(repo.binDir, 'git'), [
+        '#!/bin/sh',
+        'case "$*" in',
+        `  "rev-parse --git-path ${HOOK_SCOPED_DOCTOR_FILE}-"*) ${answer} ;;`,
+        'esac',
+        `exec "${realGit}" "$@"`,
+        '',
+      ].join('\n'));
+      fs.chmodSync(path.join(repo.binDir, 'git'), 0o755);
+    }
+
+    it.each([
+      ['the token file cannot be written (its directory does not exist)', 'echo "/nonexistent-charter-dir/sub/token"; exit 0'],
+      ['git rev-parse --git-path fails', 'echo "fatal: simulated" >&2; exit 128'],
+    ])('when %s: one clear notice, no shell error, the hook carries on and verify:adf runs strict', { timeout: 60000 }, async (_label, answer) => {
+      const repo = writeHookFixtureRepo('verify-unwritable', { verifyAdf: { lockfile: 'package-lock.json' } });
+      shimGitPath(repo, answer);
+      withUnstagedGeminiBloat(repo.dir);
+      const before = head(repo.dir);
+
+      // Run directly under sh: git would put its own git ahead of the shim on the hook's PATH.
+      const result = await repo.runHook({}, true);
+
+      expect(result.output).toContain(SCOPE_NOTICE);
+      expect(result.output).not.toMatch(/cannot create|Directory nonexistent|No such file or directory|fatal: simulated/);
+      // The hook did not abort: verify:adf ran, and its doctor was strict, so the unstaged bloat blocks (as CI would).
+      expect(repo.calls()).toContain('doctor --adf-only --ci --format json');
+      expect(result.output).not.toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
+      expect(result.output).toContain('"name": "adf vendor bloat",');
+      expect(result.status).toBe(1);
+      expect(result.output).toContain('[pre-commit] ADF verification FAILED.');
+      expect(head(repo.dir)).toBe(before);
+      expect(scopeFiles(repo.dir)).toEqual([]);
+    });
+
+    it('two overlapping hook runs in one worktree each keep their own token file, and both relax', { timeout: 120000 }, async () => {
+      // verify:adf first sleeps for HOOK_TEST_DELAY_MS, then lists the scope files it can see.
+      const helperDir = makeTempDir('verify-overlap-helper');
+      const delay = path.join(helperDir, 'delay.cjs');
+      fs.writeFileSync(delay, [
+        `const fs = require('fs');`,
+        `setTimeout(() => {`,
+        `  const names = fs.readdirSync('.git').filter(n => n.startsWith(${JSON.stringify(HOOK_SCOPED_DOCTOR_FILE)}));`,
+        `  console.log('SCOPE FILES SEEN: ' + names.length);`,
+        `}, Number(process.env.HOOK_TEST_DELAY_MS || 0));`,
+        '',
+      ].join('\n'));
+      const repo = writeHookFixtureRepo('verify-overlap', {
+        verifyAdf: { lockfile: 'package-lock.json', script: `node "${posix(delay)}" && ${verifyAdfScript('{CLI}')}` },
+      });
+      withUnstagedGeminiBloat(repo.dir);
+
+      const slow = repo.runHook({ HOOK_TEST_DELAY_MS: '8000' });
+      // Start the second run only once the first has written its token file.
+      const deadline = Date.now() + 60000;
+      while (scopeFiles(repo.dir).length === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
+      expect(scopeFiles(repo.dir)).toHaveLength(1);
+      const fast = await repo.runHook();
+      // The fast run finished (its trap ran) while the slow one still sleeps: only the slow run's file remains.
+      expect(scopeFiles(repo.dir)).toHaveLength(1);
+      const slowResult = await slow;
+
+      expect(fast.output).toContain('SCOPE FILES SEEN: 2');
+      for (const r of [fast, slowResult]) {
+        expect(r.output).toContain(BLOAT_SCOPE_MSG.hookCheckedStderr);
+        expect(r.output).not.toContain(SCOPE_NOTICE);
+        expect(r.status).toBe(0);
+      }
+      expect(slowResult.output).toContain('SCOPE FILES SEEN: 1');
+      expect(scopeFiles(repo.dir)).toEqual([]);
     });
   });
 

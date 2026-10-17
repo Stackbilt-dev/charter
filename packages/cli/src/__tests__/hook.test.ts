@@ -353,16 +353,26 @@ fi
       expect(HOOK_360).toContain(PRE_COMMIT_GATE_SCOPE_MARKER);
       expect(HOOK_360).not.toContain(PRE_COMMIT_VERIFY_SCOPE_MARKER);
       writeHook(path.join(tempDir, '.git', 'hooks'), HOOK_360);
+      fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify({ scripts: { 'verify:adf': 'charter doctor --adf-only --ci' } }));
       const rows = (await doctorChecks()).filter(c => c.name === 'pre-commit hook');
       expect(rows).toEqual([{
         name: 'pre-commit hook',
         status: 'INFO',
-        details: 'The Charter pre-commit hook at .git/hooks/pre-commit predates the commit-scoped gate for repos with a verify:adf script: there it runs pnpm run verify:adf instead, whose doctor blocks a commit on vendor bloat in files the commit does not include, and which fails where pnpm is not installed. Re-run: charter hook install --pre-commit',
+        details: 'The Charter pre-commit hook at .git/hooks/pre-commit predates the commit-scoped gate for repos with a verify:adf script, as this one has: it runs pnpm run verify:adf in place of that gate, so its doctor blocks a commit on vendor bloat in files the commit does not include, and the gate fails where pnpm is not installed. Re-run: charter hook install --pre-commit',
       }]);
 
       vi.spyOn(console, 'log').mockImplementation(() => {});
       expect(await hookCommand(baseOptions, ['install', '--pre-commit'])).toBe(0);
       vi.restoreAllMocks();
+      expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
+    });
+
+    it.each([
+      ['no package.json', null],
+      ['a package.json without verify:adf', JSON.stringify({ scripts: { test: 'vitest' } })],
+    ])('#357: no row for a #360-era hook with %s (its gate is already scoped there)', async (_label, pkg) => {
+      writeHook(path.join(tempDir, '.git', 'hooks'), HOOK_360);
+      if (pkg !== null) fs.writeFileSync(path.join(tempDir, 'package.json'), pkg);
       expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
     });
 
@@ -377,7 +387,11 @@ fi
       expect(branchAt).toBeGreaterThan(doctorAt);
       expect(gate).toContain('    "$PM" run verify:adf || {');
       expect(gate).not.toContain('pnpm run verify:adf');
-      expect(gate).toContain(`SCOPE_FILE=$(git rev-parse --git-path ${HOOK_SCOPED_DOCTOR_FILE})`);
+      // One file per hook run, named after its token; a failing rev-parse never aborts the hook.
+      expect(gate).toContain(`SCOPE_FILE=$(git rev-parse --git-path "${HOOK_SCOPED_DOCTOR_FILE}-$SCOPE_TOKEN" 2>/dev/null) || SCOPE_FILE=""`);
+      // The braces put the redirection's own error under 2>/dev/null too.
+      expect(gate).toContain(`if [ -n "$SCOPE_FILE" ] && { printf '%s\\n' "$SCOPE_TOKEN" > "$SCOPE_FILE"; } 2>/dev/null; then`);
+      expect(gate).toContain('[pre-commit] Could not write the scope token in the git dir');
       expect(gate).toContain(`      ${HOOK_SCOPED_DOCTOR_ENV}="$SCOPE_TOKEN"\n      export ${HOOK_SCOPED_DOCTOR_ENV}\n`);
       expect(gate).toContain(`trap 'rm -f "$SCOPE_FILE"' EXIT`);
       expect(gate).toContain('    npx charter adf evidence --auto-measure --ci || {');
