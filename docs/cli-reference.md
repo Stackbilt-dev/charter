@@ -100,9 +100,10 @@ npx charter bootstrap --skip-install --skip-doctor            # minimal
 - `--security-sensitive` — generate `SECURITY.md`, seed hard-fail drift denies in `.charter/patterns/security-deny.json`, and warn in `doctor` when no `security*` or `l4*` test file exists
 - `--skip-install` — skip dependency installation phase
 - `--skip-doctor` — skip health check phase
-- `--force` — rewrite Charter thin pointers from the current template and replace `.mcp.json`'s `mcpServers.charter` entry (other keys are kept). For `.ai/*.adf` it **merges** the preset template instead of replacing it ([#354](https://github.com/Stackbilt-dev/charter/issues/354)): a file gains the whole template sections it lacks (for example `RULES`), and `manifest.adf` gains an entry, with the template's triggers, for each preset module it has no entry for. A section the file already has is never edited, so custom triggers, `RULES` lines, `METRICS` ceilings and constraints survive byte for byte, as do line endings and the trailing-newline state. Each edit is re-parsed before it is written; a file that cannot be parsed, or that the edit would change elsewhere, is left as is with a warning naming `--reset-adf`. Each file is reported as `Created`, `Merged … added …` or `Unchanged by merge:` (phase 6 may still fill a section that is exactly the template's text, and says so). `--force` never overwrites a hand-authored vendor file (one with no Charter marker), compiled output (the `adf compile` banner, or a file recorded `compiled`), or a file recorded `unmanaged`: each is skipped with a warning naming the next step. Vendor files are not backed up, so a hand-authored file is left for phase 4 to migrate into `.ai/` (with `--yes`).
+- `.charter/` — bootstrap creates each missing `.charter/` file (and `SECURITY.md` under `--security-sensitive`) and never overwrites an existing one, whatever `--yes`, `--force` or `--reset-adf` say ([#369](https://github.com/Stackbilt-dev/charter/issues/369)). Phase 2 prints `Created` only for files it wrote and names the ones it kept (`setup.details.kept` in JSON). Use [`charter init --force`](#charter-init) to replace them, with backups.
+- `--force` — rewrite Charter thin pointers from the current template and replace `.mcp.json`'s `mcpServers.charter` entry (other keys are kept). An existing, differing entry is replaced only under `--force`, never under `--yes` alone; `.mcp.json` is first copied to `.charter/.backup/mcp.json.<timestamp>` (gitignored), the phase-2 line reads `Updated .mcp.json (backup: …)` (`setup.details.mcpBackup` in JSON), and if the backup fails the entry is left as is with a warning. For `.ai/*.adf` it **merges** the preset template instead of replacing it ([#354](https://github.com/Stackbilt-dev/charter/issues/354)): a file gains the whole template sections it lacks (for example `RULES`), and `manifest.adf` gains an entry, with the template's triggers, for each preset module it has no entry for. A section the file already has is never edited, so custom triggers, `RULES` lines, `METRICS` ceilings and constraints survive byte for byte, as do line endings and the trailing-newline state. Each edit is re-parsed before it is written; a file that cannot be parsed, or that the edit would change elsewhere, is left as is with a warning naming `--reset-adf`. Each file is reported as `Created`, `Merged … added …` or `Unchanged by merge:` (phase 6 may still fill a section that is exactly the template's text, and says so). `--force` never overwrites a hand-authored vendor file (one with no Charter marker), compiled output (the `adf compile` banner, or a file recorded `compiled`), or a file recorded `unmanaged`: each is skipped with a warning naming the next step. Vendor files are not backed up, so a hand-authored file is left for phase 4 to migrate into `.ai/` (with `--yes`).
 - `--reset-adf` — replace each `.ai/*.adf` scaffold file (`manifest.adf`, `core.adf`, `state.adf` and the preset's modules) with the preset template. This is what `--force` did before 2.1. Each file is copied to `.ai/.backup/<name>.<timestamp>` first (a backup never overwrites an earlier one, and a file whose backup fails is not replaced), and `.ai/.backup/.gitignore` (`*`) keeps the backups out of git. Each replaced file is printed as `Replaced .ai/<file> (backup: …)`. After phase 6 a reset report lists, per file, what the backup holds that the file as the run left it does not: lost sections, lost items, changed `METRICS` rows, changed section decorations or weights, changed manifest entries (every `DEFAULT_LOAD`/`ON_DEMAND` section) and `VENDORS` entries not carried over (`adf-init.details.scaffolds[].lost` in JSON). If some backups fail, those files are kept and listed (`N of M file(s) not reset`, `details.notReset`); if all fail, bootstrap exits 1. It needs `--yes`, or a `y` at the interactive prompt that lists the files; otherwise (CI, pipes, `--format json`, or an `N`) bootstrap exits 1 and writes nothing to the project (`.ai/`, `.charter/` config, hooks, pointers, `.mcp.json`, `package.json`). The CLI's own gitignored usage log, `.charter/telemetry/events.ndjson`, is still appended, as after every command. It does not imply `--force`: pointers and `.mcp.json` are rewritten only when `--force` is passed too. Valid `VENDORS` entries are carried over to the replaced `manifest.adf`, and modules whose entries the template dropped are re-registered with their file stem as trigger.
-- `-y, --yes` — accept all prompts
+- `-y, --yes` — accept all prompts. It does not overwrite anything: before 2.1 it also replaced the `.charter/` templates and `.mcp.json`'s `mcpServers.charter` entry.
 
 **Phase 6 (populate).** Bootstrap fills `CONTEXT` (in `core.adf`, `backend.adf`, `frontend.adf`) only while it is absent, empty, or exactly the template's text, and `STATE` (in `state.adf`) only while it is empty or exactly the template's text (an absent `STATE` is not added), whatever `--yes` or `--force` say; any line of your own leaves it alone. Generated values are cleaned to one line (control characters removed, whitespace collapsed). A file whose edit fails the re-parse check is left as is and listed under `populate.details.refused`. Edits are made in place: only the filled section's lines (or an added `CONSTRAINTS` bullet) change, and line endings are kept. Each change is printed (`Filled CONTEXT in .ai/core.adf`). Before 2.1 it ran `adf populate --force` and replaced hand-written `CONTEXT`/`STATE` on every bootstrap. Run `charter adf populate --force` to overwrite them on purpose.
 
@@ -125,6 +126,7 @@ Setup-specific options:
 - `--preset <worker|frontend|backend|fullstack|docs|rust-wasm>` — stack preset
 - `--detect-only` — preview detection results without writing files
 - `--no-dependency-sync` — skip rewriting `@stackbilt/cli` devDependency
+- `--force` — replace existing `.charter/` templates the way [`charter init --force`](#charter-init) does, backing each up to `.charter/.backup/` first (`replaced` and `notReplaced` in JSON). Without it, setup creates missing `.charter/` files and keeps existing ones.
 
 ### charter init
 
@@ -133,7 +135,11 @@ Scaffolds the `.charter/` config directory without running the full setup workfl
 ```bash
 npx charter init
 npx charter init --preset worker
+npx charter init --force                      # replace existing templates (backed up first)
 ```
+
+- Without `--force` (with or without `--yes`), `init` creates each missing file (`config.json`, `patterns/blessed-stack.json`, `policies/governance.md`, `.gitignore`, and with `--security-sensitive` `patterns/security-deny.json` and `SECURITY.md`) and never overwrites one that exists. A kept `config.json` that lacks newer keys still works: defaults fill them when it is loaded. Before 2.1, `--yes` alone overwrote every template file without a backup ([#369](https://github.com/Stackbilt-dev/charter/issues/369)).
+- `--force` — replace each existing file that differs from the template. Each one is first copied to `.charter/.backup/<name>.<timestamp>` (`patterns/blessed-stack.json` becomes `patterns-blessed-stack.json.<timestamp>`; a backup never overwrites an earlier one), and `.charter/.backup/.gitignore` (`*`) keeps the backups out of git. A file whose backup fails is not replaced, and if none could be, `init` exits 1. Text output prints `Replaced <file> (backup: <path>)` per file. `--format json` adds `createdFiles`, `kept` (existing files that differ and were left as is), `replaced` (`{ file, backup }`) and `notReplaced` (`{ file, detail }`); the existing keys are unchanged.
 
 This writes `.charter/.gitignore`, which marks the local-only parts of `.charter/` — `.cache/`, `context.md`, and `telemetry/`. Everything else under `.charter/` (config, patterns, policies) is meant to be committed.
 
@@ -141,7 +147,7 @@ This writes `.charter/.gitignore`, which marks the local-only parts of `.charter
 
 `.charter/telemetry/events.ndjson` is per-machine usage data. Releases before the `telemetry/` ignore rule did not exclude it, so repos bootstrapped with an older CLI may already have it committed — where it grows with every command and conflicts on every merge between machines.
 
-Adding the ignore rule does **not** untrack a file that is already in the index. Re-running `charter init` or `charter bootstrap` updates `.charter/.gitignore`, but existing repos must also untrack the file once:
+Adding the ignore rule does **not** untrack a file that is already in the index. `charter init` and `charter bootstrap` keep an existing `.charter/.gitignore` as it is ([#369](https://github.com/Stackbilt-dev/charter/issues/369)), so add the `telemetry/` line by hand, or run `charter init --force` to replace it with the template (the old copy goes to `.charter/.backup/`). Existing repos must also untrack the file once:
 
 ```bash
 git rm -r --cached .charter/telemetry
@@ -348,13 +354,17 @@ Scaffolds `.ai/` directory with preset-aware modules. The scaffolded `core.adf` 
 ```bash
 npx charter adf init
 npx charter adf init --ai-dir ./context       # custom directory
-npx charter adf init --force                  # overwrite existing
+npx charter adf init --force                  # merge the template into existing files
+npx charter adf init --reset-adf --yes        # replace existing files (backed up first)
 npx charter adf init --emit-pointers          # generate thin pointer files
 npx charter adf init --module testing         # add a single module to existing .ai/
 ```
 
 - `--ai-dir <dir>` — custom directory path (default: `.ai`). Resolved to an absolute path at runtime.
-- `--force` — overwrite existing files. Without this flag, existing `.adf` files are skipped and reported; only the missing `manifest.adf` is written.
+- Without `--force` or `--reset-adf`, an existing `manifest.adf` makes `adf init` a no-op. When `manifest.adf` is missing, it is written and existing `.adf` files are skipped and reported.
+- `--force` — **merge** the preset template into existing files, exactly as [`bootstrap --force`](#charter-bootstrap) does ([#370](https://github.com/Stackbilt-dev/charter/issues/370)): missing scaffold files are created, a file gains the whole template sections it lacks (`manifest.adf` never gains `DEFAULT_LOAD`, `ON_DEMAND` or `VENDORS` sections as text), and `manifest.adf` gains an entry, with the template's triggers, for each preset module it has no entry for. A section the file already has is never edited, line endings are kept, and a second run changes nothing. A file the re-parse guard refuses is left as is with a warning naming `charter adf init --reset-adf --yes`. An existing `.adf.lock` is kept. Before 2.1, `--force` replaced every file with the template, without a backup.
+- `--reset-adf` — replace each scaffold file that differs from the template. It needs `--yes` or a `y` at the interactive prompt; otherwise (CI, pipes, `--format json`, or an `N`) `adf init` exits 1 and writes nothing. Each file is copied to `.ai/.backup/<name>.<timestamp>` first (gitignored by `.ai/.backup/.gitignore`); a file whose backup fails is not replaced, and if none could be, `adf init` exits 1. Each replaced file is printed as `Replaced .ai/<file> (backup: …)` followed by what it lost (sections, items, `METRICS` rows, manifest entries). Valid `VENDORS` entries are carried over.
+- `--format json` with `--force` or `--reset-adf` adds `mode`, `scaffolds` (one outcome per file, with the loss report), `replaced` (`{ file, backup }`) and `warnings`, plus `notReset`, `backupGitignore` and `resetAdf` under `--reset-adf`. `created` is `true` only when `manifest.adf` did not exist, and `files` lists only files this run wrote. A fresh directory's output is unchanged.
 - `--emit-pointers` — generate thin pointer files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`). The generated `CLAUDE.md` includes a `## Session Start` section with guidance to call the `charter_context` MCP tool at session start, giving agents the live constraint surface before any other action.
 - `--module <name>` — add a single module to existing `.ai/` (delegates to `adf create`)
 
@@ -1006,11 +1016,11 @@ npx charter surface --schema db/schema.sql          # explicit schema path
 | `--config <path>` | Path to `.charter/` directory (default: `.charter/`) |
 | `--format json` | Machine-readable output with stable schemas |
 | `--ci` | Non-interactive, deterministic exit codes |
-| `--yes` | Accept all prompts (for automation) |
+| `--yes` | Accept all prompts (for automation). It never means "overwrite": `bootstrap --yes` and `init --yes` keep existing `.charter/` files and `.mcp.json`'s charter entry |
 | `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`, `docs`) |
 | `--detect-only` | Setup mode: detect stack/preset and exit |
 | `--no-dependency-sync` | Setup mode: do not rewrite `@stackbilt/cli` devDependency |
-| `--force` | Overwrite existing files; what that covers depends on the command. `hook install --force` replaces a non-Charter hook. `bootstrap --force` rewrites Charter thin pointers and `.mcp.json`'s charter entry and merges `.ai/*.adf` (it never replaces them, and never overwrites a hand-authored or compiled vendor file; `bootstrap` never installs hooks). `adf init`, `adf create`, `adf populate` and `adf compile --write` document their own `--force` |
+| `--force` | Overwrite existing files; what that covers depends on the command. `hook install --force` replaces a non-Charter hook. `bootstrap --force` rewrites Charter thin pointers and `.mcp.json`'s charter entry (backing `.mcp.json` up to `.charter/.backup/` first) and merges `.ai/*.adf` (it never replaces them, never overwrites `.charter/` files, and never overwrites a hand-authored or compiled vendor file; `bootstrap` never installs hooks). `init --force` and `setup --force` replace `.charter/` templates, backing each up to `.charter/.backup/` first. `adf init --force` merges like `bootstrap --force`; `adf init --reset-adf` replaces. `adf create`, `adf populate` and `adf compile --write` document their own `--force` |
 
 ## Exit Codes
 

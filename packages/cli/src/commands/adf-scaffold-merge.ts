@@ -161,9 +161,12 @@ export function backupFile(source: string, backupDir: string, name: string, stam
   }
 }
 
-/** Keep `.ai/.backup/` out of git: a `.gitignore` inside it ignoring everything. */
-export function ensureBackupGitignore(aiDir: string): 'created' | 'present' | 'not-needed' {
-  const dir = path.join(aiDir, '.backup');
+/**
+ * Keep `<parentDir>/.backup/` out of git: a `.gitignore` inside it ignoring
+ * everything. Used for `.ai/.backup/` (#354) and `.charter/.backup/` (#369).
+ */
+export function ensureBackupGitignore(parentDir: string): 'created' | 'present' | 'not-needed' {
+  const dir = path.join(parentDir, '.backup');
   try {
     if (!fs.statSync(dir).isDirectory()) return 'not-needed';
   } catch {

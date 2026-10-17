@@ -125,7 +125,8 @@ Scaffolds `.ai/` directory with `manifest.adf`, `core.adf`, `state.adf`, and sta
 ```bash
 npx charter adf init
 npx charter adf init --ai-dir ./context    # custom directory
-npx charter adf init --force               # overwrite existing
+npx charter adf init --force               # merge the template into existing files
+npx charter adf init --reset-adf --yes     # replace existing files (backed up to .ai/.backup/)
 ```
 
 ### charter adf fmt

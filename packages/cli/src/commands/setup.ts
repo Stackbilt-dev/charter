@@ -104,6 +104,10 @@ ${installStep}
 export interface SetupResult {
   configPath: string;
   initialized: boolean;
+  /** .charter/ files replaced under --force, each backed up first (#369). */
+  replaced?: Array<{ file: string; backup: string }>;
+  /** .charter/ files --force did not replace because the backup failed (#369). */
+  notReplaced?: Array<{ file: string; detail: string }>;
   detected: DetectionResult;
   selectedPreset: StackPreset;
   inferenceMode: 'auto' | 'preset-override' | 'fallback-conservative';
@@ -256,6 +260,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
+  // #369: without --force each missing file is created and existing ones are kept;
+  // --force replaces a differing file only after backing it up to .charter/.backup/.
   const initResult = initializeCharter(options.configPath, explicitForce, {
     preset: selectedPreset,
     projectName: inferProjectName(contexts),
@@ -277,6 +283,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const result: SetupResult = {
     configPath: options.configPath,
     initialized: initResult.created,
+    ...(initResult.replaced.length > 0 ? { replaced: initResult.replaced } : {}),
+    ...(initResult.notReplaced.length > 0 ? { notReplaced: initResult.notReplaced } : {}),
     detected: detection,
     selectedPreset,
     inferenceMode,
@@ -371,6 +379,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   console.log('  Governance guardrails are now active for this repo.');
   console.log(`  Baseline path: ${result.configPath}`);
   console.log(`  Baseline created: ${result.initialized ? 'yes' : 'already present'}`);
+  for (const r of result.replaced ?? []) console.log(`  Replaced ${r.file} (backup: ${r.backup})`);
+  for (const n of result.notReplaced ?? []) console.log(`  Warning: ${n.detail}`);
   console.log(`  Stack preset: ${result.selectedPreset} (${result.inferenceMode})`);
   console.log(`  Detection confidence: ${result.detected.confidence}`);
   if (result.detected.mixedStack) {

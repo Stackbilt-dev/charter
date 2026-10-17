@@ -68,16 +68,28 @@ describe('charter adf init — scaffolding guard', () => {
     expect(fs.readFileSync(path.join(tmp, '.ai', 'core.adf'), 'utf-8')).toBe(customCore);
   });
 
-  it('overwrites existing core.adf with --force', async () => {
+  // #370: --force merges (never rewrites existing bytes); --reset-adf --yes replaces, with a backup.
+  it('overwrites existing core.adf with --reset-adf --yes, backing it up first', async () => {
     const tmp = makeTmp();
     fs.mkdirSync(path.join(tmp, '.ai'), { recursive: true });
     fs.writeFileSync(path.join(tmp, '.ai', 'core.adf'), 'custom content');
 
-    await adfCommand(DEFAULT_OPTIONS, ['init', '--force']);
+    const origLog = console.log;
+    console.log = () => undefined;
+    try {
+      await adfCommand(DEFAULT_OPTIONS, ['init', '--force']);
+      expect(fs.readFileSync(path.join(tmp, '.ai', 'core.adf'), 'utf-8')).toContain('custom content');
+
+      await adfCommand({ ...DEFAULT_OPTIONS, yes: true }, ['init', '--reset-adf', '--yes']);
+    } finally {
+      console.log = origLog;
+    }
 
     const written = fs.readFileSync(path.join(tmp, '.ai', 'core.adf'), 'utf-8');
     expect(written).not.toBe('custom content');
     expect(written).toContain('ADF: 0.1');
+    const backup = fs.readdirSync(path.join(tmp, '.ai', '.backup')).find(f => f.startsWith('core.adf.'));
+    expect(fs.readFileSync(path.join(tmp, '.ai', '.backup', backup!), 'utf-8')).toContain('custom content');
   });
 });
 

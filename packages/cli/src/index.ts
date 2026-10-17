@@ -47,8 +47,9 @@ Usage:
                                    Live session snapshot to .ai/context.adf + .ai/context.snapshot.json
   charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
-  charter init [--preset <worker|frontend|backend|fullstack>] [--guided]
-                                   Scaffold .charter/ config directory
+  charter init [--preset <worker|frontend|backend|fullstack>] [--guided] [--force]
+                                   Scaffold .charter/ config directory (creates missing files, keeps existing ones)
+                                   --force: replace existing templates, each backed up to .charter/.backup/ first
                                    --guided: interactive mode that asks about your stack
   charter validate [--range <revset>]
                                    Validate git commits for governance trailers
@@ -87,9 +88,11 @@ Options:
   --config <path>    Path to .charter/ directory (default: .charter/)
   --format <type>    Output format: text, json, markdown (default: text)
   --ci               CI mode: exit non-zero on WARN or FAIL
-  --yes              Non-interactive bootstrap; accept default actions
-  --force            Bootstrap: rewrite Charter thin pointers and .mcp.json's charter entry, and merge the preset
-                     template into .ai/*.adf (adds missing sections and modules; never replaces). Use --reset-adf to replace
+  --yes              Non-interactive bootstrap; accept default actions (never overwrites .charter/ or .mcp.json)
+  --force            Bootstrap: rewrite Charter thin pointers and .mcp.json's charter entry (backing .mcp.json up to
+                     .charter/.backup/), and merge the preset template into .ai/*.adf (adds missing sections and
+                     modules; never replaces; never overwrites .charter/). Use --reset-adf to replace .ai/.
+                     init/setup: replace .charter/ templates, each backed up first. adf init: see 'charter adf --help'
   --preset <name>    Stack preset: worker, frontend, backend, fullstack
   --detect-only      Setup only: print detected stack/preset and exit
   --no-dependency-sync

@@ -11,6 +11,7 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { getDefaultConfigJSON } from '../config';
+import { backupFile, ensureBackupGitignore } from './adf-scaffold-merge';
 
 export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack' | 'docs' | 'rust-wasm';
 
@@ -332,10 +333,20 @@ const SECURITY_DENY_PATTERNS = {
 };
 
 interface InitResult {
+  /** config.json was absent before this run. */
   created: boolean;
   configPath: string;
+  /** Every template file, relative to configPath. */
   files: string[];
   writesPerformed: number;
+  /** Files this run created because they were missing (#369). */
+  createdFiles: string[];
+  /** Existing files that differ from the template and were left as is (#369). */
+  kept: string[];
+  /** Files replaced under --force, each with its backup (#369). */
+  replaced: Array<{ file: string; backup: string }>;
+  /** Files --force did not replace because the backup failed (#369). */
+  notReplaced: Array<{ file: string; detail: string }>;
 }
 
 interface InitializeOptions {
@@ -351,7 +362,8 @@ interface InitializeOptions {
 }
 
 export async function initCommand(options: CLIOptions, args: string[] = []): Promise<number> {
-  const force = options.yes || args.includes('--force');
+  // #369: only --force replaces existing files (each backed up first); --yes alone never does.
+  const force = args.includes('--force');
   const guided = args.includes('--guided');
   const presetFlag = getFlag(args, '--preset');
   const preset = isValidPreset(presetFlag) ? presetFlag : undefined;
@@ -363,20 +375,28 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   }
 
   const result = initializeCharter(options.configPath, force, { preset, securitySensitive });
+  // Every file --force had to replace failed its backup: nothing was replaced.
+  const exitCode = result.notReplaced.length > 0 && result.replaced.length === 0 ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
-    return EXIT_CODE.SUCCESS;
+    return exitCode;
   }
 
   if (!result.created) {
-    console.log('');
-    console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
-    console.log('');
-    console.log('  Use --config <path> for a different location, or --force to overwrite templates.');
-    return EXIT_CODE.SUCCESS;
+    if (result.createdFiles.length > 0 || result.replaced.length > 0 || result.notReplaced.length > 0) {
+      printInitChanges(result);
+    } else {
+      console.log('');
+      console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
+      console.log('');
+      console.log('  Use --config <path> for a different location, or --force to replace the templates');
+      console.log('  (each replaced file is backed up to .charter/.backup/ first).');
+    }
+    return exitCode;
   }
 
+  printInitChanges(result, false);
   console.log('');
   console.log('  \u2713 Created .charter/ directory');
   console.log('');
@@ -396,21 +416,32 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   console.log('');
   console.log('  Docs: https://github.com/Stackbilt-dev/charter');
 
-  return EXIT_CODE.SUCCESS;
+  return exitCode;
 }
 
-export function initializeCharter(configDir: string, force: boolean, initOptions: InitializeOptions = {}): InitResult {
+/** Text lines for what initializeCharter did to files that already existed (#369). */
+export function printInitChanges(result: InitResult, includeCreated = true): void {
+  if (includeCreated) for (const f of result.createdFiles) console.log(`  Created ${f}`);
+  for (const r of result.replaced) console.log(`  Replaced ${r.file} (backup: ${r.backup})`);
+  for (const n of result.notReplaced) console.log(`  Warning: ${n.detail}`);
+  if (result.kept.length > 0) {
+    console.log(`  Kept existing ${result.kept.join(', ')} (not overwritten; use --force to replace, with a backup)`);
+  }
+}
+
+/**
+ * Write the .charter/ templates (#369).
+ *
+ * Without `replace`, each missing file is created and every existing file is
+ * kept byte-for-byte; `loadConfig` fills defaults for keys a kept config lacks.
+ * With `replace` (only `charter init --force` / `charter setup --force`), an
+ * existing file that differs from the template is first copied to
+ * `<configDir>/.backup/<name>.<timestamp>` (gitignored); a file whose backup
+ * fails is not replaced.
+ */
+export function initializeCharter(configDir: string, replace: boolean, initOptions: InitializeOptions = {}): InitResult {
   const configFile = path.join(configDir, 'config.json');
   const exists = fs.existsSync(configFile);
-
-  if (exists && !force) {
-    return {
-      created: false,
-      configPath: configDir,
-      files: [],
-      writesPerformed: 0,
-    };
-  }
 
   const dirs = [configDir, path.join(configDir, 'patterns'), path.join(configDir, 'policies')];
   for (const dir of dirs) {
@@ -419,39 +450,57 @@ export function initializeCharter(configDir: string, force: boolean, initOptions
 
   const selectedPreset = initOptions.preset || 'fullstack';
   const patterns = buildPatternTemplate(selectedPreset, initOptions.features);
-  let writesPerformed = 0;
-  if (writeIfChanged(configFile, getDefaultConfigJSON(initOptions.projectName) + '\n')) writesPerformed++;
-  if (writeIfChanged(path.join(configDir, 'patterns', 'blessed-stack.json'), JSON.stringify(patterns, null, 2) + '\n')) writesPerformed++;
-  if (writeIfChanged(path.join(configDir, 'policies', 'governance.md'), DEFAULT_POLICY_CONTENT)) writesPerformed++;
-  if (writeIfChanged(path.join(configDir, '.gitignore'), GITIGNORE_CONTENT)) writesPerformed++;
+  const templates: Array<{ name: string; target: string; content: string }> = [
+    { name: 'config.json', target: configFile, content: getDefaultConfigJSON(initOptions.projectName) + '\n' },
+    { name: 'patterns/blessed-stack.json', target: path.join(configDir, 'patterns', 'blessed-stack.json'), content: JSON.stringify(patterns, null, 2) + '\n' },
+    { name: 'policies/governance.md', target: path.join(configDir, 'policies', 'governance.md'), content: DEFAULT_POLICY_CONTENT },
+    { name: '.gitignore', target: path.join(configDir, '.gitignore'), content: GITIGNORE_CONTENT },
+  ];
   if (initOptions.securitySensitive) {
-    if (writeIfChanged(path.join(configDir, 'patterns', 'security-deny.json'), JSON.stringify(SECURITY_DENY_PATTERNS, null, 2) + '\n')) writesPerformed++;
-    if (writeIfChanged('SECURITY.md', SECURITY_TEMPLATE)) writesPerformed++;
+    templates.push(
+      { name: 'patterns/security-deny.json', target: path.join(configDir, 'patterns', 'security-deny.json'), content: JSON.stringify(SECURITY_DENY_PATTERNS, null, 2) + '\n' },
+      { name: '../SECURITY.md', target: 'SECURITY.md', content: SECURITY_TEMPLATE },
+    );
   }
 
-  return {
-    created: !exists,
-    configPath: configDir,
-    files: [
-      'config.json',
-      'patterns/blessed-stack.json',
-      'policies/governance.md',
-      '.gitignore',
-      ...(initOptions.securitySensitive ? ['patterns/security-deny.json', '../SECURITY.md'] : []),
-    ],
-    writesPerformed,
-  };
+  const label = (t: { name: string; target: string }) => t.name === '../SECURITY.md' ? 'SECURITY.md' : `${displayDir(configDir)}${t.name}`;
+  const backupDir = path.join(configDir, '.backup');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const result: InitResult = { created: !exists, configPath: configDir, files: templates.map(t => t.name), writesPerformed: 0, createdFiles: [], kept: [], replaced: [], notReplaced: [] };
+
+  for (const t of templates) {
+    if (!fs.existsSync(t.target)) {
+      fs.writeFileSync(t.target, t.content);
+      result.writesPerformed++;
+      result.createdFiles.push(label(t));
+      continue;
+    }
+    if (fs.readFileSync(t.target, 'utf-8') === t.content) continue;
+    if (!replace) {
+      result.kept.push(label(t));
+      continue;
+    }
+    let backupName: string;
+    try {
+      backupName = backupFile(t.target, backupDir, t.name.replace(/^\.\.\//, '').replace(/\//g, '-'), stamp);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result.notReplaced.push({ file: label(t), detail: `Could not back up ${label(t)} to ${displayDir(configDir)}.backup/ (${msg}); not replaced.` });
+      continue;
+    }
+    fs.writeFileSync(t.target, t.content);
+    result.writesPerformed++;
+    result.replaced.push({ file: label(t), backup: `${displayDir(configDir)}.backup/${backupName}` });
+  }
+  if (replace) ensureBackupGitignore(configDir);
+
+  return result;
 }
 
-function writeIfChanged(targetPath: string, content: string): boolean {
-  if (fs.existsSync(targetPath)) {
-    const existing = fs.readFileSync(targetPath, 'utf-8');
-    if (existing === content) {
-      return false;
-    }
-  }
-  fs.writeFileSync(targetPath, content);
-  return true;
+/** `configDir` as a display prefix with a trailing slash, e.g. `.charter/`. */
+function displayDir(configDir: string): string {
+  const dir = configDir.split(path.sep).join('/').replace(/\/+$/, '');
+  return dir === '' ? '' : `${dir}/`;
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
@@ -540,13 +589,18 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
     }
 
     if (!result.created) {
+      printInitChanges(result);
       console.log('');
       console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
       return EXIT_CODE.SUCCESS;
     }
 
-    // If auth governance was requested, add auth-specific patterns to governance.md
-    if (useAuth) {
+    // If auth governance was requested, add auth-specific patterns to governance.md:
+    // only to the template this run wrote, never to a kept hand-edited file (#369).
+    const policyLabel = `${displayDir(options.configPath)}policies/governance.md`;
+    const wrotePolicy = result.createdFiles.includes(policyLabel) || result.replaced.some(r => r.file === policyLabel);
+    printInitChanges(result, false);
+    if (useAuth && wrotePolicy) {
       const policyPath = path.join(options.configPath, 'policies', 'governance.md');
       if (fs.existsSync(policyPath)) {
         const existing = fs.readFileSync(policyPath, 'utf-8');

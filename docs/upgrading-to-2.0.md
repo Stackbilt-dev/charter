@@ -181,6 +181,12 @@ Each skipped file gets a warning naming the next step. That is `charter adf migr
 
 To replace a hand-authored file without migrating it, delete it and re-run bootstrap.
 
+From 2.1, `--yes` never means "overwrite" ([#369](https://github.com/Stackbilt-dev/charter/issues/369), [#370](https://github.com/Stackbilt-dev/charter/issues/370)):
+
+- `charter bootstrap` (with any flags) and `charter init --yes` keep existing `.charter/` files (`config.json`, `patterns/blessed-stack.json`, `policies/governance.md`, `.gitignore`, and `SECURITY.md`); each missing one is still created. To replace them, run `charter init --force`, which backs each replaced file up to `.charter/.backup/` first.
+- `bootstrap --yes` no longer replaces `.mcp.json`'s `mcpServers.charter` entry. `bootstrap --force` does, after backing `.mcp.json` up to `.charter/.backup/`.
+- `charter adf init --force` merges the template into `.ai/` like `bootstrap --force`. To replace the files, run `charter adf init --reset-adf --yes` (backups go to `.ai/.backup/`).
+
 ## `charter score` may go up
 
 A thin pointer used to score as "thin" (−5 and "Expand `CLAUDE.md` beyond a thin pointer") however much `.ai/` held. It now counts as substantive when the file `adf compile` would render for it is substantive. That file is compiled in memory and nothing is written. Hand-authored and compiled files are scored on their text as before. Scores can only rise. A committed `.charter/badge.json` may need `charter score --badge --write`.

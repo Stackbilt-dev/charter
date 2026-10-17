@@ -33,6 +33,10 @@ import {
   NAMED_MODULE_DEFAULT_TRIGGERS,
 } from './adf-named-scaffolds';
 import { PatchOperationArraySchema } from '../schemas/patch-ops';
+import { ensureBackupGitignore } from './adf-scaffold-merge';
+import type { ScaffoldMode } from './adf-scaffold-merge';
+import { gateReset, reportScaffoldRun, splitWritten, writeAdfScaffolds } from './adf-scaffold-write';
+import type { ResetConfirmation, ScaffoldSpec } from './adf-scaffold-write';
 
 // Re-export named-scaffold registry for programmatic consumers and tests.
 export {
@@ -395,8 +399,19 @@ export const POINTER_COPILOT_MD = `DO NOT modify this file. All project rules ar
 See .ai/manifest.adf for the module routing manifest.
 `;
 
-function adfInit(options: CLIOptions, args: string[]): number {
-  const force = args.includes('--force');
+/** adf init's scaffold set, manifest first (kept as is by #370; for rust-wasm it differs from bootstrap's). */
+function adfInitScaffolds(preset?: string): ScaffoldSpec[] {
+  const s = (name: string, content: string): ScaffoldSpec => ({ name, content });
+  const modules = preset === 'docs' ? [s('content.adf', CONTENT_SCAFFOLD), s('decisions.adf', DECISIONS_SCAFFOLD), s('planning.adf', PLANNING_SCAFFOLD)]
+    : preset === 'frontend' ? [s('frontend.adf', FRONTEND_SCAFFOLD)]
+    : preset === 'backend' || preset === 'worker' ? [s('backend.adf', BACKEND_SCAFFOLD)]
+    : [s('frontend.adf', FRONTEND_SCAFFOLD), s('backend.adf', BACKEND_SCAFFOLD)];
+  return [s('manifest.adf', manifestForPreset(preset)), s('core.adf', CORE_SCAFFOLD), s('state.adf', STATE_SCAFFOLD), ...modules];
+}
+
+async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
+  // #370: --force merges the template in (append-only); --reset-adf replaces, with backups.
+  const mode: ScaffoldMode = args.includes('--reset-adf') ? 'reset' : args.includes('--force') ? 'merge' : 'skip';
   const aiDir = getFlag(args, '--ai-dir') || '.ai';
   const moduleFlag = getFlag(args, '--module');
   const presetFlag = getFlag(args, '--preset');
@@ -412,7 +427,8 @@ function adfInit(options: CLIOptions, args: string[]): number {
     return adfCreate(options, [moduleFlag, '--ai-dir', aiDir]);
   }
 
-  if (fs.existsSync(manifestPath) && !force) {
+  const manifestExisted = fs.existsSync(manifestPath);
+  if (manifestExisted && mode === 'skip') {
     const result: AdfInitResult = { created: false, aiDir, files: [] };
     if (options.format === 'json') {
       console.log(JSON.stringify({ ...result, nextActions: ['charter adf fmt .ai/core.adf --check', 'charter adf bundle --task "<prompt>"'] }, null, 2));
@@ -420,43 +436,27 @@ function adfInit(options: CLIOptions, args: string[]): number {
       console.log('');
       console.log('  .ai/ directory already exists. Run \'charter doctor\' to check for issues.');
       console.log('');
-      console.log('  Use --force to overwrite existing files.');
+      console.log('  Use --force to merge the preset template in (adds missing files, sections and modules; never rewrites existing content),');
+      console.log('  or --reset-adf to replace the files with the template (each is backed up to .ai/.backup/ first).');
       console.log('  To add a single module: charter adf init --module <name>');
     }
     return EXIT_CODE.SUCCESS;
   }
 
-  fs.mkdirSync(aiDir, { recursive: true });
-  fs.writeFileSync(path.join(aiDir, 'manifest.adf'), manifestForPreset(presetFlag));
-
-  const createdFiles: string[] = ['manifest.adf'];
-  const skippedFiles: string[] = [];
-  const tryWrite = (name: string, scaffold: string): boolean => {
-    const fp = path.join(aiDir, name);
-    if (!fs.existsSync(fp) || force) { fs.writeFileSync(fp, scaffold); createdFiles.push(name); return true; }
-    skippedFiles.push(name); return false;
-  };
-
-  tryWrite('core.adf', CORE_SCAFFOLD);
-  tryWrite('state.adf', STATE_SCAFFOLD);
-
-  const moduleFiles: string[] = [];
-  if (presetFlag === 'docs') {
-    if (tryWrite('content.adf', CONTENT_SCAFFOLD)) moduleFiles.push('content.adf');
-    if (tryWrite('decisions.adf', DECISIONS_SCAFFOLD)) moduleFiles.push('decisions.adf');
-    if (tryWrite('planning.adf', PLANNING_SCAFFOLD)) moduleFiles.push('planning.adf');
-  } else if (presetFlag === 'frontend') {
-    if (tryWrite('frontend.adf', FRONTEND_SCAFFOLD)) moduleFiles.push('frontend.adf');
-  } else if (presetFlag === 'backend' || presetFlag === 'worker') {
-    if (tryWrite('backend.adf', BACKEND_SCAFFOLD)) moduleFiles.push('backend.adf');
-  } else {
-    if (tryWrite('frontend.adf', FRONTEND_SCAFFOLD)) moduleFiles.push('frontend.adf');
-    if (tryWrite('backend.adf', BACKEND_SCAFFOLD)) moduleFiles.push('backend.adf');
+  const scaffolds = adfInitScaffolds(presetFlag);
+  let resetAdf: ResetConfirmation | undefined;
+  if (mode === 'reset') {
+    const gate = await gateReset(options, aiDir, scaffolds, { created: false, aiDir, files: [], mode });
+    if (gate.refused) return EXIT_CODE.POLICY_VIOLATION;
+    resetAdf = gate.confirmation;
   }
-  tryWrite('.adf.lock', '{}\n');
+  const w = writeAdfScaffolds({ aiDir, mode, scaffolds, manifestTemplate: manifestForPreset(presetFlag), command: 'charter adf init', lock: 'create-empty' });
+  const backupGitignore = mode === 'reset' ? ensureBackupGitignore(aiDir) : undefined;
+  const { written: createdFiles, notWritten: skippedFiles } = splitWritten(w, scaffolds);
+  const moduleFiles = scaffolds.slice(3).filter((_s, i) => w.scaffolds[i + 3].kind === 'created').map(s => s.name);
 
   const result: AdfInitResult = {
-    created: true,
+    created: !manifestExisted,
     aiDir,
     files: createdFiles,
     ...(skippedFiles.length > 0 ? { skipped: skippedFiles } : {}),
@@ -499,6 +499,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
     }
   }
 
+  if (mode !== 'skip') return reportScaffoldRun(options, { ...result }, mode, w, aiDir, { backupGitignore, resetAdf });
   if (options.format === 'json') {
     console.log(JSON.stringify({
       ...result,
@@ -523,7 +524,7 @@ function adfInit(options: CLIOptions, args: string[]): number {
     }
     if (skippedFiles.length > 0) {
       console.log('');
-      console.log('  Skipped (already exist \u2014 use --force to overwrite):');
+      console.log('  Skipped (already exist \u2014 --force merges the template in, --reset-adf replaces them):');
       for (const name of skippedFiles) {
         console.log(`    .ai/${name}`);
       }
@@ -889,7 +890,8 @@ function printHelp(): void {
   console.log('  charter adf — Attention-Directed Format tools');
   console.log('');
   console.log('  Usage:');
-  console.log('    charter adf init [--ai-dir <dir>] [--force] [--emit-pointers] [--preset <preset>]');
+  console.log('    charter adf init [--ai-dir <dir>] [--force | --reset-adf [--yes]] [--emit-pointers] [--preset <preset>]');
+  console.log('      --force: merge the template in (adds missing files, sections, modules); --reset-adf: replace, backed up to .ai/.backup/');
   console.log('      Scaffold .ai/ directory with manifest, core, and state modules.');
   console.log('      --module <name>: add a single module to an existing .ai/ (additive, no overwrite)');
   console.log('      --preset <preset>: scaffold preset-aware modules (worker|frontend|backend|fullstack|docs)');
