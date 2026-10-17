@@ -50,7 +50,7 @@ import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './ad
 import { inferVendorMode, recordedModeOf, recordWrittenVendorModes, resolveVendorMode } from './adf-vendor';
 import type { VendorFile } from './adf-vendor';
 import { registerModules } from './adf-manifest-register';
-import { backupFile, describeMerge, ensureBackupGitignore, formatLossLines } from './adf-scaffold-merge';
+import { backupFile, describeMerge, dirLabel, formatLossLines, tryEnsureBackupGitignore } from './adf-scaffold-merge';
 import type { ScaffoldMode, ScaffoldOutcome } from './adf-scaffold-merge';
 import { confirmReset, finalizeLoss, promptYesNo, resetDeclinedMessage, resetRefusalMessage, writeAdfScaffolds } from './adf-scaffold-write';
 import type { ResetConfirmation, ScaffoldSpec } from './adf-scaffold-write';
@@ -745,8 +745,10 @@ function runSetupPhase(
       securitySensitive,
     });
 
-    created.push(...initResult.createdFiles);
-    kept.push(...initResult.kept);
+    // Platform separators, as phase 2 printed them before #369 (path.join).
+    created.push(...initResult.createdFiles.map(f => path.normalize(f)));
+    kept.push(...initResult.kept.map(f => path.normalize(f)));
+    warnings.push(...(initResult.warnings ?? []));
 
     // Generate CI workflow if requested
     if (ciTarget === 'github') {
@@ -941,22 +943,24 @@ function ensureProjectMcpConfig(
 
   // Replacing an existing entry (--force): back the file up first; no backup, no write.
   let backup: string | undefined;
+  let gitignoreWarning: string | undefined;
   if (existingCharter !== undefined) {
     const backupDir = path.join(configDir, '.backup');
-    const prefix = configDir.split(path.sep).join('/').replace(/\/+$/, '');
+    const prefix = dirLabel(configDir);
     try {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      backup = `${prefix}/.backup/${backupFile(configPath, backupDir, 'mcp.json', stamp)}`;
+      backup = `${prefix}.backup/${backupFile(configPath, backupDir, 'mcp.json', stamp)}`;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      tryEnsureBackupGitignore(configDir, () => undefined);
       return {
         created: false,
         updated: false,
-        warning: `Skipped MCP config update: could not back up .mcp.json to ${prefix}/.backup/ (${msg}); mcpServers.charter was not replaced.`,
+        warning: `Skipped MCP config update: could not back up .mcp.json to ${prefix}.backup/ (${msg}); mcpServers.charter was not replaced.`,
       };
-    } finally {
-      ensureBackupGitignore(configDir);
     }
+    // A .gitignore that cannot be written is a warning, never a failed setup step.
+    tryEnsureBackupGitignore(configDir, w => { gitignoreWarning = w; });
   }
 
   mcpServers.charter = desiredServer;
@@ -967,7 +971,7 @@ function ensureProjectMcpConfig(
     return { created: true, updated: false };
   }
 
-  return { created: false, updated: true, ...(backup ? { backup } : {}) };
+  return { created: false, updated: true, ...(backup ? { backup } : {}), ...(gitignoreWarning ? { warning: gitignoreWarning } : {}) };
 }
 
 // ============================================================================
@@ -1032,7 +1036,7 @@ function runAdfInitPhase(
     warnings.push(...scaffoldResult.warnings);
     lockExisted = scaffoldResult.lockExisted;
     replacedText = scaffoldResult.replacedText;
-    const backupGitignore = ensureBackupGitignore(aiDir);
+    const backupGitignore = tryEnsureBackupGitignore(aiDir, w => warnings.push(w));
 
     // Detect orphaned ADF modules not registered in manifest (#65)
     const manifestPath2 = path.join(aiDir, 'manifest.adf');

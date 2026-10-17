@@ -30,6 +30,18 @@ vi.mock('@stackbilt/adf', async (importOriginal) => {
   };
 });
 
+// Per-test write failure for chosen targets (a .backup/.gitignore that cannot be written).
+let failWrite: ((target: string) => boolean) | null = null;
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const writeFileSync = ((target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (failWrite && failWrite(String(target))) throw new Error('simulated write failure');
+    return (actual.writeFileSync as (...a: unknown[]) => void)(target, ...rest);
+  }) as typeof actual.writeFileSync;
+  return { ...actual, writeFileSync, default: { ...actual, writeFileSync } };
+});
+const isBackupGitignore = (t: string): boolean => t.split(path.sep).join('/').endsWith('.backup/.gitignore');
+
 // Interactive prompt: answer injected per test; the real readline never runs.
 let promptAnswer = 'n';
 vi.mock('node:readline', async (importOriginal) => {
@@ -76,6 +88,8 @@ beforeEach(() => {
   out = [];
   errOut = [];
   tamper = null;
+  failWrite = null;
+  promptAnswer = 'n';
   vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(a.map(String).join(' ')); });
   vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errOut.push(a.map(String).join(' ')); });
 });
@@ -93,6 +107,8 @@ function write(rel: string, text: string): void {
 }
 
 const read = (rel: string): string => fs.readFileSync(rel, 'utf-8');
+/** A path as bootstrap phase 2 prints it: platform separators. */
+const P = (rel: string): string => path.normalize(rel);
 
 /** Every file under the temp dir (telemetry excluded), relative path -> bytes. */
 function tree(dir = '.'): Map<string, string> {
@@ -133,9 +149,9 @@ describe('#369 bootstrap keeps .charter/ files', () => {
       for (const [f, t] of Object.entries(HAND)) expect(read(f)).toBe(t);
       expect(fs.existsSync('.charter/.backup')).toBe(false);
       // No claim of having created a file it kept; the kept files are named.
-      expect(out.some(l => /Created \.charter/.test(l))).toBe(false);
+      expect(out.some(l => l.startsWith(`  Created ${P('.charter/')}`))).toBe(false);
       const kept = out.find(l => l.startsWith('  Kept existing '));
-      expect(kept).toContain('.charter/config.json');
+      expect(kept).toContain(P('.charter/config.json'));
       expect(kept).toContain("'charter init --force' replaces them");
     });
   }
@@ -146,8 +162,9 @@ describe('#369 bootstrap keeps .charter/ files', () => {
     expect(await bootstrapCommand(YES, ['--yes', ...BOOT])).toBe(0);
     expect(JSON.parse(read('.charter/patterns/blessed-stack.json')).patterns.length).toBeGreaterThan(0);
     expect(read('.charter/config.json')).toBe(HAND['.charter/config.json']);
-    expect(out).toContain('  Created .charter/patterns/blessed-stack.json');
-    expect(out.some(l => l.includes('Created .charter/config.json'))).toBe(false);
+    // Phase 2 keeps the platform separator it printed before #369 (path.join).
+    expect(out).toContain(`  Created ${P('.charter/patterns/blessed-stack.json')}`);
+    expect(out.some(l => l.includes(`Created ${P('.charter/config.json')}`))).toBe(false);
   });
 
   it('reports created and kept files in the JSON setup step', async () => {
@@ -155,9 +172,9 @@ describe('#369 bootstrap keeps .charter/ files', () => {
     fs.rmSync('.charter/policies/governance.md');
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', ...BOOT])).toBe(0);
     const setup = JSON.parse(out.join('\n')).steps.find((s: { name: string }) => s.name === 'setup');
-    expect(setup.details.created).toContain('.charter/policies/governance.md');
-    expect(setup.details.created).not.toContain('.charter/config.json');
-    expect(setup.details.kept).toEqual(expect.arrayContaining(['.charter/config.json', '.charter/.gitignore']));
+    expect(setup.details.created).toContain(P('.charter/policies/governance.md'));
+    expect(setup.details.created).not.toContain(P('.charter/config.json'));
+    expect(setup.details.kept).toEqual(expect.arrayContaining([P('.charter/config.json'), P('.charter/.gitignore')]));
   });
 
   it('keeps a hand-edited SECURITY.md and security-deny.json under --security-sensitive --yes', async () => {
@@ -540,5 +557,183 @@ describe('#370 adf init on a fresh directory', () => {
       ],
     }, null, 2) + '\n');
     expect(read('.ai/.adf.lock')).toBe('{}\n');
+  });
+});
+
+// ============================================================================
+// PR #373 review follow-ups
+// ============================================================================
+
+const FRESH_TEXT = [
+  '',
+  '  ✓ Created .ai/ directory',
+  '',
+  '  Your AI governance is ready. Here\'s what was created:',
+  '',
+  '    .ai/manifest.adf    — Module router (controls what loads when)',
+  '    .ai/core.adf        — Universal rules (always loaded)',
+  '    .ai/state.adf       — Project state tracking',
+  '    .ai/frontend.adf       — Domain-specific rules (on-demand)',
+  '    .ai/backend.adf        — Domain-specific rules (on-demand)',
+  '',
+  '  Next steps:',
+  '    1. Edit .ai/core.adf to add your project\'s constraints',
+  '    2. Run \'charter doctor\' to validate your setup',
+  '    3. Run \'charter adf bundle --task "<prompt>"\' to see the assembled context',
+  '',
+  '  Docs: https://github.com/Stackbilt-dev/charter',
+  '',
+].join('\n');
+
+const FRESH_JSON = JSON.stringify({
+  created: true,
+  aiDir: '.ai',
+  files: ['manifest.adf', 'core.adf', 'state.adf', 'frontend.adf', 'backend.adf', '.adf.lock'],
+  nextActions: [
+    'charter adf populate  # auto-fill ADF files from codebase signals',
+    'Edit core.adf to add project-specific constraints and rules',
+    'charter adf fmt .ai/core.adf --check',
+    'charter adf bundle --task "<prompt>"',
+  ],
+}, null, 2) + '\n';
+
+describe('adf init --force / --reset-adf --yes on an empty directory', () => {
+  for (const [label, opts, args] of [
+    ['--force', TEXT, ['init', '--force']],
+    ['--reset-adf --yes', YES, ['init', '--reset-adf', '--yes']],
+  ] as Array<[string, CLIOptions, string[]]>) {
+    it(`${label}: the same text and files as plain adf init`, async () => {
+      expect(await adfCommand(opts, args)).toBe(0);
+      expect(out.join('\n') + '\n').toBe(FRESH_TEXT);
+      expect([...tree().keys()].sort()).toEqual(['.ai/.adf.lock', '.ai/backend.adf', '.ai/core.adf', '.ai/frontend.adf', '.ai/manifest.adf', '.ai/state.adf']);
+    });
+
+    it(`${label}: the same JSON as plain adf init, nextActions included`, async () => {
+      expect(await adfCommand({ ...opts, format: 'json' }, args)).toBe(0);
+      expect(out.join('\n') + '\n').toBe(FRESH_JSON);
+    });
+  }
+});
+
+describe('adf init --emit-pointers with --force / --reset-adf', () => {
+  it('prints the pointer lines after the merge header', async () => {
+    write('.ai/manifest.adf', HAND_MANIFEST);
+    expect(await adfCommand(TEXT, ['init', '--force', '--emit-pointers'])).toBe(0);
+    const header = out.findIndex(l => l.startsWith('  Merged the preset template into .ai/'));
+    const pointer = out.findIndex(l => l.startsWith('  Generated CLAUDE.md'));
+    expect(header).toBeGreaterThanOrEqual(0);
+    expect(pointer).toBeGreaterThan(header);
+  });
+
+  it('prints the pointer lines after the reset header', async () => {
+    write('.ai/manifest.adf', HAND_MANIFEST);
+    write('AGENTS.md', '# mine\n');
+    expect(await adfCommand(YES, ['init', '--reset-adf', '--yes', '--emit-pointers'])).toBe(0);
+    const header = out.findIndex(l => l.startsWith('  Reset .ai/ to the preset template'));
+    expect(header).toBeGreaterThanOrEqual(0);
+    expect(out.findIndex(l => l.startsWith('  Generated CLAUDE.md'))).toBeGreaterThan(header);
+    expect(out.findIndex(l => l === '  Skipped AGENTS.md (already exists)')).toBeGreaterThan(header);
+  });
+});
+
+describe('setup --force and init --guided honour failed backups', () => {
+  it('setup --force exits 1 when every backup failed, and names the files in text', async () => {
+    writeHandCharter();
+    write('.charter/.backup', 'not a directory\n');
+    expect(await setupCommand(TEXT, ['--preset', 'worker', '--no-dependency-sync', '--force'])).toBe(1);
+    for (const [f, t] of Object.entries(HAND)) expect(read(f)).toBe(t);
+    expect(out.some(l => l.includes('Could not back up .charter/config.json to .charter/.backup/'))).toBe(true);
+  });
+
+  it('setup --force JSON also exits 1 when every backup failed', async () => {
+    writeHandCharter();
+    write('.charter/.backup', 'not a directory\n');
+    expect(await setupCommand(JSON_OPTS, ['--preset', 'worker', '--no-dependency-sync', '--force'])).toBe(1);
+    expect(JSON.parse(out.join('\n')).notReplaced.length).toBeGreaterThan(0);
+  });
+
+  it('setup without --force names created and kept files like init', async () => {
+    writeHandCharter();
+    fs.rmSync('.charter/policies/governance.md');
+    expect(await setupCommand(TEXT, ['--preset', 'worker', '--no-dependency-sync'])).toBe(0);
+    expect(out).toContain('  Created .charter/policies/governance.md');
+    expect(out.some(l => l.startsWith('  Kept existing ') && l.includes('.charter/config.json'))).toBe(true);
+  });
+
+  it('init --guided --force warns and exits 1 when nothing could be replaced', async () => {
+    writeHandCharter();
+    write('.charter/.backup', 'not a directory\n');
+    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
+    for (const [f, t] of Object.entries(HAND)) expect(read(f)).toBe(t);
+    expect(out.some(l => l.startsWith('  Warning: Could not back up .charter/config.json'))).toBe(true);
+  });
+
+  it('init --guided --force JSON exits 1 and lists notReplaced', async () => {
+    writeHandCharter();
+    write('.charter/.backup', 'not a directory\n');
+    expect(await initCommand(JSON_OPTS, ['--guided', '--force'])).toBe(1);
+    // --guided prints its question banner before the JSON document, even under --format json.
+    const r = JSON.parse(out.slice(out.findIndex(l => l.startsWith('{'))).join('\n'));
+    expect(r.guided).toBe(true);
+    expect(r.notReplaced.map((n: { file: string }) => n.file)).toContain('.charter/config.json');
+  });
+
+  it('init --guided --force replaces with backups and exits 0 when backups work', async () => {
+    writeHandCharter();
+    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(0);
+    expect(out.some(l => l.startsWith('  Replaced .charter/config.json (backup: .charter/.backup/config.json.'))).toBe(true);
+  });
+});
+
+describe('a .backup/.gitignore that cannot be written is a warning', () => {
+  it('bootstrap --force still replaces mcpServers.charter, and setup passes with a warning', async () => {
+    write('.mcp.json', JSON.stringify({ mcpServers: { charter: { command: 'charter' } } }, null, 2) + '\n');
+    failWrite = t => isBackupGitignore(t) && t.includes('.charter');
+    expect(await bootstrapCommand({ ...JSON_OPTS }, ['--force', ...BOOT])).toBe(0);
+    const setup = JSON.parse(out.join('\n')).steps.find((s: { name: string }) => s.name === 'setup');
+    expect(setup.status).toBe('pass');
+    expect(setup.details.mcpBackup).toMatch(/^\.charter\/\.backup\/mcp\.json\./);
+    expect(setup.warnings.some((w: string) => w.includes('Could not write .charter/.backup/.gitignore'))).toBe(true);
+    expect(JSON.parse(read('.mcp.json')).mcpServers.charter.command).toBe('npx');
+  });
+
+  it('init --force still replaces, and warns', async () => {
+    writeHandCharter();
+    failWrite = isBackupGitignore;
+    expect(await initCommand(TEXT, ['--force'])).toBe(0);
+    expect(read('.charter/config.json')).not.toBe(HAND['.charter/config.json']);
+    expect(out.some(l => l.startsWith('  Warning: Could not write .charter/.backup/.gitignore'))).toBe(true);
+  });
+
+  it('adf init --reset-adf --yes still replaces, and warns', async () => {
+    write('.ai/manifest.adf', HAND_MANIFEST);
+    write('.ai/core.adf', HAND_CORE);
+    failWrite = isBackupGitignore;
+    expect(await adfCommand({ ...JSON_OPTS, yes: true }, ['init', '--reset-adf', '--yes'])).toBe(0);
+    const r = JSON.parse(out.join('\n'));
+    expect(r.backupGitignore).toBe('failed');
+    expect(r.warnings.some((w: string) => w.includes('Could not write .ai/.backup/.gitignore'))).toBe(true);
+    expect(read('.ai/core.adf')).toBe(CORE_SCAFFOLD);
+  });
+});
+
+describe('init JSON keeps files and writesPerformed meaning what they did', () => {
+  it('existing .charter/ without --force: files is [], new information only in new fields', async () => {
+    writeHandCharter();
+    fs.rmSync('.charter/.gitignore');
+    expect(await initCommand(JSON_OPTS, [])).toBe(0);
+    const r = JSON.parse(out.join('\n'));
+    expect(r.created).toBe(false);
+    expect(r.files).toEqual([]);
+    expect(r.writesPerformed).toBe(1);
+    expect(r.createdFiles).toEqual(['.charter/.gitignore']);
+  });
+
+  it('existing .charter/ with nothing missing: files [] and writesPerformed 0, as before', async () => {
+    writeHandCharter();
+    expect(await initCommand(JSON_OPTS, [])).toBe(0);
+    const r = JSON.parse(out.join('\n'));
+    expect(r.files).toEqual([]);
+    expect(r.writesPerformed).toBe(0);
   });
 });

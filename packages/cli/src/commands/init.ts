@@ -11,7 +11,7 @@ import type { CLIOptions } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { getDefaultConfigJSON } from '../config';
-import { backupFile, ensureBackupGitignore } from './adf-scaffold-merge';
+import { backupFile, dirLabel, tryEnsureBackupGitignore } from './adf-scaffold-merge';
 
 export type StackPreset = 'worker' | 'frontend' | 'backend' | 'fullstack' | 'docs' | 'rust-wasm';
 
@@ -336,8 +336,9 @@ interface InitResult {
   /** config.json was absent before this run. */
   created: boolean;
   configPath: string;
-  /** Every template file, relative to configPath. */
+  /** Every template file, relative to configPath; [] when config.json existed and replace was off, as before #369. */
   files: string[];
+  /** Files written (created or replaced) by this run. */
   writesPerformed: number;
   /** Files this run created because they were missing (#369). */
   createdFiles: string[];
@@ -347,6 +348,8 @@ interface InitResult {
   replaced: Array<{ file: string; backup: string }>;
   /** Files --force did not replace because the backup failed (#369). */
   notReplaced: Array<{ file: string; detail: string }>;
+  /** Non-fatal problems, e.g. a .backup/.gitignore that could not be written; present only when non-empty. */
+  warnings?: string[];
 }
 
 interface InitializeOptions {
@@ -375,8 +378,7 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   }
 
   const result = initializeCharter(options.configPath, force, { preset, securitySensitive });
-  // Every file --force had to replace failed its backup: nothing was replaced.
-  const exitCode = result.notReplaced.length > 0 && result.replaced.length === 0 ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+  const exitCode = initExitCode(result);
 
   if (options.format === 'json') {
     console.log(JSON.stringify(result, null, 2));
@@ -419,11 +421,17 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   return exitCode;
 }
 
+/** 1 when --force had files to replace and every backup failed, so nothing was replaced (#369). */
+export function initExitCode(result: InitResult): number {
+  return result.notReplaced.length > 0 && result.replaced.length === 0 ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+}
+
 /** Text lines for what initializeCharter did to files that already existed (#369). */
 export function printInitChanges(result: InitResult, includeCreated = true): void {
   if (includeCreated) for (const f of result.createdFiles) console.log(`  Created ${f}`);
   for (const r of result.replaced) console.log(`  Replaced ${r.file} (backup: ${r.backup})`);
   for (const n of result.notReplaced) console.log(`  Warning: ${n.detail}`);
+  for (const w of result.warnings ?? []) console.log(`  Warning: ${w}`);
   if (result.kept.length > 0) {
     console.log(`  Kept existing ${result.kept.join(', ')} (not overwritten; use --force to replace, with a backup)`);
   }
@@ -463,10 +471,10 @@ export function initializeCharter(configDir: string, replace: boolean, initOptio
     );
   }
 
-  const label = (t: { name: string; target: string }) => t.name === '../SECURITY.md' ? 'SECURITY.md' : `${displayDir(configDir)}${t.name}`;
+  const label = (t: { name: string; target: string }) => t.name === '../SECURITY.md' ? 'SECURITY.md' : `${dirLabel(configDir)}${t.name}`;
   const backupDir = path.join(configDir, '.backup');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const result: InitResult = { created: !exists, configPath: configDir, files: templates.map(t => t.name), writesPerformed: 0, createdFiles: [], kept: [], replaced: [], notReplaced: [] };
+  const result: InitResult = { created: !exists, configPath: configDir, files: exists && !replace ? [] : templates.map(t => t.name), writesPerformed: 0, createdFiles: [], kept: [], replaced: [], notReplaced: [] };
 
   for (const t of templates) {
     if (!fs.existsSync(t.target)) {
@@ -485,22 +493,16 @@ export function initializeCharter(configDir: string, replace: boolean, initOptio
       backupName = backupFile(t.target, backupDir, t.name.replace(/^\.\.\//, '').replace(/\//g, '-'), stamp);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      result.notReplaced.push({ file: label(t), detail: `Could not back up ${label(t)} to ${displayDir(configDir)}.backup/ (${msg}); not replaced.` });
+      result.notReplaced.push({ file: label(t), detail: `Could not back up ${label(t)} to ${dirLabel(configDir)}.backup/ (${msg}); not replaced.` });
       continue;
     }
     fs.writeFileSync(t.target, t.content);
     result.writesPerformed++;
-    result.replaced.push({ file: label(t), backup: `${displayDir(configDir)}.backup/${backupName}` });
+    result.replaced.push({ file: label(t), backup: `${dirLabel(configDir)}.backup/${backupName}` });
   }
-  if (replace) ensureBackupGitignore(configDir);
+  if (replace) tryEnsureBackupGitignore(configDir, w => { result.warnings = [...(result.warnings ?? []), w]; });
 
   return result;
-}
-
-/** `configDir` as a display prefix with a trailing slash, e.g. `.charter/`. */
-function displayDir(configDir: string): string {
-  const dir = configDir.split(path.sep).join('/').replace(/\/+$/, '');
-  return dir === '' ? '' : `${dir}/`;
 }
 
 function isValidPreset(value: string | undefined): value is StackPreset {
@@ -585,19 +587,19 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
 
     if (options.format === 'json') {
       console.log(JSON.stringify({ ...result, guided: true, preset, useCloudflare, useAuth }, null, 2));
-      return EXIT_CODE.SUCCESS;
+      return initExitCode(result);
     }
 
     if (!result.created) {
       printInitChanges(result);
       console.log('');
       console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
-      return EXIT_CODE.SUCCESS;
+      return initExitCode(result);
     }
 
     // If auth governance was requested, add auth-specific patterns to governance.md:
     // only to the template this run wrote, never to a kept hand-edited file (#369).
-    const policyLabel = `${displayDir(options.configPath)}policies/governance.md`;
+    const policyLabel = `${dirLabel(options.configPath)}policies/governance.md`;
     const wrotePolicy = result.createdFiles.includes(policyLabel) || result.replaced.some(r => r.file === policyLabel);
     printInitChanges(result, false);
     if (useAuth && wrotePolicy) {
@@ -633,7 +635,7 @@ All auth changes require:
     console.log('');
     console.log('  Docs: https://github.com/Stackbilt-dev/charter');
 
-    return EXIT_CODE.SUCCESS;
+    return initExitCode(result);
   } finally {
     rl.close();
   }

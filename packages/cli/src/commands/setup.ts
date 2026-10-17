@@ -11,7 +11,7 @@ import type { CLIOptions } from '../index';
 import { CLIError } from '../index';
 import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
-import { initializeCharter, type StackPreset } from './init';
+import { initExitCode, initializeCharter, printInitChanges, type StackPreset } from './init';
 import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -373,14 +373,14 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (options.format === 'json') {
     const jsonResult = hasAiManifest ? result : { ...result, suggestion: 'bootstrap' };
     console.log(JSON.stringify(jsonResult, null, 2));
-    return EXIT_CODE.SUCCESS;
+    return initExitCode(initResult);
   }
 
   console.log('  Governance guardrails are now active for this repo.');
   console.log(`  Baseline path: ${result.configPath}`);
   console.log(`  Baseline created: ${result.initialized ? 'yes' : 'already present'}`);
-  for (const r of result.replaced ?? []) console.log(`  Replaced ${r.file} (backup: ${r.backup})`);
-  for (const n of result.notReplaced ?? []) console.log(`  Warning: ${n.detail}`);
+  // #369: name what was created, replaced or kept, as charter init does.
+  printInitChanges(initResult, !initResult.created);
   console.log(`  Stack preset: ${result.selectedPreset} (${result.inferenceMode})`);
   console.log(`  Detection confidence: ${result.detected.confidence}`);
   if (result.detected.mixedStack) {
@@ -435,7 +435,8 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     console.log('  \u{1F4A1} No .ai/ found. Run `charter bootstrap` for full onboarding (ADF + CI + hooks).');
   }
 
-  return EXIT_CODE.SUCCESS;
+  // --force with every needed backup failed replaced nothing: exit 1, as charter init --force does.
+  return initExitCode(initResult);
 }
 
 export function detectStack(contexts: PackageContext[]): DetectionResult {

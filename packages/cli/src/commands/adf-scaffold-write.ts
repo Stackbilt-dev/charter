@@ -25,6 +25,7 @@ import {
   backupFile,
   computeLoss,
   describeMerge,
+  dirLabel,
   formatLossLines,
   MANIFEST_EXCLUDED_KEYS,
   templateModules,
@@ -72,8 +73,7 @@ export type ResetConfirmation =
 
 /** Display prefix for files under `aiDir`: `.ai/` for the default directory. */
 export function aiDirLabel(aiDir: string): string {
-  const dir = aiDir.split(path.sep).join('/').replace(/\/+$/, '');
-  return dir === '' ? '' : `${dir}/`;
+  return dirLabel(aiDir);
 }
 
 function hashContent(content: string): string {
@@ -354,6 +354,8 @@ export function reportScaffoldRun(
   w: ScaffoldWriteResult,
   aiDir: string,
   extras: { backupGitignore?: string; resetAdf?: ResetConfirmation },
+  /** Text lines of other writes in the same run (adf init --emit-pointers), printed after the header. */
+  laterLines: string[] = [],
 ): number {
   const prefix = aiDirLabel(aiDir);
   const replaced = finalizeLoss(w.scaffolds, w.replacedText, `${prefix}manifest.adf`);
@@ -370,6 +372,7 @@ export function reportScaffoldRun(
       : `  Reset ${prefix} to the preset template (--reset-adf); each backup holds what its file lost:`);
     for (const line of scaffoldReportLines(w.scaffolds, mode, w.replacedText)) console.log(line);
     if (w.lockWritten) console.log(`  Created ${prefix}.adf.lock`);
+    for (const line of laterLines) console.log(line);
     for (const warning of w.warnings) console.log(`  Warning: ${warning}`);
   }
   return mode === 'reset' && notReset.length > 0 && replaced.length === 0 ? 1 : 0;

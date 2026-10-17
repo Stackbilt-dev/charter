@@ -33,7 +33,7 @@ import {
   NAMED_MODULE_DEFAULT_TRIGGERS,
 } from './adf-named-scaffolds';
 import { PatchOperationArraySchema } from '../schemas/patch-ops';
-import { ensureBackupGitignore } from './adf-scaffold-merge';
+import { tryEnsureBackupGitignore } from './adf-scaffold-merge';
 import type { ScaffoldMode } from './adf-scaffold-merge';
 import { gateReset, reportScaffoldRun, splitWritten, writeAdfScaffolds } from './adf-scaffold-write';
 import type { ResetConfirmation, ScaffoldSpec } from './adf-scaffold-write';
@@ -451,7 +451,11 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
     resetAdf = gate.confirmation;
   }
   const w = writeAdfScaffolds({ aiDir, mode, scaffolds, manifestTemplate: manifestForPreset(presetFlag), command: 'charter adf init', lock: 'create-empty' });
-  const backupGitignore = mode === 'reset' ? ensureBackupGitignore(aiDir) : undefined;
+  const backupGitignore = mode === 'reset' ? tryEnsureBackupGitignore(aiDir, x => w.warnings.push(x)) : undefined;
+  // Only creations (fresh .ai/): report exactly as plain adf init does. Otherwise lines wait for the merge/reset header.
+  const report = mode !== 'skip' && !(!manifestExisted && w.scaffolds.every(o => o.kind === 'created'));
+  const later: string[] = [];
+  const say = (line: string): void => { if (report) later.push(line); else console.log(line); };
   const { written: createdFiles, notWritten: skippedFiles } = splitWritten(w, scaffolds);
   const moduleFiles = scaffolds.slice(3).filter((_s, i) => w.scaffolds[i + 3].kind === 'created').map(s => s.name);
 
@@ -486,20 +490,20 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
     }
     result.pointers = createdPointers;
     recordWrittenVendorModes(aiDir, createdPointers, 'pointer', 'adf init --emit-pointers', w =>
-      options.format === 'json' ? console.warn(`Warning: ${w}`) : console.log(`  Warning: ${w}`));
+      options.format === 'json' ? console.warn(`Warning: ${w}`) : say(`  Warning: ${w}`));
 
     if (options.format !== 'json') {
       for (const p of createdPointers) {
         const label = pointerSpecs.find(s => s.file === p)?.label ?? p;
-        console.log(`  Generated ${label}`);
+        say(`  Generated ${label}`);
       }
       for (const p of skippedPointers) {
-        console.log(`  Skipped ${p} (already exists)`);
+        say(`  Skipped ${p} (already exists)`);
       }
     }
   }
 
-  if (mode !== 'skip') return reportScaffoldRun(options, { ...result }, mode, w, aiDir, { backupGitignore, resetAdf });
+  if (report) return reportScaffoldRun(options, { ...result }, mode, w, aiDir, { backupGitignore, resetAdf }, later);
   if (options.format === 'json') {
     console.log(JSON.stringify({
       ...result,
