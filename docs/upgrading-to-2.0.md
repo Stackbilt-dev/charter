@@ -82,14 +82,16 @@ If a script runs `adf compile --target all --write --force` to convert pointers,
 
 ## Re-run the hook installs
 
-Installed hooks are not upgraded for you. Re-run the installs from step 3 to get:
+Installed hooks are not upgraded for you. Replace every pre-2.0 hook by re-running the installs from step 4 (`charter hook install --pre-commit`, and `--commit-msg` if you use it) to get:
 
-- **pre-commit**: tidies only the vendor files the commit stages, and re-stages only the files tidy wrote. A staged vendor file that also has unstaged changes is skipped, with a message. The old hook re-staged all of `.ai/*.adf` and could sweep unrelated edits into a commit. The evidence gate blocks on vendor bloat only in files the commit includes (see the note below).
+- **pre-commit**: tidies only the vendor files the commit stages, and re-stages only the files tidy wrote. A staged vendor file that also has unstaged changes is skipped, with a message. The old hook re-staged all of `.ai/*.adf` and could sweep unrelated edits into a commit. The evidence gate runs `charter doctor --adf-only --ci --staged …` and blocks on vendor bloat only in files the commit includes. A staged file that tidy could not clean, or did not tidy because tidy failed or `CHARTER_SKIP_TIDY=1` is set, still blocks. Then it runs your `verify:adf` script, if `package.json` has one, or `charter adf evidence` (see the note below).
 - **commit-msg**: now rejects a commit with no `Governed-By` or `Resolves-Request` trailer when `git.requireTrailers` is on and strictness is `FAIL`/`STRICT`, or `ci.failOnWarn` is `true`. Under advisory strictness it only warns. The old hook only normalized trailers you had already typed, so a missing trailer first showed up as a red CI run.
 
 The new pre-commit hook calls `charter adf tidy --print-paths` and `charter doctor --staged`. With a 1.x CLI in `node_modules`, `--print-paths` is unknown, so the hook reports files as clean and tidies nothing. Upgrade the CLI as well as the hook.
 
-> **`verify:adf` script.** If `package.json` has a `verify:adf` script (`charter setup` and `bootstrap` add one), the pre-commit gate runs `pnpm run verify:adf` instead of the built-in `charter doctor --adf-only --ci --staged …` gate. The gate is then not scoped to the commit, so vendor bloat anywhere in the working tree can block the commit, as in 1.x.
+> **`verify:adf` script.** `charter setup` and `bootstrap` add a `verify:adf` script. The hook runs it after the scoped doctor, with your package manager: `pnpm` (with `pnpm-lock.yaml` and pnpm installed), `yarn` (with `yarn.lock` and yarn installed), otherwise `npm`. pnpm is no longer required. Inside the hook, the doctor in `verify:adf` reports vendor bloat as INFO, `adf vendor bloat (checked by pre-commit hook)`, because the scoped check already ran. Its other checks still block. Running `npm run verify:adf` (or your package manager's equivalent) by hand or in CI still checks every vendor file. The hook runs `npx charter doctor …` even if your custom `verify:adf` leaves doctor out.
+>
+> **Known limitation:** Yarn Plug'n'Play repos are not supported by the hook yet ([#366](https://github.com/Stackbilt-dev/charter/issues/366)).
 
 ## What doctor's new lines mean
 
@@ -97,7 +99,7 @@ None of the INFO lines fails `charter doctor --ci`. A repo that has no `VENDORS`
 
 | Line | Status | What it means | Fix |
 |---|---|---|---|
-| `pre-commit hook` | INFO | The installed pre-commit hook is from 1.x (it tidies every vendor file and re-stages all of `.ai/*.adf`). | `charter hook install --pre-commit` |
+| `pre-commit hook` | INFO | The installed pre-commit hook is outdated: it tidies every vendor file and re-stages all of `.ai/*.adf`, or its gate blocks on bloat outside the commit. | `charter hook install --pre-commit` |
 | `gate enforcement` naming the commit-msg hook | WARN | The commit-msg hook only normalizes trailers, so nothing blocks a missing trailer locally. | `charter hook install --commit-msg`, or run `charter validate --ci` in CI |
 | `adf vendor mode`: "N vendor file(s) have no recorded mode" | INFO | No `VENDORS` entry. Modes are inferred from markers. | `charter adf vendor init` |
 | `adf vendor mode`: "git tracks agents.md under its pre-#297 lowercase name" (`legacy-tracked`) | INFO | Bootstrap before #297 wrote `agents.md`. Harnesses on case-sensitive systems read `AGENTS.md`. | `charter adf vendor rename-legacy` |
