@@ -1,10 +1,10 @@
 # Upgrading to Charter 2.0
 
-Charter 2.0 records whether each vendor file (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `GEMINI.md`, `agents.md`, `copilot-instructions.md`) is a thin **pointer** to `.ai/`, **compiled** output of `charter adf compile`, or **unmanaged** (hand-authored, left alone). Commands act on that record instead of guessing from markers. Most repos upgrade with the six steps below. The rest of this page explains what changes and what each new doctor line means.
+Charter 2.0 records whether each vendor file (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `GEMINI.md`, `agents.md`, `copilot-instructions.md`) is a thin **pointer** to `.ai/`, **compiled** output of `charter adf compile`, or **unmanaged** (hand-authored, left alone). Commands act on that record instead of guessing from markers. Most repos upgrade with the seven steps below. The rest of this page explains what changes and what each new doctor line means.
 
 The full list of changes is in the [CHANGELOG](../CHANGELOG.md). Flag details are in the [CLI reference](./cli-reference.md).
 
-## Upgrade in six steps
+## Upgrade in seven steps
 
 Run these from the repository root, starting from a clean working tree (`git status` shows nothing to commit).
 
@@ -13,39 +13,39 @@ Run these from the repository root, starting from a clean working tree (`git sta
 npm install --save-dev @stackbilt/cli@latest      # or: pnpm add -D @stackbilt/cli@latest
 npx charter --version
 
-# 2. See what Charter infers about each vendor file, then record it
+# 2. Clean up two files 1.x bootstrap made unsafe to commit (both commands are no-ops if already fine)
+#    a. Stop tracking the telemetry log: every charter run rewrites it, so it would land in the commit
+grep -qx 'telemetry/' .charter/.gitignore 2>/dev/null || echo 'telemetry/' >> .charter/.gitignore
+git rm -r -q --cached --ignore-unmatch .charter/telemetry
+#    b. Replace an absolute --ai-dir in .mcp.json with the repo-relative .ai (it breaks other clones and CI)
+node -e 'const fs=require("fs"),f=".mcp.json";if(!fs.existsSync(f))process.exit();const j=JSON.parse(fs.readFileSync(f,"utf8")),a=(j.mcpServers&&j.mcpServers.charter&&j.mcpServers.charter.args)||[],i=a.indexOf("--ai-dir");if(i>=0&&/^([A-Za-z]:)?[\\/]/.test(a[i+1])){a[i+1]=".ai";fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n");console.log("fixed .mcp.json")}'
+
+# 3. See what Charter infers about each vendor file, then record it
 npx charter adf vendor status
 npx charter adf vendor init
 
-# 3. Reinstall the hooks you use (each overwrites a Charter-managed hook without --force)
+# 4. Reinstall the hooks you use. Required: installed hooks keep their 1.x behaviour until you do.
 npx charter hook install --pre-commit
 npx charter hook install --commit-msg            # only if you use the commit-msg hook
 
-# 4. Rename a lowercase agents.md, if you have one ("Nothing to rename" means you don't)
+# 5. Rename a lowercase agents.md, if you have one ("Nothing to rename" means you don't)
 npx charter adf vendor rename-legacy --dry-run
 npx charter adf vendor rename-legacy             # stages the rename as a git mv
 
-# 5. Check, and re-compile if you use compiled files
+# 6. Check, and re-compile if you use compiled files
 npx charter adf compile --target all --check
 npx charter adf compile --target all --write     # only needed if --check reports [stale]
 
-# 6. Read doctor and fix what it names (see the table below), then commit
+# 7. Read doctor and fix what it names (see the table below), then commit
 npx charter doctor
-git add -u                                       # manifest, re-compiled files, package.json, lockfile
+git add -u                                       # manifest, re-compiled files, .gitignore, .mcp.json, package.json, lockfile
 git status
-git commit -m "chore: upgrade charter to 2.0"
+git commit -m "chore: upgrade charter to 2.0" -m "Governed-By: ADR-001"   # the trailer is required once the commit-msg hook is on
 ```
 
 `charter adf vendor init` writes only to `.ai/manifest.adf`. It records each unrecorded file's inferred mode and never changes an existing entry. If `status` shows a mode you did not mean, record the right one with `charter adf vendor set <file> <pointer|compiled|unmanaged>`.
 
-`git add -u` stages every tracked file you changed, which is why the steps start from a clean tree. It also picks up `AGENTS.md` when `rename-legacy` rewrote its `# agents.md` title line. If doctor reports `telemetry tracking`, untrack the log before `git add -u`:
-
-```bash
-grep -qx 'telemetry/' .charter/.gitignore || echo 'telemetry/' >> .charter/.gitignore
-git rm -r --cached .charter/telemetry
-```
-
-If the commit-msg hook is installed, add your trailer to the commit message, for example `git commit -m "chore: upgrade charter to 2.0" -m "Governed-By: ADR-001"`.
+`git add -u` stages every tracked file you changed, which is why the steps start from a clean tree. It also picks up `AGENTS.md` when `rename-legacy` rewrote its `# agents.md` title line. The telemetry log stays on disk after step 2, so `charter telemetry report` keeps working. Use your own policy reference in the trailer (`Governed-By:` or `Resolves-Request:`). If your `.ai/` directory is not `.ai`, use its repo-relative path in step 2b. If `.mcp.json` is meant to stay machine-local, skip 2b and instead add `.mcp.json` to `.gitignore` and run `git rm --cached .mcp.json`.
 
 ## Breaking: only `--mode compiled` turns a pointer into compiled output
 
@@ -121,11 +121,11 @@ Repos bootstrapped before #297 track `agents.md`, which nothing renames automati
 ```bash
 npx charter adf vendor rename-legacy --dry-run   # see the plan
 npx charter adf vendor rename-legacy             # stages R agents.md -> AGENTS.md
-git add .ai/manifest.adf                         # the output names this (plus AGENTS.md if its title was rewritten)
+git add .ai/manifest.adf AGENTS.md               # or run exactly the git add line the output prints
 git commit -m "chore: rename agents.md to AGENTS.md"
 ```
 
-When git tracks the file, the rename is staged and nothing else is. `.ai/manifest.adf` is left for you to `git add`. Its only content edit is a first line that is exactly `# agents.md`. Other mentions of `agents.md` are listed, not edited. It refuses, exit 1, and changes nothing when:
+When git tracks the file, the rename is staged and nothing else is. If the `VENDORS` key moved, `.ai/manifest.adf` is left for you to `git add`, and if the title line was rewritten, so is `AGENTS.md`. The output names the files to add. (After `adf vendor init` on a case-insensitive filesystem, the key is often already `AGENTS.md`, so only `AGENTS.md` is named.) Its only content edit is a first line that is exactly `# agents.md`. Other mentions of `agents.md` are listed, not edited. It refuses, exit 1, and changes nothing when:
 
 - both spellings are tracked, or are two different files;
 - `agents.md` has uncommitted changes;
@@ -200,15 +200,18 @@ A thin pointer used to score as "thin" (−5 and "Expand `CLAUDE.md` beyond a th
 | `adf vendor rename-legacy` | one result: `status`, `method`, `from`, `to`, `staged`, `record`, `titleUpdated`, `references`, `refusal`, `remedy`, `error` |
 | `adf tidy` | `paths` (`vendor`, `modules`); file rows add `vendorFile`, `mode`, `source`, `skipReason`; status `compiled` |
 | `adf migrate` | `sources[].registrations[]` |
-| `doctor` | `rows` on the `adf vendor mode` check only; new check names `pre-commit hook`, `telemetry tracking` and `adf vendor bloat (not blocking)` |
+| `doctor` | `rows` on the `adf vendor mode` check only; new check names `adf vendor mode`, `pre-commit hook`, `telemetry tracking` and `adf vendor bloat (not blocking)` |
 | `score` | `signals.agentConfig` adds `mode`, `source`, `substantiveVia` per file |
 
 Exit codes that changed:
 
+- `adf compile --target all --check` on thin pointers exits 0 (`pointer-ok`). 1.9.3 reported every pointer `[stale]` and exited 1, so a CI step that expected that failure now passes. A pointer with content `adf tidy` would extract still exits 1 (`pointer-bloated`).
 - `adf compile --target all --write` with pointer or unmanaged targets exits 0 and skips them (1.9.3 refused them, exit 1).
 - `adf compile --write --force` no longer converts a pointer (1.9.3 did). A single `--target` is refused with exit 1, and `--target all` skips it with exit 0.
 - `adf tidy --source` with no value exits 2 (it used to tidy every file).
-- `adf tidy --print-paths --format json` exits 2.
-- `doctor --tidy-skipped` without `--staged` exits 2.
+
+New flags that are usage errors (exit 2) when misused: `adf tidy --print-paths` with `--format json`, and `doctor --tidy-skipped` without `--staged`.
 
 **`@stackbilt/adf` library:** `classifyElement` now always sets `routingTrace`, with `candidateScores: {}` when there is no trigger map. Check `candidateScores` instead of "is `routingTrace` defined" to tell whether content routing ran. `RoutingTrace` gains an optional `headingKeyword`, and `parseManifest` gains a `vendors` field.
+
+**`@stackbilt/git` library:** the trailer parser no longer accepts a whitespace-only value (`Governed-By:   `), and such a line ends the terminal trailer block, so trailers above it are not counted (`#340`).
