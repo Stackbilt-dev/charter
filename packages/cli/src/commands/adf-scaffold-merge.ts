@@ -169,7 +169,8 @@ export function backupFile(source: string, backupDir: string, name: string, stam
 export function dirLabel(dir: string): string {
   let d = dir.split(path.sep).join('/');
   while (d.endsWith('/')) d = d.slice(0, -1);
-  return d === '' ? '' : `${d}/`;
+  if (d === '') return dir === '' ? '' : '/';
+  return `${d}/`;
 }
 
 /** ensureBackupGitignore that reports a failure as a warning instead of throwing (#369). */

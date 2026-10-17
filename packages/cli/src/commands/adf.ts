@@ -504,6 +504,8 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
   }
 
   if (report) return reportScaffoldRun(options, { ...result }, mode, w, aiDir, { backupGitignore, resetAdf }, later);
+  // A fresh --force/--reset-adf run keeps plain adf init's output; engine warnings still print (stderr under JSON).
+  for (const x of mode === 'skip' ? [] : w.warnings) if (options.format === 'json') console.warn(`Warning: ${x}`); else console.log(`  Warning: ${x}`);
   if (options.format === 'json') {
     console.log(JSON.stringify({
       ...result,

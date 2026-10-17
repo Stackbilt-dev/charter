@@ -389,6 +389,7 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
     if (result.createdFiles.length > 0 || result.replaced.length > 0 || result.notReplaced.length > 0) {
       printInitChanges(result);
     } else {
+      for (const w of result.warnings ?? []) console.log(`  Warning: ${w}`);
       console.log('');
       console.log('  .charter/ directory already exists. Run \'charter doctor\' to check for issues.');
       console.log('');
@@ -399,6 +400,8 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   }
 
   printInitChanges(result, false);
+  // No success banner when --force could replace nothing (exit 1).
+  if (exitCode !== EXIT_CODE.SUCCESS) return exitCode;
   console.log('');
   console.log('  \u2713 Created .charter/ directory');
   console.log('');
@@ -419,6 +422,28 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
   console.log('  Docs: https://github.com/Stackbilt-dev/charter');
 
   return exitCode;
+}
+
+/**
+ * Whether an existing template file still equals the template. blessed-stack.json
+ * embeds a fresh `generatedAt` on every run, so it is compared as JSON with that
+ * key removed; a file that does not parse differs (#369).
+ */
+export function sameAsTemplate(name: string, existing: string, template: string): boolean {
+  if (existing === template) return true;
+  if (name !== 'patterns/blessed-stack.json') return false;
+  const strip = (text: string): string | null => {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const { generatedAt: _ignored, ...rest } = parsed as Record<string, unknown>;
+      return JSON.stringify(rest);
+    } catch {
+      return null;
+    }
+  };
+  const a = strip(existing);
+  return a !== null && a === strip(template);
 }
 
 /** 1 when --force had files to replace and every backup failed, so nothing was replaced (#369). */
@@ -483,7 +508,7 @@ export function initializeCharter(configDir: string, replace: boolean, initOptio
       result.createdFiles.push(label(t));
       continue;
     }
-    if (fs.readFileSync(t.target, 'utf-8') === t.content) continue;
+    if (sameAsTemplate(t.name, fs.readFileSync(t.target, 'utf-8'), t.content)) continue;
     if (!replace) {
       result.kept.push(label(t));
       continue;
@@ -618,6 +643,7 @@ All auth changes require:
         fs.writeFileSync(policyPath, existing + authPolicy);
       }
     }
+    if (initExitCode(result) !== EXIT_CODE.SUCCESS) return initExitCode(result);
 
     console.log('');
     console.log('  \u2713 Created .charter/ directory');

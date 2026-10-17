@@ -42,6 +42,19 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 const isBackupGitignore = (t: string): boolean => t.split(path.sep).join('/').endsWith('.backup/.gitignore');
 
+// Makes the shared manifest writer report a warning (engine-warning tests).
+let registerWarning: string | null = null;
+vi.mock('../commands/adf-manifest-register', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../commands/adf-manifest-register')>();
+  return {
+    ...actual,
+    registerManifestModules: (...a: Parameters<typeof actual.registerManifestModules>) => {
+      if (registerWarning) a[2]?.onWarning?.(registerWarning);
+      return actual.registerManifestModules(...a);
+    },
+  };
+});
+
 // Interactive prompt: answer injected per test; the real readline never runs.
 let promptAnswer = 'n';
 vi.mock('node:readline', async (importOriginal) => {
@@ -89,6 +102,7 @@ beforeEach(() => {
   errOut = [];
   tamper = null;
   failWrite = null;
+  registerWarning = null;
   promptAnswer = 'n';
   vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(a.map(String).join(' ')); });
   vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errOut.push(a.map(String).join(' ')); });
@@ -735,5 +749,215 @@ describe('init JSON keeps files and writesPerformed meaning what they did', () =
     const r = JSON.parse(out.join('\n'));
     expect(r.files).toEqual([]);
     expect(r.writesPerformed).toBe(0);
+  });
+});
+
+// ============================================================================
+// PR #373 round 3
+// ============================================================================
+
+const keptOf = (): string[] => JSON.parse(out.join('\n')).kept;
+
+describe('blessed-stack.json: generatedAt does not count as an edit', () => {
+  it('an untouched .charter/ reports kept: [] on an init re-run', async () => {
+    expect(await initCommand(TEXT, [])).toBe(0);
+    out = [];
+    expect(await initCommand(JSON_OPTS, [])).toBe(0);
+    expect(keptOf()).toEqual([]);
+  });
+
+  it('an untouched .charter/ reports nothing kept on a bootstrap re-run', async () => {
+    expect(await bootstrapCommand(YES, ['--yes', ...BOOT])).toBe(0);
+    out = [];
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', ...BOOT])).toBe(0);
+    const setup = JSON.parse(out.join('\n')).steps.find((s: { name: string }) => s.name === 'setup');
+    expect(setup.details.kept).toEqual([]);
+    out = [];
+    expect(await bootstrapCommand(YES, ['--yes', ...BOOT])).toBe(0);
+    expect(out.some(l => l.startsWith('  Kept existing '))).toBe(false);
+  });
+
+  it('an untouched .charter/ reports nothing kept on a setup re-run', async () => {
+    expect(await setupCommand(TEXT, ['--preset', 'worker', '--no-dependency-sync'])).toBe(0);
+    out = [];
+    expect(await setupCommand(TEXT, ['--preset', 'worker', '--no-dependency-sync'])).toBe(0);
+    expect(out.some(l => l.startsWith('  Kept existing '))).toBe(false);
+  });
+
+  it('init --force and setup --force on an untouched .charter/ replace nothing and write no backup', async () => {
+    expect(await initCommand(TEXT, [])).toBe(0);
+    const before = read('.charter/patterns/blessed-stack.json');
+    out = [];
+    expect(await initCommand(JSON_OPTS, ['--force'])).toBe(0);
+    expect(JSON.parse(out.join('\n')).replaced).toEqual([]);
+    expect(fs.existsSync('.charter/.backup')).toBe(false);
+    expect(read('.charter/patterns/blessed-stack.json')).toBe(before);
+
+    // setup writes its own template (inferred project name), so compare it with itself.
+    fs.rmSync('.charter', { recursive: true, force: true });
+    expect(await setupCommand(TEXT, ['--preset', 'worker', '--no-dependency-sync'])).toBe(0);
+    const setupBefore = tree('.charter');
+    out = [];
+    expect(await setupCommand(JSON_OPTS, ['--preset', 'worker', '--no-dependency-sync', '--force'])).toBe(0);
+    expect(JSON.parse(out.join('\n')).replaced).toBeUndefined();
+    expect(fs.existsSync('.charter/.backup')).toBe(false);
+    expect(tree('.charter')).toEqual(setupBefore);
+  });
+
+  it('a real edit is still detected: kept without --force, backed up and replaced with it', async () => {
+    expect(await initCommand(TEXT, [])).toBe(0);
+    const edited = JSON.parse(read('.charter/patterns/blessed-stack.json'));
+    edited.patterns[0].blessed_solution = 'Our own choice';
+    write('.charter/patterns/blessed-stack.json', JSON.stringify(edited, null, 2) + '\n');
+    out = [];
+    expect(await initCommand(JSON_OPTS, [])).toBe(0);
+    expect(keptOf()).toEqual(['.charter/patterns/blessed-stack.json']);
+    out = [];
+    expect(await initCommand(JSON_OPTS, ['--force'])).toBe(0);
+    const r = JSON.parse(out.join('\n'));
+    expect(r.replaced.map((x: { file: string }) => x.file)).toEqual(['.charter/patterns/blessed-stack.json']);
+    expect(read(r.replaced[0].backup)).toContain('Our own choice');
+  });
+
+  it('a blessed-stack.json that does not parse counts as differing', async () => {
+    expect(await initCommand(TEXT, [])).toBe(0);
+    write('.charter/patterns/blessed-stack.json', '{ not json\n');
+    out = [];
+    expect(await initCommand(JSON_OPTS, [])).toBe(0);
+    expect(keptOf()).toEqual(['.charter/patterns/blessed-stack.json']);
+  });
+});
+
+describe('warnings always reach the output', () => {
+  it('setup --force --format json includes a .charter/.backup/.gitignore warning', async () => {
+    writeHandCharter();
+    failWrite = isBackupGitignore;
+    expect(await setupCommand(JSON_OPTS, ['--preset', 'worker', '--no-dependency-sync', '--force'])).toBe(0);
+    const r = JSON.parse(out.join('\n'));
+    expect(r.warnings.some((w: string) => w.includes('Could not write .charter/.backup/.gitignore'))).toBe(true);
+  });
+
+  it('init --force text prints a gitignore warning even when nothing was created or replaced', async () => {
+    expect(await initCommand(TEXT, [])).toBe(0);
+    fs.mkdirSync('.charter/.backup');
+    failWrite = isBackupGitignore;
+    out = [];
+    expect(await initCommand(TEXT, ['--force'])).toBe(0);
+    expect(out.some(l => l.startsWith('  Warning: Could not write .charter/.backup/.gitignore'))).toBe(true);
+    expect(out.some(l => l.includes('.charter/ directory already exists'))).toBe(true);
+  });
+
+  it('a fresh adf init --force prints engine warnings (stdout text, stderr under JSON)', async () => {
+    registerWarning = 'simulated registration warning';
+    expect(await adfCommand(TEXT, ['init', '--force'])).toBe(0);
+    expect(out).toContain('  Warning: simulated registration warning');
+    expect(out.some(l => l.includes('Created .ai/ directory'))).toBe(true);
+    fs.rmSync('.ai', { recursive: true, force: true });
+    out = [];
+    const warned: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => { warned.push(a.map(String).join(' ')); });
+    expect(await adfCommand(JSON_OPTS, ['init', '--force'])).toBe(0);
+    expect(out.join('\n') + '\n').toBe(FRESH_JSON);
+    expect(warned).toContain('Warning: simulated registration warning');
+  });
+
+  it('bootstrap phase 3: a .ai/.backup/.gitignore that cannot be written is a warning, not a failed step', async () => {
+    write('.ai/core.adf', HAND_CORE);
+    failWrite = t => isBackupGitignore(t) && t.split(path.sep).join('/').includes('.ai/');
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--reset-adf', '--yes', ...BOOT])).toBe(0);
+    const step = JSON.parse(out.join('\n')).steps.find((s: { name: string }) => s.name === 'adf-init');
+    expect(step.status).toBe('pass');
+    expect(step.details.backupGitignore).toBe('failed');
+    expect(step.warnings.some((w: string) => w.includes('Could not write .ai/.backup/.gitignore'))).toBe(true);
+    expect(read('.ai/core.adf')).toBe(CORE_SCAFFOLD);
+  });
+});
+
+describe('--reset-adf with nothing to replace needs no confirmation', () => {
+  it('adf init --reset-adf without --yes on an empty dir creates the files, as plain adf init', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    expect(await adfCommand(TEXT, ['init', '--reset-adf'])).toBe(0);
+    expect(out.join('\n') + '\n').toBe(FRESH_TEXT);
+    expect(errOut).toEqual([]);
+  });
+
+  it('adf init --reset-adf --format json without --yes on an empty dir: plain adf init JSON', async () => {
+    expect(await adfCommand(JSON_OPTS, ['init', '--reset-adf'])).toBe(0);
+    expect(out.join('\n') + '\n').toBe(FRESH_JSON);
+  });
+
+  it('bootstrap --reset-adf without --yes on an empty dir proceeds (resetAdf: nothing-to-replace)', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    expect(await bootstrapCommand(JSON_OPTS, ['--reset-adf', ...BOOT])).toBe(0);
+    const r = JSON.parse(out.join('\n'));
+    expect(r.resetAdf).toEqual({ kind: 'nothing-to-replace' });
+    expect(read('.ai/core.adf')).toBe(CORE_SCAFFOLD);
+    expect(fs.existsSync('.ai/.backup')).toBe(false);
+  });
+
+  it('a .ai/ whose files are all the template also needs no confirmation', async () => {
+    expect(await adfCommand(TEXT, ['init'])).toBe(0);
+    const before = tree();
+    out = [];
+    expect(await adfCommand(TEXT, ['init', '--reset-adf'])).toBe(0);
+    expect(tree()).toEqual(before);
+  });
+});
+
+describe('the success banner prints only on success', () => {
+  it('init --force with config.json absent: no "Created .charter/ directory" when every backup failed', async () => {
+    writeHandCharter();
+    fs.rmSync('.charter/config.json');
+    write('.charter/.backup', 'not a directory\n');
+    expect(await initCommand(TEXT, ['--force'])).toBe(1);
+    expect(out.some(l => l.includes('Created .charter/ directory'))).toBe(false);
+    expect(out.some(l => l.startsWith('  Warning: Could not back up'))).toBe(true);
+  });
+
+  it('init --guided --force with config.json absent: no banner when every backup failed', async () => {
+    writeHandCharter();
+    fs.rmSync('.charter/config.json');
+    write('.charter/.backup', 'not a directory\n');
+    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
+    expect(out.some(l => l.includes('Created .charter/ directory'))).toBe(false);
+  });
+
+  it('init with config.json absent still prints the banner on success', async () => {
+    expect(await initCommand(TEXT, [])).toBe(0);
+    expect(out).toContain('  ✓ Created .charter/ directory');
+  });
+});
+
+describe('bootstrap phase 2 paths use the platform separator, as before #369', () => {
+  it('text and JSON', async () => {
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', ...BOOT])).toBe(0);
+    const setup = JSON.parse(out.join('\n')).steps.find((s: { name: string }) => s.name === 'setup');
+    expect(setup.details.created).toEqual(expect.arrayContaining([
+      path.join('.charter', 'config.json'),
+      path.join('.charter', 'patterns', 'blessed-stack.json'),
+      path.join('.charter', 'policies', 'governance.md'),
+      path.join('.charter', '.gitignore'),
+    ]));
+    fs.rmSync('.charter/policies/governance.md');
+    out = [];
+    expect(await bootstrapCommand(YES, ['--yes', ...BOOT])).toBe(0);
+    expect(out).toContain(`  Created ${path.join('.charter', 'policies', 'governance.md')}`);
+  });
+});
+
+describe('dirLabel', () => {
+  it('normalizes separators and strips trailing slashes without a regex', async () => {
+    const { dirLabel } = await import('../commands/adf-scaffold-merge');
+    expect(dirLabel('.ai')).toBe('.ai/');
+    expect(dirLabel('.ai/')).toBe('.ai/');
+    expect(dirLabel('.ai///')).toBe('.ai/');
+    expect(dirLabel(['a', 'b'].join(path.sep) + path.sep)).toBe('a/b/');
+    expect(dirLabel('./.charter')).toBe('./.charter/');
+    expect(dirLabel('')).toBe('');
+    expect(dirLabel('/')).toBe('/');
+    const started = Date.now();
+    expect(dirLabel('x' + '/'.repeat(50_000))).toBe('x/');
+    expect(dirLabel('/'.repeat(50_000) + 'x' + '/'.repeat(50_000))).toBe('/'.repeat(50_000) + 'x/');
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });

@@ -67,6 +67,8 @@ export interface ScaffoldWriteResult {
 
 export type ResetConfirmation =
   | { kind: 'confirmed-by-yes' }
+  /** No scaffold file exists that differs from the template: nothing to confirm (#373). */
+  | { kind: 'nothing-to-replace' }
   | { kind: 'confirmed-by-prompt' }
   | { kind: 'declined-at-prompt'; exitCode: 1 }
   | { kind: 'refused-non-interactive'; exitCode: 1 };
@@ -298,15 +300,17 @@ export function resetDeclinedMessage(aiDir: string): string {
 /**
  * `--reset-adf` confirmation (#354): `--yes` confirms; an interactive text run
  * asks y/N after listing the files; anything else (CI, pipes, --format json)
- * is refused. Never waits on a non-TTY stdin.
+ * is refused. Never waits on a non-TTY stdin. When no existing file differs
+ * from the template (an empty or absent .ai/), there is nothing to replace and
+ * nothing to confirm: the run goes ahead and only creates files.
  */
 export async function confirmReset(options: CLIOptions, aiDir: string, scaffolds: ScaffoldSpec[]): Promise<ResetConfirmation> {
   if (options.yes) return { kind: 'confirmed-by-yes' };
-  if (!process.stdin.isTTY || options.format !== 'text') return { kind: 'refused-non-interactive', exitCode: 1 };
   const files = filesResetWouldReplace(aiDir, scaffolds);
+  if (files.length === 0) return { kind: 'nothing-to-replace' };
+  if (!process.stdin.isTTY || options.format !== 'text') return { kind: 'refused-non-interactive', exitCode: 1 };
   console.log(`--reset-adf replaces these files with the preset template (each is backed up to ${aiDirLabel(aiDir)}.backup/ first):`);
   for (const f of files) console.log(`  ${f}`);
-  if (files.length === 0) console.log('  (none: every scaffold file is absent or already the template)');
   return await promptYesNo('Replace them? (y/N) ')
     ? { kind: 'confirmed-by-prompt' }
     : { kind: 'declined-at-prompt', exitCode: 1 };

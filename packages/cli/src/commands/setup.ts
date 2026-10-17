@@ -108,6 +108,8 @@ export interface SetupResult {
   replaced?: Array<{ file: string; backup: string }>;
   /** .charter/ files --force did not replace because the backup failed (#369). */
   notReplaced?: Array<{ file: string; detail: string }>;
+  /** Non-fatal .charter/ write problems (e.g. a .backup/.gitignore that could not be written), when any (#369). */
+  warnings?: string[];
   detected: DetectionResult;
   selectedPreset: StackPreset;
   inferenceMode: 'auto' | 'preset-override' | 'fallback-conservative';
@@ -285,6 +287,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     initialized: initResult.created,
     ...(initResult.replaced.length > 0 ? { replaced: initResult.replaced } : {}),
     ...(initResult.notReplaced.length > 0 ? { notReplaced: initResult.notReplaced } : {}),
+    ...(initResult.warnings && initResult.warnings.length > 0 ? { warnings: initResult.warnings } : {}),
     detected: detection,
     selectedPreset,
     inferenceMode,

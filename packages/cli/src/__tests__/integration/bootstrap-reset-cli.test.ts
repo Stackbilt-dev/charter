@@ -72,9 +72,20 @@ describe('bootstrap --reset-adf (built CLI)', () => {
 
   it('--format json refusal is one valid JSON document', () => {
     const dir = repo();
+    fs.mkdirSync(path.join(dir, '.ai'));
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - mine\n');
     const r = run(dir, ['--reset-adf', '--format', 'json', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
     expect(r.status).toBe(1);
     expect(JSON.parse(r.stdout).resetAdf).toEqual({ kind: 'refused-non-interactive', exitCode: 1 });
+  });
+
+  // #373: with nothing to replace (no .ai/ yet) there is nothing to confirm.
+  it('proceeds without --yes when no scaffold file exists to replace', () => {
+    const dir = repo();
+    const r = run(dir, ['--reset-adf', '--format', 'json', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).resetAdf).toEqual({ kind: 'nothing-to-replace' });
+    expect(fs.readFileSync(path.join(dir, '.ai', 'core.adf'), 'utf-8')).toContain('ADF: 0.1');
   });
 });
 
