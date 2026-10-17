@@ -578,7 +578,8 @@ class GuidedLineReader {
       w?.(null);
     });
     // Terminal mode only: with a listener, Ctrl-C emits this instead of closing.
-    // On a pipe, Ctrl-C is a real process SIGINT and Node's default (exit 130) applies.
+    // On a pipe, Ctrl-C is a real process SIGINT that this CLI does not handle; the shell
+    // reports exit code 130 (POSIX shells; Windows reports STATUS_CONTROL_C_EXIT).
     rl.on('SIGINT', () => {
       this.interrupted = true;
       rl.close();

@@ -39,7 +39,7 @@ vi.mock('node:readline', async (importOriginal) => {
   };
 });
 
-import { run } from '../index';
+import { CLIError, run } from '../index';
 import { initCommand } from '../commands/init';
 import { promptYesNo } from '../commands/adf-scaffold-write';
 
@@ -311,19 +311,30 @@ describe('init --guided --ci', () => {
 });
 
 describe('promptYesNo', () => {
-  it('Ctrl-C in terminal mode prints "Aborted." and exits the process with 130', async () => {
+  it('Ctrl-C in terminal mode rejects with CLIError "Aborted." (exit code 130), not N', async () => {
     terminalMode = true;
     setTTY(true);
-    // The mocked exit returns, so the prompt's promise is left unsettled, as the real process would be gone.
-    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
-    let settled = false;
-    void promptYesNo('Register these modules now? (y/N) ').then(() => { settled = true; });
+    const answer = promptYesNo('Register these modules now? (y/N) ');
     output.once('data', () => input.write('\x03'));
-    for (let i = 0; i < 500 && exit.mock.calls.length === 0; i++) await new Promise(r => setImmediate(r));
-    expect(exit).toHaveBeenCalledWith(130);
-    expect(errOut).toContain('Aborted.');
+    const err = await answer.then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(CLIError);
+    expect((err as CLIError).message).toBe('Aborted.');
+    expect((err as CLIError).exitCode).toBe(130);
     expect(errOut).not.toContain('  No answer (input closed); treating it as N.');
-    expect(settled).toBe(false);
+  });
+
+  it('Ctrl-C at bootstrap\'s orphan prompt stops the run: run() exits via CLIError 130 and records the usage-log event', async () => {
+    terminalMode = true;
+    setTTY(true);
+    // An orphan module (a .adf file the manifest does not list) makes bootstrap ask.
+    fs.mkdirSync('.ai', { recursive: true });
+    fs.writeFileSync('.ai/orphan.adf', 'ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - orphan\n');
+    output.on('data', (c: Buffer) => { if (c.toString().includes('Register these modules now?')) input.write('\x03'); });
+    const err = await run(['bootstrap', '--preset', 'worker', '--skip-install', '--skip-doctor']).then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(CLIError);
+    expect((err as CLIError).exitCode).toBe(130);
+    const events = fs.readFileSync('.charter/telemetry/events.ndjson', 'utf-8').trim().split('\n').map(l => JSON.parse(l));
+    expect(events.at(-1)).toMatchObject({ exitCode: 130 });
   });
 
   it('Ctrl-D (\\x04) on an empty line in terminal mode is N with the note, not an exit', async () => {

@@ -286,7 +286,7 @@ Returns exit code `2` if no routes or schema tables are detected (surface is des
 | `--format json` | Machine-readable output with stable schemas |
 | `--ci` | Non-interactive, deterministic exit codes |
 | `--yes` | Accept all prompts (for automation) |
-| `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`) |
+| `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`, `docs`, `rust-wasm`) |
 | `--detect-only` | Setup mode: detect stack/preset and exit |
 | `--no-dependency-sync` | Setup mode: do not rewrite `@stackbilt/cli` devDependency |
 

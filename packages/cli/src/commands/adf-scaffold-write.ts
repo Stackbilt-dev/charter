@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import * as readline from 'node:readline';
 import * as crypto from 'node:crypto';
 import type { CLIOptions } from '../index';
+import { CLIError } from '../index';
 import { registerManifestModules } from './adf-manifest-register';
 import { readVendorRecord, recordVendorModes } from './adf-vendor';
 import {
@@ -407,9 +408,10 @@ export function scaffoldReportLines(outcomes: ScaffoldOutcome[], mode: ScaffoldM
  * `rl.question` callback never fires on close, so without this the promise
  * never settled and the CLI exited 0 mid-run (#375).
  *
- * Ctrl-C is a request to stop, not an answer: it prints `Aborted.` and exits
- * the process with 130 right here, so no caller carries on (bootstrap would
- * otherwise go on to migrate configs and install packages).
+ * Ctrl-C is a request to stop, not an answer: the promise rejects with a
+ * CLIError (`Aborted.`, exit code 130) that no caller catches, so the command
+ * stops there (bootstrap would otherwise go on to migrate configs and install
+ * packages) and the dispatcher still records the usage-log event.
  */
 export function promptYesNo(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) {
@@ -419,15 +421,16 @@ export function promptYesNo(question: string): Promise<boolean> {
     input: process.stdin,
     output: process.stdout,
   });
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let answered = false;
     // Terminal mode: with a listener, readline emits this on Ctrl-C instead of closing.
+    // No caller catches it: run() records the usage-log event with exit 130 and
+    // bin.ts prints `charter: Aborted.` and sets process.exitCode = 130.
     rl.on('SIGINT', () => {
       answered = true;
       rl.close();
       console.error('');
-      console.error('Aborted.');
-      process.exit(130);
+      reject(new CLIError('Aborted.', 130));
     });
     rl.once('close', () => {
       if (answered) return;

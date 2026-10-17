@@ -1018,7 +1018,7 @@ npx charter surface --schema db/schema.sql          # explicit schema path
 | `--format json` | Machine-readable output with stable schemas |
 | `--ci` | Non-interactive, deterministic exit codes |
 | `--yes` | Accept all prompts (for automation). It never means "overwrite": `bootstrap --yes` and `init --yes` keep existing `.charter/` files and `.mcp.json`'s charter entry |
-| `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`, `docs`) |
+| `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`, `docs`, `rust-wasm`) |
 | `--detect-only` | Setup mode: detect stack/preset and exit |
 | `--no-dependency-sync` | Setup mode: do not rewrite `@stackbilt/cli` devDependency |
 | `--force` | Overwrite existing files; what that covers depends on the command. `hook install --force` replaces a non-Charter hook. `bootstrap --force` rewrites Charter thin pointers and `.mcp.json`'s charter entry (backing `.mcp.json` up to `.charter/.backup/` first) and merges `.ai/*.adf` (it never replaces them, never overwrites `.charter/` files, and never overwrites a hand-authored or compiled vendor file; `bootstrap` never installs hooks). `init --force` and `setup --force` replace `.charter/` templates, backing each up to `.charter/.backup/` first. `adf init --force` merges like `bootstrap --force`; `adf init --reset-adf` replaces. `adf create`, `adf populate` and `adf compile --write` document their own `--force` |
