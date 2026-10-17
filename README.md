@@ -95,6 +95,8 @@ npm install --save-dev @stackbilt/cli
 
 For pnpm workspaces: `pnpm add -Dw @stackbilt/cli`. For global install: `npm install -g @stackbilt/cli`.
 
+Upgrading a repo set up with Charter 1.x? `adf compile --write` now converts pointer files only with `--mode compiled`, and installed git hooks need a re-install. Follow [Upgrading to 2.0](docs/upgrading-to-2.0.md).
+
 ### Non-Node repos (C++, Go, Rust, etc.)
 
 Charter works as a local governance tool in any repo — Node is not required as your primary build system. Add it as a dev dependency and invoke it without a global install:
@@ -255,15 +257,17 @@ For live session continuity snapshots, use `charter context-refresh` to produce 
 | I want to compile task-specific agent context | `charter adf bundle --task "Fix the login flow"` |
 | I want to enforce metric/file-size ceilings | `charter adf evidence --auto-measure --ci` |
 | I want to migrate existing agent docs | `charter adf migrate --dry-run` |
+| I want to see whether each vendor file is a pointer or compiled output | `charter adf vendor status` (record the modes with `charter adf vendor init`) |
 | I want to regenerate CLAUDE.md / AGENTS.md / .cursorrules / GEMINI.md from `.ai/` | `charter adf compile --target all --write` (add `--mode compiled` to convert pointer files; your `## Environment` notes are kept in a retained block at the end) |
 | I want a letter-grade AI-readiness audit | `charter score` |
 | I want to validate governance in CI | `charter validate --ci --format json` |
 | I want to check pattern drift | `charter drift --ci --format json` |
 | I want to audit governance coverage | `charter audit --ci --format json` |
-| I want to install commit trailer normalization | `charter hook install --commit-msg` |
+| I want to require commit trailers before CI does | `charter hook install --commit-msg` |
 | I want to install ADF pre-commit checks | `charter hook install --pre-commit` |
 | I want session context for agent workflows | `charter context-refresh --once` or `charter hook print --claude` |
 | I want to start the MCP server for Claude Code / Codex / Cursor | `charter serve` |
+| I am upgrading a repo set up with Charter 1.x | Follow [Upgrading to 2.0](docs/upgrading-to-2.0.md) |
 
 ## Commands
 
