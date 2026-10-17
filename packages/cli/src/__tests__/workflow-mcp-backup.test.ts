@@ -17,7 +17,7 @@ vi.mock('../git-helpers', async (importOriginal) => {
 
 import { bootstrapCommand } from '../commands/bootstrap';
 import { getGithubWorkflow, setupCommand } from '../commands/setup';
-import { applyGovernanceWorkflow, KNOWN_WORKFLOWS, normalizeWorkflow, workflowHash, workflowWidening } from '../commands/github-workflow';
+import { applyGovernanceWorkflow, KNOWN_WORKFLOWS, normalizeWorkflow, TEMPLATE_PERMISSIONS, workflowHash } from '../commands/github-workflow';
 
 const TEXT: CLIOptions = { configPath: '.charter', format: 'text', ciMode: false, yes: false };
 const JSON_OPTS: CLIOptions = { ...TEXT, format: 'json' };
@@ -160,65 +160,92 @@ describe('#374 .mcp.json: CRLF', () => {
   });
 });
 
+// Every historical template (not the current ones), as setup.ts generated it.
+const HISTORY: Array<{ commit: string; packageManager: 'npm' | 'pnpm'; text: string }> = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'fixtures', 'charter-governance-history.json'), 'utf-8'),
+);
+const PRE_BADGE = 'contents: read → write; adds push and workflow_dispatch triggers; adds a step that commits and pushes to the repo';
+const TEMPLATE_LINE = 'the current Charter template grants contents: write and pull-requests: write, runs on push, pull_request and workflow_dispatch, and has a step that commits and pushes to the repo';
+
+// Hand edits that a YAML diff could misread; none may be described as a change.
+const CURRENT = getGithubWorkflow('npm');
+const HAND_VARIANTS: Record<string, string> = {
+  'flow-style permissions': CURRENT.replace('permissions:\n  contents: write\n  pull-requests: write\n', 'permissions: { contents: write, pull-requests: write }\n'),
+  'job-level permissions': CURRENT.replace('    runs-on: ubuntu-latest\n', '    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n'),
+  'quoted on:': CURRENT.replace('\non:\n', '\n"on":\n'),
+  'write-all': CURRENT.replace('permissions:\n  contents: write\n  pull-requests: write\n', 'permissions: write-all\n'),
+  'narrowed (contents: read)': CURRENT.replace('  contents: write\n', '  contents: read\n'),
+};
+
 describe('#374 known workflow versions', () => {
   it('lists the current npm and pnpm templates as safe (add new hashes when the template changes)', () => {
     for (const pm of ['npm', 'pnpm'] as const) {
       const entry = KNOWN_WORKFLOWS.find(k => k.hash === workflowHash(getGithubWorkflow(pm)));
-      expect(entry?.safe).toBe(true);
+      expect(entry).toMatchObject({ safe: true, packageManager: pm });
     }
   });
 
-  it('every known hash is unique, a sha256, and has a safe flag', () => {
+  it('every known hash is unique, a sha256, with a safe flag; every unsafe one has a description', () => {
     const hashes = KNOWN_WORKFLOWS.map(k => k.hash);
     expect(new Set(hashes).size).toBe(hashes.length);
     for (const k of KNOWN_WORKFLOWS) {
       expect(k.hash).toMatch(/^[0-9a-f]{64}$/);
       expect(typeof k.safe).toBe('boolean');
-      expect(k.origin.length).toBeGreaterThan(0);
+      expect(k.origin).toMatch(/^[0-9a-f]{7}[ ,]/);
+      if (!k.safe) expect(k.refreshChanges.trim().length).toBeGreaterThan(0);
     }
   });
 
-  it('the pinned historical template is listed as not safe, and its widening is named', () => {
-    expect(KNOWN_WORKFLOWS.find(k => k.hash === workflowHash(PINNED_HISTORICAL))?.safe).toBe(false);
-    expect(workflowWidening(PINNED_HISTORICAL, getGithubWorkflow('npm'))).toEqual([
-      'CI permissions (contents: read → write)',
-      'triggers (adds push, workflow_dispatch)',
-      'an auto-commit step that runs git push',
-    ]);
-    expect(workflowWidening(getGithubWorkflow('pnpm'), getGithubWorkflow('npm'))).toEqual([]);
+  it('the history fixture and the known list match one to one, and every historical template is unsafe', () => {
+    const fixtureHashes = HISTORY.map(h => workflowHash(h.text));
+    const current = [workflowHash(getGithubWorkflow('npm')), workflowHash(getGithubWorkflow('pnpm'))];
+    expect(new Set([...fixtureHashes, ...current])).toEqual(new Set(KNOWN_WORKFLOWS.map(k => k.hash)));
+    for (const h of HISTORY) {
+      const k = KNOWN_WORKFLOWS.find(e => e.hash === workflowHash(h.text));
+      expect(k).toMatchObject({ safe: false, packageManager: h.packageManager, refreshChanges: PRE_BADGE });
+      expect(k?.origin.startsWith(h.commit)).toBe(true);
+      // The static description is true of every historical template.
+      expect(h.text).toContain('permissions:\n  contents: read\n');
+      expect(h.text).not.toContain('git push');
+    }
+  });
+
+  it('TEMPLATE_PERMISSIONS describes the current template', () => {
+    expect(TEMPLATE_PERMISSIONS).toBe(TEMPLATE_LINE);
+    for (const pm of ['npm', 'pnpm'] as const) {
+      const t = getGithubWorkflow(pm);
+      expect(t).toContain('permissions:\n  contents: write\n  pull-requests: write\n\njobs:');
+      expect(t).toContain('on:\n  push:\n    branches: [main, master]\n  pull_request:\n    branches: [main, master]\n  workflow_dispatch:\n');
+      expect(t).toContain('git push');
+    }
   });
 
   it('normalizes a BOM, CRLF, trailing whitespace, trailing blank lines and a pinned CLI version', () => {
-    const t = getGithubWorkflow('npm');
-    expect(normalizeWorkflow('﻿' + t.replace(/\n/g, '  \r\n') + '\r\n\r\n')).toBe(normalizeWorkflow(t));
+    expect(normalizeWorkflow('﻿' + CURRENT.replace(/\n/g, '  \r\n') + '\r\n\r\n')).toBe(normalizeWorkflow(CURRENT));
     expect(workflowHash(PINNED_HISTORICAL.replace('0.4.2', '9.9.9-rc.1'))).toBe(workflowHash(PINNED_HISTORICAL));
   });
 });
 
 describe('#374 applyGovernanceWorkflow with an injected known list', () => {
-  // A same-permission older variant: the current template without its Audit Report step.
-  const current = getGithubWorkflow('npm');
-  const samePerms = current.replace(/\n {6}- name: Audit Report\n[^\n]*\n[^\n]*\n/, '\n');
-  const widening = samePerms.replace('contents: write', 'contents: read');
+  const samePerms = CURRENT.replace(/\n {6}- name: Audit Report\n[^\n]*\n[^\n]*\n/, '\n');
+  const entry = (text: string, safe: boolean) =>
+    new Map([[workflowHash(text), { hash: workflowHash(text), origin: 'test', packageManager: 'npm' as const, safe, refreshChanges: safe ? '' : 'some change' }]]);
+  const opts = { force: false, configDir: '.charter', command: 'setup' as const, packageManager: 'npm' as const };
 
-  it('refreshes a known same-permission variant silently', () => {
-    expect(samePerms).not.toBe(current);
+  it('refreshes a known safe variant silently', () => {
+    expect(samePerms).not.toBe(CURRENT);
     write(WF, samePerms);
-    const known = new Map([[workflowHash(samePerms), { hash: workflowHash(samePerms), origin: 'test', safe: true }]]);
-    expect(applyGovernanceWorkflow(WF, current, { force: false, configDir: '.charter', command: 'setup', known })).toEqual({ action: 'updated' });
-    expect(read(WF)).toBe(current);
+    expect(applyGovernanceWorkflow(WF, CURRENT, { ...opts, known: entry(samePerms, true) })).toEqual({ action: 'updated' });
+    expect(read(WF)).toBe(CURRENT);
   });
 
-  it('keeps a variant flagged safe whose permissions differ (the run-time check wins)', () => {
-    write(WF, widening);
-    const known = new Map([[workflowHash(widening), { hash: workflowHash(widening), origin: 'test', safe: true }]]);
-    const outcome = applyGovernanceWorkflow(WF, current, { force: false, configDir: '.charter', command: 'setup', known });
-    expect(outcome).toMatchObject({ action: 'kept', reason: 'would-widen-permissions', widens: ['CI permissions (contents: read → write)'] });
-    expect(read(WF)).toBe(widening);
+  it('keeps a known unsafe variant with its static description', () => {
+    write(WF, samePerms);
+    const outcome = applyGovernanceWorkflow(WF, CURRENT, { ...opts, known: entry(samePerms, false) });
+    expect(outcome).toMatchObject({ action: 'kept', reason: 'would-widen-permissions', changes: 'some change', templatePermissions: TEMPLATE_LINE });
+    expect(read(WF)).toBe(samePerms);
   });
 });
-
-const WIDEN_PARTS = ['contents: read → write', 'adds push, workflow_dispatch', 'git push'];
 
 describe('#374 bootstrap --ci github: the workflow', () => {
   it('creates a missing workflow', async () => {
@@ -234,197 +261,260 @@ describe('#374 bootstrap --ci github: the workflow', () => {
     expect(fs.existsSync('.charter/.backup')).toBe(false);
   });
 
-  it('silently refreshes the current pnpm template to npm (and the reverse): same permissions', async () => {
-    write(WF, getGithubWorkflow('pnpm'));
+  it('names a package-manager switch when it refreshes the other current template', async () => {
+    write(WF, getGithubWorkflow('npm'));
+    write('pnpm-lock.yaml', '');
     expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
-    expect(out).toContain(`  Updated ${P(WF)}`);
+    expect(read(WF)).toBe(getGithubWorkflow('pnpm'));
+    expect(out).toContain(`  Updated ${P(WF)} (package manager npm → pnpm; adds pnpm/action-setup@v4)`);
     expect(out.some(l => l.includes('Warning') && l.includes('charter-governance.yml'))).toBe(false);
     expect(fs.existsSync('.charter/.backup')).toBe(false);
 
-    write('pnpm-lock.yaml', '');
+    fs.rmSync('pnpm-lock.yaml');
     out = [];
     expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('pnpm'));
-    expect(out).toContain(`  Updated ${P(WF)}`);
+    expect(read(WF)).toBe(getGithubWorkflow('npm'));
+    expect(out).toContain(`  Updated ${P(WF)} (package manager pnpm → npm; removes pnpm/action-setup@v4)`);
   });
 
-  it('counts a CRLF copy of the template as known', async () => {
-    write(WF, getGithubWorkflow('pnpm').replace(/\n/g, '\r\n'));
-    expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
+  it('JSON records the package-manager switch', async () => {
+    write(WF, getGithubWorkflow('npm'));
+    write('pnpm-lock.yaml', '');
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
+    expect(setupStep().details.workflow).toEqual({
+      file: WF, action: 'updated', packageManagerChange: { from: 'npm', to: 'pnpm', detail: 'adds pnpm/action-setup@v4' },
+    });
+  });
+
+  it('refreshes a CRLF or BOM copy of the template it would write, with no note', async () => {
+    for (const copy of [CURRENT.replace(/\n/g, '\r\n'), '﻿' + CURRENT]) {
+      write(WF, copy);
+      out = [];
+      expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
+      expect(read(WF)).toBe(CURRENT);
+      expect(out).toContain(`  Updated ${P(WF)}`);
+    }
     expect(fs.existsSync('.charter/.backup')).toBe(false);
   });
 
-  it('counts a copy with a BOM as known', async () => {
-    write(WF, '﻿' + getGithubWorkflow('pnpm'));
-    expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
-    expect(fs.existsSync('.charter/.backup')).toBe(false);
-  });
-
-  for (const flags of [[], ['--yes']]) {
-    it(`keeps a contents: read historical template, naming the widening${flags.length ? ` under ${flags.join(' ')}` : ''}`, async () => {
-      write(WF, PINNED_HISTORICAL);
-      expect(await bootstrapCommand(flags.length ? YES : TEXT, [...flags, '--ci', 'github', ...BOOT])).toBe(0);
-      expect(read(WF)).toBe(PINNED_HISTORICAL);
+  for (const h of HISTORY) {
+    it(`keeps the ${h.commit} ${h.packageManager} template under --yes with the static message`, async () => {
+      write(WF, h.text);
+      if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');
+      expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
+      expect(read(WF)).toBe(h.text);
       expect(fs.existsSync('.charter/.backup')).toBe(false);
-      const warning = out.find(l => l.startsWith(`  Warning: Kept ${WF}: it is an older Charter template`));
-      for (const part of WIDEN_PARTS) expect(warning).toContain(part);
-      expect(warning).toContain("'charter bootstrap --ci github --force' upgrades it");
+      expect(out).toContain(
+        `  Warning: Kept ${WF}: it is an older Charter template, and refreshing it to the current one changes what CI may do: ${PRE_BADGE}. ` +
+        "It was not overwritten. 'charter bootstrap --ci github --force' upgrades it, backing it up to .charter/.backup/ first " +
+        "(--force also rewrites every Charter-managed pointer, replaces .mcp.json's mcpServers.charter entry (backing .mcp.json up first) " +
+        'and merges the preset template into .ai/*.adf without rewriting existing content). To replace only the workflow, delete it and re-run without --force.',
+      );
     });
   }
 
-  it('JSON: a widening historical template is kept with reason would-widen-permissions', async () => {
+  it('plain bootstrap (no --yes) also keeps a historical template', async () => {
+    write(WF, PINNED_HISTORICAL);
+    expect(await bootstrapCommand(TEXT, ['--ci', 'github', ...BOOT])).toBe(0);
+    expect(read(WF)).toBe(PINNED_HISTORICAL);
+  });
+
+  it('JSON: a historical template is kept with reason would-widen-permissions and the static texts', async () => {
     write(WF, PINNED_HISTORICAL);
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
     const step = setupStep();
-    expect(step.details.kept).toContain(WF);
-    expect(step.details.workflow).toMatchObject({ file: WF, action: 'kept', reason: 'would-widen-permissions' });
-    expect(step.details.workflow.widens).toHaveLength(3);
+    expect(step.details.kept).toContain(P(WF));
+    expect(step.details.workflow).toEqual({
+      file: WF, action: 'kept', reason: 'would-widen-permissions', changes: PRE_BADGE, templatePermissions: TEMPLATE_LINE,
+    });
+    expect(JSON.stringify(step)).not.toContain('widens');
   });
 
-  it('--force backs a widening historical template up, then replaces it, saying what widened', async () => {
+  it('--force backs a historical template up, then replaces it, naming the changes', async () => {
     write(WF, PINNED_HISTORICAL);
     expect(await bootstrapCommand(TEXT, ['--force', '--ci', 'github', ...BOOT])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
+    expect(read(WF)).toBe(CURRENT);
     const files = backups('github-workflows-charter-governance.yml.');
     expect(files).toHaveLength(1);
     expect(read(`.charter/.backup/${files[0]}`)).toBe(PINNED_HISTORICAL);
-    const line = out.find(l => l.startsWith(`  Replaced ${WF} (backup: .charter/.backup/${files[0]}; widened `));
-    for (const part of WIDEN_PARTS) expect(line).toContain(part);
+    expect(out).toContain(`  Replaced ${WF} (backup: .charter/.backup/${files[0]}; changes: ${PRE_BADGE})`);
   });
 
-  for (const flags of [[], ['--yes']]) {
-    it(`keeps a hand-edited workflow byte-for-byte with a warning${flags.length ? ` under ${flags.join(' ')}` : ''}`, async () => {
-      write(WF, HAND_EDITED);
-      expect(await bootstrapCommand(flags.length ? YES : TEXT, [...flags, '--ci', 'github', ...BOOT])).toBe(0);
-      expect(read(WF)).toBe(HAND_EDITED);
+  for (const [name, text] of Object.entries({ 'hand-edited': HAND_EDITED, ...HAND_VARIANTS })) {
+    it(`keeps a ${name} workflow with the template-permissions warning and no claim of what changed`, async () => {
+      write(WF, text);
+      expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
+      expect(read(WF)).toBe(text);
       expect(fs.existsSync('.charter/.backup')).toBe(false);
       const warning = out.find(l => l.startsWith(`  Warning: Kept ${WF}: it differs from every workflow Charter generated`));
-      expect(warning).toContain("'charter bootstrap --ci github --force' replaces it");
-      expect(warning).toContain('backing it up to .charter/.backup/ first');
-      // The hint names what else bootstrap --force does, and the narrower alternative.
+      expect(warning).toContain(`The current Charter template grants contents: write and pull-requests: write, runs on push, pull_request and workflow_dispatch, and has a step that commits and pushes to the repo; review it before using --force.`);
+      expect(warning).toContain("'charter bootstrap --ci github --force' replaces it with the current template, backing it up to .charter/.backup/ first");
       expect(warning).toContain('rewrites every Charter-managed pointer');
-      expect(warning).toContain("replaces .mcp.json's mcpServers.charter entry");
-      expect(warning).toContain('merges the preset template into .ai/*.adf');
       expect(warning).toContain('To replace only the workflow, delete it and re-run');
-      expect(out.some(l => l.startsWith('  Updated') && l.includes('charter-governance'))).toBe(false);
-      // Not folded into the .charter/ "Kept existing ... 'charter init --force'" line.
+      expect(out.join('\n')).not.toMatch(/widen|[a-z-]+: [a-z-]+ →/);
       expect(out.some(l => l.startsWith('  Kept existing') && l.includes('charter-governance'))).toBe(false);
     });
   }
 
-  it('JSON: a kept hand-edited workflow is listed in kept (with /), with the warning', async () => {
+  for (const [name, text] of Object.entries(HAND_VARIANTS)) {
+    it(`--force replaces a ${name} workflow, stating the template's permissions, not a diff`, async () => {
+      write(WF, text);
+      expect(await bootstrapCommand(TEXT, ['--force', '--ci', 'github', ...BOOT])).toBe(0);
+      expect(read(WF)).toBe(CURRENT);
+      const files = backups('github-workflows-charter-governance.yml.');
+      expect(out).toContain(`  Replaced ${WF} (backup: .charter/.backup/${files[0]}; ${TEMPLATE_LINE})`);
+      expect(out.join('\n')).not.toMatch(/widen|[a-z-]+: [a-z-]+ →/);
+    });
+  }
+
+  it('JSON: a kept hand-edited workflow (platform separator in kept, / elsewhere)', async () => {
     write(WF, HAND_EDITED);
     expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
     const step = setupStep();
-    expect(step.details.kept).toContain(WF);
-    expect(step.details.updated).not.toContain(P(WF));
-    expect(step.details.workflow).toEqual({ file: WF, action: 'kept', reason: 'hand-edited' });
+    expect(step.details.kept).toContain(P(WF));
+    expect(step.details.workflow).toEqual({ file: WF, action: 'kept', reason: 'hand-edited', templatePermissions: TEMPLATE_LINE });
     expect(step.warnings.some((w: string) => w.startsWith(`Kept ${WF}`))).toBe(true);
-  });
-
-  it('--force backs a hand-edited workflow up, then replaces it', async () => {
-    write(WF, HAND_EDITED);
-    expect(await bootstrapCommand(TEXT, ['--force', '--ci', 'github', ...BOOT])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
-    const files = backups('github-workflows-charter-governance.yml.');
-    expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/^github-workflows-charter-governance\.yml\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/);
-    expect(read(`.charter/.backup/${files[0]}`)).toBe(HAND_EDITED);
-    expect(read('.charter/.backup/.gitignore')).toBe('*\n');
-    expect(out).toContain(`  Replaced ${WF} (backup: .charter/.backup/${files[0]})`);
   });
 
   it('--force JSON lists the replaced workflow with its backup', async () => {
     write(WF, HAND_EDITED);
     expect(await bootstrapCommand(JSON_OPTS, ['--force', '--ci', 'github', ...BOOT])).toBe(0);
     const step = setupStep();
-    expect(step.details.replaced).toEqual([{ file: WF, reason: 'hand-edited', backup: expect.stringMatching(/^\.charter\/\.backup\/github-workflows-charter-governance\.yml\./) }]);
-    expect(step.details.kept).not.toContain(WF);
+    expect(step.details.replaced).toEqual([{ file: WF, reason: 'hand-edited', note: TEMPLATE_LINE, backup: expect.stringMatching(/^\.charter\/\.backup\/github-workflows-charter-governance\.yml\./) }]);
+    expect(step.details.kept).not.toContain(P(WF));
+    expect(read('.charter/.backup/.gitignore')).toBe('*\n');
   });
 
-  it('--force does not replace it when the backup fails: warns, lists it in notReplaced, exits 1', async () => {
+  it('--force with a failed backup: not replaced, a failed step, no "Bootstrap complete", exit 1', async () => {
     write(WF, HAND_EDITED);
     write('.charter/.backup', 'a file where the backup directory should be\n');
     expect(await bootstrapCommand(TEXT, ['--force', '--ci', 'github', ...BOOT])).toBe(1);
     expect(read(WF)).toBe(HAND_EDITED);
     expect(out.some(l => l.includes(`Could not back up ${WF} to .charter/.backup/`) && l.includes('not replaced (backup failed)'))).toBe(true);
     expect(out).toContain(`  Not replaced ${WF} (backup failed; see warning)`);
-    expect(out.some(l => l.startsWith('  Replaced') && l.includes('charter-governance'))).toBe(false);
+    expect(out.some(l => l.startsWith('Bootstrap complete'))).toBe(false);
+    expect(out.some(l => l.startsWith('Bootstrap finished with failures.'))).toBe(true);
+    expect(out.some(l => l.includes('Bootstrap partially complete') )).toBe(true);
   });
 
-  it('--force JSON with a failed backup: notReplaced, exit 1', async () => {
+  it('--force JSON with a failed backup: status partial, setup step fail, notReplaced, exit 1', async () => {
     write(WF, HAND_EDITED);
     write('.charter/.backup', 'a file where the backup directory should be\n');
     expect(await bootstrapCommand(JSON_OPTS, ['--force', '--ci', 'github', ...BOOT])).toBe(1);
+    const json = JSON.parse(out.join('\n'));
+    expect(json.status).toBe('partial');
     const step = setupStep();
+    expect(step.status).toBe('fail');
     expect(step.details.notReplaced).toEqual([{ file: WF, reason: 'hand-edited', detail: expect.stringContaining('not replaced (backup failed)') }]);
     expect(step.details.workflow).toMatchObject({ file: WF, action: 'not-replaced' });
-    expect(read(WF)).toBe(HAND_EDITED);
+  });
+});
+
+describe('#374 bootstrap --force: .mcp.json backup failure', () => {
+  it('a mcpServers.charter entry --force could not replace: notReplaced, failed step, exit 1', async () => {
+    const MCP = JSON.stringify({ mcpServers: { charter: { command: 'charter' } } }, null, 2) + '\n';
+    write('.mcp.json', MCP);
+    write('.charter/.backup', 'a file where the backup directory should be\n');
+    expect(await bootstrapCommand(JSON_OPTS, ['--force', ...BOOT])).toBe(1);
+    expect(read('.mcp.json')).toBe(MCP);
+    const json = JSON.parse(out.join('\n'));
+    expect(json.status).toBe('partial');
+    const step = setupStep();
+    expect(step.status).toBe('fail');
+    expect(step.details.notReplaced).toEqual([{ file: '.mcp.json', detail: expect.stringContaining('mcpServers.charter was not replaced') }]);
+  });
+});
+
+describe('#374 governance gaps: the CI workflow check', () => {
+  const DRIFT_CONFIG = JSON.stringify({ project: 'x', drift: { enabled: true } }, null, 2) + '\n';
+  const gapListed = () => (JSON.parse(out.join('\n')).governanceGaps as Array<{ gap: string }>)
+    .some(g => g.gap === 'drift detection enabled but no CI workflow');
+
+  it('finds the generated charter-governance.yml', async () => {
+    write('.charter/config.json', DRIFT_CONFIG);
+    write(WF, CURRENT);
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', ...BOOT])).toBe(0);
+    expect(gapListed()).toBe(false);
+  });
+
+  it('also accepts charter.yml', async () => {
+    write('.charter/config.json', DRIFT_CONFIG);
+    write('.github/workflows/charter.yml', 'name: x\n');
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', ...BOOT])).toBe(0);
+    expect(gapListed()).toBe(false);
+  });
+
+  it('reports the gap when neither exists', async () => {
+    write('.charter/config.json', DRIFT_CONFIG);
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', ...BOOT])).toBe(0);
+    expect(gapListed()).toBe(true);
   });
 });
 
 const SETUP = ['--ci', 'github', '--preset', 'worker', '--no-dependency-sync'];
 
 describe('#374 setup --ci github: the workflow', () => {
-  it('keeps a hand-edited workflow without --force, with a warning naming what else --force does', async () => {
+  it('keeps a hand-edited workflow without --force, with the template-permissions warning', async () => {
     write(WF, HAND_EDITED);
     expect(await setupCommand(YES, SETUP)).toBe(0);
     expect(read(WF)).toBe(HAND_EDITED);
     expect(out).toContain(`  CI policy gate: kept (not the Charter template) (${P(WF)})`);
     const warning = out.find(l => l.includes("'charter setup --ci github --force' replaces it"));
+    expect(warning).toContain(`${TEMPLATE_LINE.charAt(0).toUpperCase()}${TEMPLATE_LINE.slice(1)}; review it before using --force.`);
     expect(warning).toContain('--force also replaces every .charter/ template that differs');
     expect(warning).toContain('To replace only the workflow, delete it and re-run');
   });
 
-  it('keeps a contents: read historical template without --force, naming the widening', async () => {
-    write(WF, PINNED_HISTORICAL);
-    expect(await setupCommand(YES, SETUP)).toBe(0);
-    expect(read(WF)).toBe(PINNED_HISTORICAL);
-    expect(out).toContain(`  CI policy gate: kept (refreshing it would widen CI permissions) (${P(WF)})`);
-    const warning = out.find(l => l.startsWith(`  Warning: Kept ${WF}: it is an older Charter template`));
-    for (const part of WIDEN_PARTS) expect(warning).toContain(part);
-    expect(warning).toContain("'charter setup --ci github --force' upgrades it");
-  });
+  for (const h of HISTORY) {
+    it(`keeps the ${h.commit} ${h.packageManager} template with the static message`, async () => {
+      write(WF, h.text);
+      if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');
+      expect(await setupCommand(YES, SETUP)).toBe(0);
+      expect(read(WF)).toBe(h.text);
+      expect(out).toContain(`  CI policy gate: kept (refreshing it would widen CI permissions) (${P(WF)})`);
+      const warning = out.find(l => l.startsWith(`  Warning: Kept ${WF}: it is an older Charter template`));
+      expect(warning).toContain(`changes what CI may do: ${PRE_BADGE}. It was not overwritten.`);
+      expect(warning).toContain("'charter setup --ci github --force' upgrades it");
+    });
+  }
 
-  it('JSON: a widening template is kept, planned and applied as noop', async () => {
+  it('JSON: a historical template is kept, planned and applied as noop', async () => {
     write(WF, PINNED_HISTORICAL);
     expect(await setupCommand(JSON_OPTS, SETUP)).toBe(0);
     const result = JSON.parse(out.join('\n'));
-    expect(result.workflow).toMatchObject({ kept: true, reason: 'would-widen-permissions', updated: false });
+    expect(result.workflow).toMatchObject({ kept: true, reason: 'would-widen-permissions', changes: PRE_BADGE, templatePermissions: TEMPLATE_LINE, updated: false });
+    expect(result.workflow.widens).toBeUndefined();
     expect(result.mutationPlan.workflow.action).toBe('noop');
     expect(result.appliedMutations.workflow.action).toBe('noop');
   });
 
-  it('--force backs a widening template up and replaces it, saying what widened', async () => {
+  it('--force backs a historical template up and replaces it, naming the changes', async () => {
     write(WF, PINNED_HISTORICAL);
     expect(await setupCommand(TEXT, [...SETUP, '--force'])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
+    expect(read(WF)).toBe(CURRENT);
     const files = backups('github-workflows-charter-governance.yml.');
     expect(files).toHaveLength(1);
     expect(read(`.charter/.backup/${files[0]}`)).toBe(PINNED_HISTORICAL);
-    const line = out.find(l => l.startsWith(`  CI policy gate: replaced, backup: .charter/.backup/${files[0]}; widened `));
-    for (const part of WIDEN_PARTS) expect(line).toContain(part);
+    expect(out).toContain(`  CI policy gate: replaced, backup: .charter/.backup/${files[0]}; changes: ${PRE_BADGE} (${P(WF)})`);
   });
 
-  it('refreshes the other package manager\'s current template without --force', async () => {
+  it('names a package-manager switch', async () => {
     write(WF, getGithubWorkflow('pnpm'));
     expect(await setupCommand(YES, SETUP)).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
-    expect(out).toContain(`  CI policy gate: updated (${P(WF)})`);
+    expect(read(WF)).toBe(CURRENT);
+    expect(out).toContain(`  CI policy gate: updated (package manager pnpm → npm; removes pnpm/action-setup@v4) (${P(WF)})`);
   });
 
-  it('--force backs a hand-edited workflow up, then replaces it; JSON names the backup', async () => {
+  it('--force replaces a hand-edited workflow; JSON lists it in top-level replaced with reason', async () => {
     write(WF, HAND_EDITED);
     expect(await setupCommand(JSON_OPTS, [...SETUP, '--force'])).toBe(0);
-    expect(read(WF)).toBe(getGithubWorkflow('npm'));
+    expect(read(WF)).toBe(CURRENT);
     const result = JSON.parse(out.join('\n'));
     const files = backups('github-workflows-charter-governance.yml.');
     expect(files).toHaveLength(1);
     expect(read(`.charter/.backup/${files[0]}`)).toBe(HAND_EDITED);
-    expect(result.workflow).toMatchObject({ updated: true, reason: 'hand-edited', backup: `.charter/.backup/${files[0]}` });
+    expect(result.workflow).toMatchObject({ updated: true, reason: 'hand-edited', backup: `.charter/.backup/${files[0]}`, templatePermissions: TEMPLATE_LINE });
+    expect(result.replaced).toEqual(expect.arrayContaining([{ file: WF, backup: `.charter/.backup/${files[0]}`, reason: 'hand-edited' }]));
     expect(result.mutationPlan.workflow.action).toBe('update');
   });
 
@@ -437,7 +527,7 @@ describe('#374 setup --ci github: the workflow', () => {
     expect(result.workflow).toMatchObject({ kept: true, reason: 'hand-edited' });
   });
 
-  it('--force with a failed backup: not replaced (backup failed), listed in notReplaced, exit 1', async () => {
+  it('--force with a failed backup: not replaced (backup failed), exit 1', async () => {
     write(WF, HAND_EDITED);
     write('.charter/.backup', 'a file where the backup directory should be\n');
     expect(await setupCommand(TEXT, [...SETUP, '--force'])).toBe(1);
@@ -446,12 +536,14 @@ describe('#374 setup --ci github: the workflow', () => {
     expect(out.some(l => l.includes('kept (not the Charter template)'))).toBe(false);
   });
 
-  it('--force JSON with a failed backup: notReplaced lists the workflow, exit 1', async () => {
-    write(WF, HAND_EDITED);
+  it('--force JSON with a failed backup: notReplaced lists the workflow with its reason, exit 1', async () => {
+    write(WF, PINNED_HISTORICAL);
     write('.charter/.backup', 'a file where the backup directory should be\n');
     expect(await setupCommand(JSON_OPTS, [...SETUP, '--force'])).toBe(1);
     const result = JSON.parse(out.join('\n'));
-    expect(result.notReplaced).toEqual(expect.arrayContaining([{ file: WF, detail: expect.stringContaining('not replaced (backup failed)') }]));
+    expect(result.notReplaced).toEqual(expect.arrayContaining([
+      { file: WF, reason: 'would-widen-permissions', detail: expect.stringContaining('not replaced (backup failed)') },
+    ]));
     expect(result.workflow).toMatchObject({ notReplaced: true, updated: false });
     expect(result.workflow.kept).toBeUndefined();
   });

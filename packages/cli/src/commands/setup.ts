@@ -13,7 +13,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { initExitCode, initializeCharter, printInitChanges, type StackPreset } from './init';
 import { applyGovernanceWorkflow, canRefreshSilently } from './github-workflow';
-import type { WorkflowKeepReason } from './github-workflow';
+import type { PackageManagerChange, WorkflowKeepReason } from './github-workflow';
 import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
@@ -106,10 +106,10 @@ ${installStep}
 export interface SetupResult {
   configPath: string;
   initialized: boolean;
-  /** .charter/ files replaced under --force, each backed up first (#369). */
-  replaced?: Array<{ file: string; backup: string }>;
-  /** Files --force did not replace because the backup failed: .charter/ templates (#369) and the CI workflow (#374). */
-  notReplaced?: Array<{ file: string; detail: string }>;
+  /** Files replaced under --force, each backed up first: .charter/ templates (#369) and the CI workflow (#374, with `reason`). */
+  replaced?: Array<{ file: string; backup: string; reason?: WorkflowKeepReason }>;
+  /** Files --force did not replace because the backup failed: .charter/ templates (#369) and the CI workflow (#374, with `reason`). */
+  notReplaced?: Array<{ file: string; detail: string; reason?: WorkflowKeepReason }>;
   /** Non-fatal .charter/ write problems (e.g. a .backup/.gitignore that could not be written), when any (#369). */
   warnings?: string[];
   detected: DetectionResult;
@@ -126,8 +126,12 @@ export interface SetupResult {
     notReplaced?: boolean;
     /** Why it was kept or replaced: hand-edited, or an older template whose refresh would widen CI permissions (#374). */
     reason?: WorkflowKeepReason;
-    /** What the refresh would widen, or widened (#374). */
-    widens?: string[];
+    /** For an older Charter template: what refreshing it changes (static text, #374). */
+    changes?: string;
+    /** What the current template grants (static text, #374). */
+    templatePermissions?: string;
+    /** A refresh that switched the package manager (#374). */
+    packageManagerChange?: PackageManagerChange;
     /** Where the workflow was backed up before --force replaced it (#374). */
     backup?: string;
     /** Why the workflow was kept or not replaced, or a .backup/.gitignore problem (#374). */
@@ -360,15 +364,18 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   };
 
   let workflowNotReplaced = false;
+  let workflowNote = '';
   if (ciMode === 'github') {
-    // #374: refresh only a Charter-generated workflow whose refresh widens
-    // nothing; any other one is kept, or under --force backed up to
-    // .charter/.backup/ and replaced.
+    // #374: refresh only a safe Charter template; any other workflow is kept,
+    // or under --force backed up to .charter/.backup/ and replaced.
     const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
       force,
       configDir: options.configPath,
       command: 'setup',
+      packageManager,
     });
+    const workflowFile = workflowPath.split(path.sep).join('/');
+    if (workflow.action === 'replaced') workflowNote = workflow.note;
     const created = workflow.action === 'created';
     const updated = workflow.action === 'updated' || workflow.action === 'replaced';
     workflowNotReplaced = workflow.action === 'not-replaced';
@@ -381,12 +388,16 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       ...(workflow.action === 'kept' ? { kept: true } : {}),
       ...(workflow.action === 'not-replaced' ? { notReplaced: true } : {}),
       ...('reason' in workflow ? { reason: workflow.reason } : {}),
-      ...('widens' in workflow && workflow.widens ? { widens: workflow.widens } : {}),
+      ...('changes' in workflow && workflow.changes ? { changes: workflow.changes } : {}),
+      ...('templatePermissions' in workflow ? { templatePermissions: workflow.templatePermissions } : {}),
+      ...(workflow.action === 'updated' && workflow.packageManagerChange ? { packageManagerChange: workflow.packageManagerChange } : {}),
       ...(workflow.action === 'replaced' ? { backup: workflow.backup } : {}),
       ...('warning' in workflow && workflow.warning ? { warning: workflow.warning } : {}),
     };
     if (workflow.action === 'not-replaced') {
-      result.notReplaced = [...(result.notReplaced ?? []), { file: workflowPath.split(path.sep).join('/'), detail: workflow.warning }];
+      result.notReplaced = [...(result.notReplaced ?? []), { file: workflowFile, detail: workflow.warning, reason: workflow.reason }];
+    } else if (workflow.action === 'replaced') {
+      result.replaced = [...(result.replaced ?? []), { file: workflowFile, backup: workflow.backup, reason: workflow.reason }];
     }
     result.appliedMutations.workflow = {
       action: created ? 'create' : updated ? 'update' : 'noop',
@@ -428,9 +439,11 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
     const workflowState = result.workflow.created
       ? 'enabled'
       : result.workflow.backup
-        ? `replaced, backup: ${result.workflow.backup}${result.workflow.widens ? `; widened ${result.workflow.widens.join('; ')}` : ''}`
+        ? `replaced, backup: ${result.workflow.backup}${workflowNote ? `; ${workflowNote}` : ''}`
         : result.workflow.updated
-          ? 'updated'
+          ? result.workflow.packageManagerChange
+            ? `updated (package manager ${result.workflow.packageManagerChange.from} → ${result.workflow.packageManagerChange.to}; ${result.workflow.packageManagerChange.detail})`
+            : 'updated'
           : result.workflow.notReplaced
             ? 'not replaced (backup failed)'
             : result.workflow.kept

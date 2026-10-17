@@ -12,15 +12,15 @@ This writes `.github/workflows/charter-governance.yml` to your repo.
 
 ### Re-running setup or bootstrap
 
-Re-running `charter setup --ci github` or `charter bootstrap --ci github` never silently overwrites a workflow you changed, and never silently widens what CI may do ([#374](https://github.com/Stackbilt-dev/charter/issues/374)):
+Re-running `charter setup --ci github` or `charter bootstrap --ci github` never silently overwrites a workflow you changed, and never silently changes what CI may do ([#374](https://github.com/Stackbilt-dev/charter/issues/374)):
 
 - **Missing:** the workflow is created.
 - **Identical to the current template:** left alone.
-- **A workflow Charter generated, with the same permissions:** refreshed to the current template. This covers switching between the npm and pnpm forms, and copies that differ only in a BOM, CRLF line endings, trailing whitespace or a pinned `@stackbilt/cli@x.y.z` version (a pin is treated as template text, so a pin you changed by hand is refreshed).
-- **An older Charter template whose refresh would widen permissions:** kept, with a warning. Templates before the score-badge steps ran on `pull_request` only with `permissions: contents: read`. The current template has `contents: write`, also runs on `push` to `main`/`master` and on `workflow_dispatch`, and has a step that commits `.charter/badge.json` and runs `git push`. Upgrading therefore grants the workflow's `GITHUB_TOKEN` write access, and on a protected default branch the push step fails unless the token may push. Review that, then run the command again with `--force` to upgrade.
-- **Edited by hand:** kept byte for byte, with a warning.
+- **The current npm or pnpm template:** refreshed. A switch between them is named in the output (`package manager npm → pnpm; adds pnpm/action-setup@v4`), since the pnpm form runs the third-party `pnpm/action-setup` action. Copies that differ only in a BOM, CRLF line endings, trailing whitespace or trailing blank lines count as the template.
+- **An older Charter template:** kept, with a warning. Every template before the score-badge steps ran on `pull_request` only with `permissions: contents: read`, and refreshing one changes `contents: read → write`, adds the `push` and `workflow_dispatch` triggers, and adds a step that commits `.charter/badge.json` and pushes to the repo. That gives the workflow's `GITHUB_TOKEN` write access, and on a protected default branch the push step fails unless the token may push. Review it, then run the command again with `--force` to upgrade. The one template that pinned `@stackbilt/cli@x.y.z` is one of these, so a pinned workflow is kept whatever version it pins.
+- **Anything else (edited by hand):** kept byte for byte, with a warning stating what the current template grants (`contents: write` and `pull-requests: write`; runs on `push`, `pull_request` and `workflow_dispatch`; commits and pushes to the repo). Charter does not try to describe what your edit changed.
 
-With `--force`, a kept workflow is first copied to `.charter/.backup/github-workflows-charter-governance.yml.<timestamp>` (gitignored), then replaced. The output names the backup and, when it applies, what widened. If the backup fails, the workflow is not replaced and the command exits 1. To replace only the workflow without the rest of `--force`, delete it and re-run.
+With `--force`, a kept workflow is first copied to `.charter/.backup/github-workflows-charter-governance.yml.<timestamp>` (gitignored), then replaced. The output names the backup and either what the upgrade changed or what the template grants. If the backup fails, the workflow is not replaced and the command exits 1. To replace only the workflow without the rest of `--force`, delete it and re-run.
 
 ## What the Workflow Does
 
