@@ -374,7 +374,7 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
 
   // --guided: interactive mode that asks questions before scaffolding
   if (guided) {
-    return guidedInit(options, force);
+    return guidedInit(options, force, preset);
   }
 
   const result = initializeCharter(options.configPath, force, { preset, securitySensitive });
@@ -539,11 +539,96 @@ function isValidPreset(value: string | undefined): value is StackPreset {
 // --guided interactive init
 // ============================================================================
 
-function askQuestion(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
-  });
+/**
+ * Reads guided answers one line at a time from a readline interface (#375).
+ *
+ * Every 'line' event is queued from the moment the interface exists, and each
+ * question takes the next queued line or waits for one. That fixes two bugs
+ * of the old `rl.question` loop:
+ *  - with piped stdin, readline emits all buffered lines at once, and a line
+ *    that arrived while no question was pending was dropped, so even a full
+ *    set of piped answers stalled after the second question;
+ *  - a pending `rl.question` callback never fires when stdin closes, so the
+ *    promise never settled, the event loop drained, and the CLI exited 0
+ *    having written nothing.
+ * `next()` resolves null once stdin has closed (EOF, Ctrl-D on an empty line,
+ * Ctrl-C) with no line left; `interrupted` tells Ctrl-C apart.
+ */
+class GuidedLineReader {
+  private readonly queue: string[] = [];
+  private waiter: ((line: string | null) => void) | null = null;
+  private closed = false;
+  /** Ctrl-C on a terminal (readline 'SIGINT'). */
+  interrupted = false;
+
+  constructor(private readonly rl: readline.Interface) {
+    rl.on('line', (line: string) => {
+      const w = this.waiter;
+      if (w) {
+        this.waiter = null;
+        w(line);
+      } else {
+        this.queue.push(line);
+      }
+    });
+    rl.on('close', () => {
+      this.closed = true;
+      const w = this.waiter;
+      this.waiter = null;
+      w?.(null);
+    });
+    // Terminal mode only: with a listener, Ctrl-C emits this instead of closing.
+    // On a pipe, Ctrl-C is a real process SIGINT that this CLI does not handle; the shell
+    // reports exit code 130 (POSIX shells; Windows reports STATUS_CONTROL_C_EXIT).
+    rl.on('SIGINT', () => {
+      this.interrupted = true;
+      rl.close();
+    });
+  }
+
+  /** Prints `question` and returns the next answer (trimmed), or null if stdin closed first. */
+  next(question: string): Promise<string | null> {
+    const queued = this.queue.shift();
+    if (this.closed) {
+      if (queued === undefined) return Promise.resolve(null);
+      console.log(`${question}${queued}`);
+      return Promise.resolve(queued.trim());
+    }
+    this.rl.setPrompt(question);
+    if (queued !== undefined) {
+      this.rl.prompt();
+      // The answer was already waiting (piped input): echo it so the transcript reads like a typed run.
+      if (!this.rl.terminal) console.log(queued);
+      return Promise.resolve(queued.trim());
+    }
+    // Wait first, then prompt: a stream may deliver the answer synchronously while the prompt is written.
+    const answer = new Promise<string | null>((resolve) => {
+      this.waiter = (line) => resolve(line === null ? null : line.trim());
+    });
+    this.rl.prompt();
+    return answer;
+  }
 }
+
+/**
+ * Why `init --guided` cannot run here (#375): its prompts go to stdout, so it
+ * cannot produce a JSON document, and under --ci an open stdin that never
+ * closes would leave it waiting forever. Null when it can run.
+ */
+function guidedRefusal(options: CLIOptions): { errorCode: string; message: string } | null {
+  const alternative = 'Nothing was written. Run `charter init --preset <worker|frontend|backend|fullstack|docs|rust-wasm>` instead ' +
+    '(add --force to replace existing templates; each is backed up first).';
+  if (options.format !== 'text') {
+    return { errorCode: 'GUIDED_REQUIRES_TEXT', message: `charter init --guided asks questions and cannot run with --format ${options.format}. ${alternative}` };
+  }
+  if (options.ciMode) {
+    return { errorCode: 'GUIDED_REFUSED_CI', message: `charter init --guided asks questions and cannot run with --ci. ${alternative}` };
+  }
+  return null;
+}
+
+/** Exit code for a questionnaire cut short: 130 for Ctrl-C, as a shell reports SIGINT, else 1. */
+const GUIDED_INTERRUPTED_EXIT = 130;
 
 const LANGUAGE_PRESET_MAP: Record<string, StackPreset> = {
   typescript: 'fullstack',
@@ -556,11 +641,25 @@ const LANGUAGE_PRESET_MAP: Record<string, StackPreset> = {
   svelte: 'frontend',
 };
 
-async function guidedInit(options: CLIOptions, force: boolean): Promise<number> {
+async function guidedInit(options: CLIOptions, force: boolean, presetFlag?: StackPreset): Promise<number> {
+  // #375: refuse before any question is printed or file written.
+  const refusal = guidedRefusal(options);
+  if (refusal) {
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ error: refusal.message, errorCode: refusal.errorCode, guided: true, writesPerformed: 0 }, null, 2));
+    } else {
+      console.error(refusal.message);
+    }
+    return EXIT_CODE.POLICY_VIOLATION;
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
+  const reader = new GuidedLineReader(rl);
+  // --preset seeds the answer used when the language answer names no known stack.
+  const fallbackPreset: StackPreset = presetFlag ?? 'fullstack';
 
   try {
     console.log('');
@@ -568,26 +667,22 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
     console.log('  --------------------');
     console.log('');
 
-    // Q1: Primary language
-    const langAnswer = await askQuestion(
-      rl,
-      '  What\'s your primary language/framework? (TypeScript, Python, Go, React, etc.) '
+    // Nothing is written until every answer has arrived.
+    const langAnswer = await reader.next(
+      `  What's your primary language/framework? (TypeScript, Python, Go, React, etc.${presetFlag ? `; blank keeps --preset ${presetFlag}` : ''}) `,
     );
+    const cfAnswer = langAnswer === null ? null : await reader.next('  Do you use Cloudflare Workers? (y/N) ');
+    const authAnswer = cfAnswer === null ? null : await reader.next('  Do you want auth governance patterns? (y/N) ');
+    if (langAnswer === null || cfAnswer === null || authAnswer === null) {
+      // stdin closed first: EOF (a short pipe, </dev/null), Ctrl-D on an empty line, or Ctrl-C.
+      console.error('');
+      console.error('Aborted; nothing was written.');
+      return reader.interrupted ? GUIDED_INTERRUPTED_EXIT : EXIT_CODE.POLICY_VIOLATION;
+    }
+
     const langKey = langAnswer.toLowerCase().replace(/\s+/g, '');
     const detectedPreset = LANGUAGE_PRESET_MAP[langKey];
-
-    // Q2: Cloudflare Workers
-    const cfAnswer = await askQuestion(
-      rl,
-      '  Do you use Cloudflare Workers? (y/N) '
-    );
     const useCloudflare = cfAnswer.toLowerCase() === 'y' || cfAnswer.toLowerCase() === 'yes';
-
-    // Q3: Auth governance
-    const authAnswer = await askQuestion(
-      rl,
-      '  Do you want auth governance patterns? (y/N) '
-    );
     const useAuth = authAnswer.toLowerCase() === 'y' || authAnswer.toLowerCase() === 'yes';
 
     rl.close();
@@ -599,7 +694,7 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
     } else if (detectedPreset) {
       preset = detectedPreset;
     } else {
-      preset = 'fullstack';
+      preset = fallbackPreset;
     }
 
     const initOpts: InitializeOptions = {
@@ -609,12 +704,8 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
       },
     };
 
+    // Text output only: --format json was refused above (#375).
     const result = initializeCharter(options.configPath, force, initOpts);
-
-    if (options.format === 'json') {
-      console.log(JSON.stringify({ ...result, guided: true, preset, useCloudflare, useAuth }, null, 2));
-      return initExitCode(result);
-    }
 
     if (!result.created) {
       printInitChanges(result);

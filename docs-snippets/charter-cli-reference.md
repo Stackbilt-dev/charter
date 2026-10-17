@@ -84,7 +84,7 @@ npx charter setup --preset fullstack --ci github --yes
 Setup-specific options:
 
 - `--ci github` — generate the GitHub Actions governance workflow (`.github/workflows/charter-governance.yml`). An existing workflow is refreshed only when it matches a Charter-generated version and the refresh widens no CI permissions or triggers; otherwise it is kept with a warning, and `--force` replaces it after backing it up to `.charter/.backup/`
-- `--preset <worker|frontend|backend|fullstack>` — stack preset
+- `--preset <worker|frontend|backend|fullstack|docs|rust-wasm>` — stack preset
 - `--detect-only` — preview detection results without writing files
 - `--no-dependency-sync` — skip rewriting `@stackbilt/cli` devDependency
 
@@ -286,7 +286,7 @@ Returns exit code `2` if no routes or schema tables are detected (surface is des
 | `--format json` | Machine-readable output with stable schemas |
 | `--ci` | Non-interactive, deterministic exit codes |
 | `--yes` | Accept all prompts (for automation) |
-| `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`) |
+| `--preset <name>` | Stack preset (`worker`, `frontend`, `backend`, `fullstack`, `docs`, `rust-wasm`) |
 | `--detect-only` | Setup mode: detect stack/preset and exit |
 | `--no-dependency-sync` | Setup mode: do not rewrite `@stackbilt/cli` devDependency |
 

@@ -900,7 +900,7 @@ function printHelp(): void {
   console.log('      --force: merge the template in (adds missing files, sections, modules); --reset-adf: replace, backed up to .ai/.backup/');
   console.log('      Scaffold .ai/ directory with manifest, core, and state modules.');
   console.log('      --module <name>: add a single module to an existing .ai/ (additive, no overwrite)');
-  console.log('      --preset <preset>: scaffold preset-aware modules (worker|frontend|backend|fullstack|docs)');
+  console.log('      --preset <preset>: scaffold preset-aware modules (worker|frontend|backend|fullstack|docs|rust-wasm)');
   console.log('      --emit-pointers: also generate thin pointer files (CLAUDE.md, .cursorrules, AGENTS.md)');
   console.log('');
   console.log('    charter adf fmt <file> [--check] [--write]');

@@ -59,12 +59,20 @@ vi.mock('../commands/adf-manifest-register', async (importOriginal) => {
 let promptAnswer = 'n';
 vi.mock('node:readline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:readline')>();
+  const { EventEmitter } = await import('node:events');
   return {
     ...actual,
-    createInterface: () => ({
-      question: (_q: string, cb: (a: string) => void) => { cb(promptAnswer); },
-      close: () => undefined,
-    }),
+    // promptYesNo uses question(); init --guided reads 'line' events after prompt().
+    createInterface: () => {
+      const rl = Object.assign(new EventEmitter(), {
+        terminal: true,
+        question: (_q: string, cb: (a: string) => void) => { cb(promptAnswer); },
+        setPrompt: () => undefined,
+        prompt: () => { queueMicrotask(() => rl.emit('line', promptAnswer)); },
+        close: () => undefined,
+      });
+      return rl;
+    },
   };
 });
 
@@ -682,14 +690,14 @@ describe('setup --force and init --guided honour failed backups', () => {
     expect(out.some(l => l.startsWith('  Warning: Could not back up .charter/config.json'))).toBe(true);
   });
 
-  it('init --guided --force JSON exits 1 and lists notReplaced', async () => {
+  it('init --guided --force JSON is refused up front (#375): exit 1, one JSON document, nothing written', async () => {
     writeHandCharter();
-    write('.charter/.backup', 'not a directory\n');
+    const before = tree();
     expect(await initCommand(JSON_OPTS, ['--guided', '--force'])).toBe(1);
-    // --guided prints its question banner before the JSON document, even under --format json.
-    const r = JSON.parse(out.slice(out.findIndex(l => l.startsWith('{'))).join('\n'));
+    const r = JSON.parse(out.join('\n'));
     expect(r.guided).toBe(true);
-    expect(r.notReplaced.map((n: { file: string }) => n.file)).toContain('.charter/config.json');
+    expect(r.errorCode).toBe('GUIDED_REQUIRES_TEXT');
+    expect(tree()).toEqual(before);
   });
 
   it('init --guided --force replaces with backups and exits 0 when backups work', async () => {

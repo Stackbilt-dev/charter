@@ -218,7 +218,7 @@ Setup baseline mutation metadata now includes `configHashBefore`, `configHashAft
 
 ### `charter init`
 
-Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|backend|fullstack`.
+Scaffold `.charter/` config templates only. Supports `--preset worker|frontend|backend|fullstack|docs|rust-wasm`.
 
 ### `charter doctor`
 
@@ -433,7 +433,7 @@ Produces constraint checks against live source file line counts:
 | `--yes` | Auto-accept safe setup overwrites | off |
 
 Setup-only options:
-- `--preset <worker|frontend|backend|fullstack>`: override auto-detected preset
+- `--preset <worker|frontend|backend|fullstack|docs|rust-wasm>`: override auto-detected preset
 - `--detect-only`: print stack detection result and selected preset without writing files
 - `--no-dependency-sync`: skip rewriting `devDependencies["@stackbilt/cli"]` during setup
 
