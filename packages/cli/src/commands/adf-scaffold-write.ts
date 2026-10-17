@@ -401,6 +401,11 @@ export function scaffoldReportLines(outcomes: ScaffoldOutcome[], mode: ScaffoldM
 
 /**
  * Prompt user for a yes/no answer via readline.
+ *
+ * Only `y` is yes. If stdin closes before an answer (Ctrl-D on an empty line,
+ * Ctrl-C, EOF), the answer is no and a note says so on stderr: a pending
+ * `rl.question` callback never fires on close, so without this the promise
+ * never settled and the CLI exited 0 mid-run (#375).
  */
 export function promptYesNo(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) {
@@ -411,7 +416,16 @@ export function promptYesNo(question: string): Promise<boolean> {
     output: process.stdout,
   });
   return new Promise((resolve) => {
+    let answered = false;
+    rl.once('close', () => {
+      if (answered) return;
+      answered = true;
+      console.error('');
+      console.error('  No answer (input closed); treating it as N.');
+      resolve(false);
+    });
     rl.question(question, (answer) => {
+      answered = true;
       rl.close();
       resolve(answer.trim().toLowerCase() === 'y');
     });

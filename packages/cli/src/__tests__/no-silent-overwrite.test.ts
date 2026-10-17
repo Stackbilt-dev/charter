@@ -59,14 +59,20 @@ vi.mock('../commands/adf-manifest-register', async (importOriginal) => {
 let promptAnswer = 'n';
 vi.mock('node:readline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:readline')>();
+  const { EventEmitter } = await import('node:events');
   return {
     ...actual,
-    createInterface: () => ({
-      question: (_q: string, cb: (a: string) => void) => { cb(promptAnswer); },
-      close: () => undefined,
-      once: () => undefined,
-      removeListener: () => undefined,
-    }),
+    // promptYesNo uses question(); init --guided reads 'line' events after prompt().
+    createInterface: () => {
+      const rl = Object.assign(new EventEmitter(), {
+        terminal: true,
+        question: (_q: string, cb: (a: string) => void) => { cb(promptAnswer); },
+        setPrompt: () => undefined,
+        prompt: () => { queueMicrotask(() => rl.emit('line', promptAnswer)); },
+        close: () => undefined,
+      });
+      return rl;
+    },
   };
 });
 
@@ -123,7 +129,7 @@ function write(rel: string, text: string): void {
 }
 
 const read = (rel: string): string => fs.readFileSync(rel, 'utf-8');
-/** `init --guided` refuses a non-TTY stdin (#375); the readline mock answers instead. */
+/** `init --guided` as on a terminal; the readline mock answers every question. */
 const setTTY = (): void => { Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true }); };
 /** A path as bootstrap phase 2 prints it: platform separators. */
 const P = (rel: string): string => path.normalize(rel);

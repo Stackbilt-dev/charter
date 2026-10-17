@@ -45,12 +45,12 @@ Usage:
                                    Pre-digested repo brief for AI agents (routes, hotspots, governance)
   charter context-refresh [--sources git,github,repo-intel] [--output CONTEXT.md] [--ai-dir <dir>] [--once] [--ttl-minutes <n>] [--force]
                                    Live session snapshot to .ai/context.adf + .ai/context.snapshot.json
-  charter setup [--ci github] [--preset <worker|frontend|backend|fullstack>] [--detect-only] [--no-dependency-sync]
+  charter setup [--ci github] [--preset <worker|frontend|backend|fullstack|docs|rust-wasm>] [--detect-only] [--no-dependency-sync]
                                    Bootstrap .charter/ and optional CI workflow
-  charter init [--preset <worker|frontend|backend|fullstack>] [--guided] [--force]
+  charter init [--preset <worker|frontend|backend|fullstack|docs|rust-wasm>] [--guided] [--force]
                                    Scaffold .charter/ config directory (creates missing files, keeps existing ones)
                                    --force: replace existing templates, each backed up to .charter/.backup/ first
-                                   --guided: interactive mode that asks about your stack
+                                   --guided: ask about your stack (typed or piped answers; --preset seeds the default)
   charter validate [--range <revset>]
                                    Validate git commits for governance trailers
   charter audit [--range <revset>]

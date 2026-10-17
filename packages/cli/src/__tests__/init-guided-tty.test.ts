@@ -1,34 +1,41 @@
 /**
- * `charter init --guided` and non-interactive stdin (#375).
+ * `charter init --guided` and stdin that is piped, closed or interrupted (#375).
  *
- * Guided mode refuses up front, before printing a question or writing a file,
- * when stdin is not a TTY or the output format is not text. A stdin that hits
- * EOF (Ctrl-D) mid-questionnaire aborts with a non-zero exit instead of
- * leaving the CLI to exit 0 with nothing written.
+ * Guided mode reads its answers as a queue of lines, so piped answers work
+ * like typed ones. If stdin closes before every answer has arrived, it prints
+ * `Aborted; nothing was written.` and exits 1 (130 for Ctrl-C) with nothing
+ * written. `--format json` is refused up front. `promptYesNo` treats a close
+ * before the answer as N.
  *
  * The real node:readline runs here, over a PassThrough standing in for
- * process.stdin, so the EOF test exercises readline's own 'close' behaviour.
+ * process.stdin, so EOF goes through readline's own 'line' / 'close' events.
  */
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
+import type * as readlineTypes from 'node:readline';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
 
 let input = new PassThrough();
 let output = new PassThrough();
+let lastRl: readlineTypes.Interface | null = null;
 vi.mock('node:readline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:readline')>();
   return {
     ...actual,
-    createInterface: (opts: { input: unknown; output: unknown }) =>
-      actual.createInterface({ ...opts, input, output, terminal: false }),
+    createInterface: (opts: { input: unknown; output: unknown }) => {
+      lastRl = actual.createInterface({ ...opts, input, output, terminal: false });
+      return lastRl;
+    },
   };
 });
 
+import { run } from '../index';
 import { initCommand } from '../commands/init';
+import { promptYesNo } from '../commands/adf-scaffold-write';
 
 const TEXT: CLIOptions = { configPath: '.charter', format: 'text', ciMode: false, yes: false };
 const JSON_OPTS: CLIOptions = { ...TEXT, format: 'json' };
@@ -42,8 +49,8 @@ function setTTY(value: boolean | undefined): void {
   Object.defineProperty(process.stdin, 'isTTY', { value, configurable: true });
 }
 
-/** Answer each question as readline prints it; end stdin once `answers` runs out. */
-function answerWith(answers: string[]): void {
+/** Type each answer when its prompt appears, as a person would; end stdin once `answers` runs out. */
+function typeAnswers(answers: string[]): void {
   const queue = [...answers];
   // readline writes each prompt to `output` as one chunk; nothing else goes there.
   output.on('data', () => {
@@ -53,11 +60,32 @@ function answerWith(answers: string[]): void {
   });
 }
 
+/** Everything a pipe would deliver, written before the command starts, then EOF. */
+function pipeAnswers(text: string): void {
+  output.resume();
+  input.end(text);
+}
+
+/** Every file under the cwd except the CLI usage log, relative path -> bytes (blessed-stack's generatedAt blanked). */
+function tree(): Record<string, string> {
+  const files: Record<string, string> = {};
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else files[p.split(path.sep).join('/')] = fs.readFileSync(p, 'utf-8').replace(/"generatedAt": "[^"]*"/, '"generatedAt": ""');
+    }
+  };
+  walk('.');
+  return files;
+}
+
 beforeEach(() => {
   tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'charter-375-')));
   process.chdir(tempDir);
   input = new PassThrough();
   output = new PassThrough();
+  lastRl = null;
   out = [];
   errOut = [];
   vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(a.map(String).join(' ')); });
@@ -71,71 +99,10 @@ afterEach(() => {
   setTTY(undefined);
 });
 
-describe('init --guided with a non-interactive stdin (#375)', () => {
-  for (const isTTY of [undefined, false]) {
-    it(`refuses up front when stdin.isTTY is ${String(isTTY)}: exit 1, nothing written, names the alternative`, async () => {
-      setTTY(isTTY);
-      const asked: string[] = [];
-      output.on('data', (c: Buffer) => asked.push(c.toString()));
-      expect(await initCommand(TEXT, ['--guided'])).toBe(1);
-      expect(fs.readdirSync('.')).toEqual([]);
-      expect(out).toEqual([]);
-      expect(asked).toEqual([]);
-      const msg = errOut.join('\n');
-      expect(msg).toContain('needs an interactive terminal');
-      expect(msg).toContain('Nothing was written');
-      expect(msg).toContain('charter init --preset');
-    });
-  }
-
-  it('refuses even with answers waiting on the pipe (they are never read)', async () => {
-    setTTY(undefined);
-    input.write('typescript\ny\ny\n');
-    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
-    expect(fs.existsSync('.charter')).toBe(false);
-  });
-
-  it('refuses --format json with one JSON error document, on a TTY or not', async () => {
-    for (const isTTY of [true, undefined]) {
-      setTTY(isTTY);
-      out = [];
-      expect(await initCommand(JSON_OPTS, ['--guided'])).toBe(1);
-      const r = JSON.parse(out.join('\n'));
-      expect(r).toMatchObject({ guided: true, writesPerformed: 0, errorCode: 'GUIDED_REQUIRES_TEXT' });
-      expect(r.error).toContain('--format json');
-      expect(r.error).toContain('charter init --preset');
-      expect(fs.readdirSync('.')).toEqual([]);
-    }
-  });
-});
-
-describe('init --guided on a TTY', () => {
-  it('EOF before the first answer: exit 1, "Aborted; nothing was written.", nothing written', async () => {
+describe('init --guided answers', () => {
+  it('typed on a TTY: three answers scaffold .charter/ and exit 0 (unchanged)', async () => {
     setTTY(true);
-    answerWith([]);
-    expect(await initCommand(TEXT, ['--guided'])).toBe(1);
-    expect(errOut).toContain('Aborted; nothing was written.');
-    expect(fs.readdirSync('.')).toEqual([]);
-  });
-
-  it('EOF mid-questionnaire (Ctrl-D after one answer): exit 1, nothing written', async () => {
-    setTTY(true);
-    answerWith(['typescript']);
-    expect(await initCommand(TEXT, ['--guided'])).toBe(1);
-    expect(errOut).toContain('Aborted; nothing was written.');
-    expect(fs.readdirSync('.')).toEqual([]);
-  });
-
-  it('EOF before the last answer: exit 1, nothing written', async () => {
-    setTTY(true);
-    answerWith(['typescript', 'y']);
-    expect(await initCommand(TEXT, ['--guided'])).toBe(1);
-    expect(fs.readdirSync('.')).toEqual([]);
-  });
-
-  it('happy path is unchanged: three answers scaffold .charter/ and exit 0', async () => {
-    setTTY(true);
-    answerWith(['typescript', 'y', 'y']);
+    typeAnswers(['typescript', 'y', 'y']);
     expect(await initCommand(TEXT, ['--guided'])).toBe(0);
     expect(errOut).toEqual([]);
     expect(out).toContain('  ✓ Created .charter/ directory');
@@ -145,11 +112,150 @@ describe('init --guided on a TTY', () => {
     expect(fs.readFileSync('.charter/policies/governance.md', 'utf-8')).toContain('## Auth Governance');
   });
 
-  it('happy path with defaults: an unknown language and blank answers pick fullstack', async () => {
+  it('fully piped answers write the same files as a typed TTY run', async () => {
     setTTY(true);
-    answerWith(['cobol', '', '']);
+    typeAnswers(['typescript', 'y', 'y']);
+    expect(await initCommand(TEXT, ['--guided'])).toBe(0);
+    const typed = tree();
+    fs.rmSync('.charter', { recursive: true });
+
+    setTTY(undefined);
+    input = new PassThrough();
+    output = new PassThrough();
+    out = [];
+    pipeAnswers('typescript\ny\ny\n');
+    expect(await initCommand(TEXT, ['--guided'])).toBe(0);
+    expect(errOut).toEqual([]);
+    expect(tree()).toEqual(typed);
+    expect(out).toContain('    Preset: worker (with Cloudflare Workers)');
+  });
+
+  it('piped answers with CRLF line endings and no final newline work', async () => {
+    pipeAnswers('python\r\nn\r\nn');
+    expect(await initCommand(TEXT, ['--guided'])).toBe(0);
+    expect(out).toContain('    Preset: backend');
+    expect(fs.readFileSync('.charter/policies/governance.md', 'utf-8')).not.toContain('## Auth Governance');
+  });
+
+  it('defaults: an unknown language and blank answers pick fullstack', async () => {
+    pipeAnswers('cobol\n\n\n');
     expect(await initCommand(TEXT, ['--guided'])).toBe(0);
     expect(out).toContain('    Preset: fullstack');
-    expect(fs.readFileSync('.charter/policies/governance.md', 'utf-8')).not.toContain('## Auth Governance');
+  });
+
+  it('--preset seeds the default used when the language names no known stack', async () => {
+    const asked: string[] = [];
+    output.on('data', (c: Buffer) => asked.push(c.toString()));
+    input.end('\nn\nn\n');
+    expect(await initCommand(TEXT, ['--guided', '--preset', 'docs'])).toBe(0);
+    expect(asked[0]).toContain('blank keeps --preset docs');
+    expect(out).toContain('    Preset: docs');
+    expect(JSON.parse(fs.readFileSync('.charter/patterns/blessed-stack.json', 'utf-8')).preset).toBe('docs');
+  });
+
+  it('a recognized language or a Cloudflare yes still decides over --preset', async () => {
+    pipeAnswers('react\nn\nn\n');
+    expect(await initCommand(TEXT, ['--guided', '--preset', 'docs'])).toBe(0);
+    expect(out).toContain('    Preset: frontend');
+  });
+});
+
+describe('init --guided when stdin closes before every answer (#375)', () => {
+  const expectAborted = (): void => {
+    expect(errOut).toContain('Aborted; nothing was written.');
+    expect(fs.readdirSync('.')).toEqual([]);
+  };
+
+  it('</dev/null (EOF before any answer): exit 1, nothing written', async () => {
+    pipeAnswers('');
+    expect(await initCommand(TEXT, ['--guided'])).toBe(1);
+    expectAborted();
+  });
+
+  it('`echo y |` (one answer, then EOF): exit 1, nothing written', async () => {
+    pipeAnswers('y\n');
+    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
+    expectAborted();
+  });
+
+  it('two piped answers, then EOF: exit 1, nothing written', async () => {
+    pipeAnswers('typescript\ny\n');
+    expect(await initCommand(TEXT, ['--guided'])).toBe(1);
+    expectAborted();
+  });
+
+  it('a short pipe leaves an existing .charter/ untouched', async () => {
+    fs.mkdirSync('.charter');
+    fs.writeFileSync('.charter/config.json', '{"hand":"edited"}\n');
+    pipeAnswers('typescript\n');
+    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
+    expect(fs.readdirSync('.charter')).toEqual(['config.json']);
+    expect(fs.readFileSync('.charter/config.json', 'utf-8')).toBe('{"hand":"edited"}\n');
+  });
+
+  for (const typed of [[], ['typescript'], ['typescript', 'y']]) {
+    it(`TTY: Ctrl-D after ${typed.length} answer(s): exit 1, nothing written`, async () => {
+      setTTY(true);
+      typeAnswers(typed);
+      expect(await initCommand(TEXT, ['--guided'])).toBe(1);
+      expectAborted();
+    });
+  }
+
+  it('TTY: Ctrl-C (readline SIGINT) mid-questionnaire: exit 130, nothing written', async () => {
+    setTTY(true);
+    output.on('data', () => { lastRl?.emit('SIGINT'); });
+    expect(await initCommand(TEXT, ['--guided'])).toBe(130);
+    expectAborted();
+  });
+});
+
+describe('init --guided --format json', () => {
+  it('is refused up front with one JSON error document, on a TTY or not', async () => {
+    for (const isTTY of [true, undefined]) {
+      setTTY(isTTY);
+      out = [];
+      const asked: string[] = [];
+      output.on('data', (c: Buffer) => asked.push(c.toString()));
+      expect(await initCommand(JSON_OPTS, ['--guided'])).toBe(1);
+      const r = JSON.parse(out.join('\n'));
+      expect(r).toMatchObject({ guided: true, writesPerformed: 0, errorCode: 'GUIDED_REQUIRES_TEXT' });
+      expect(r.error).toContain('--format json');
+      expect(r.error).toContain('charter init --preset');
+      expect(asked).toEqual([]);
+      expect(fs.readdirSync('.')).toEqual([]);
+    }
+  });
+});
+
+describe('promptYesNo', () => {
+  it('stdin closing before an answer is N, with a note on stderr', async () => {
+    setTTY(true);
+    output.on('data', () => input.end());
+    expect(await promptYesNo('Register these modules now? (y/N) ')).toBe(false);
+    expect(errOut).toContain('  No answer (input closed); treating it as N.');
+  });
+
+  it('y is still yes, with no note', async () => {
+    setTTY(true);
+    output.on('data', () => input.write('y\n'));
+    expect(await promptYesNo('Replace them? (y/N) ')).toBe(true);
+    expect(errOut).toEqual([]);
+  });
+
+  it('a non-TTY stdin is still N without asking', async () => {
+    setTTY(undefined);
+    expect(await promptYesNo('Replace them? (y/N) ')).toBe(false);
+    expect(lastRl).toBeNull();
+  });
+});
+
+describe('help text', () => {
+  it('lists all six presets for init and setup', async () => {
+    expect(await run(['--help'])).toBe(0);
+    const help = out.join('\n');
+    const presets = '<worker|frontend|backend|fullstack|docs|rust-wasm>';
+    expect(help).toContain(`charter init [--preset ${presets}]`);
+    expect(help).toContain(`charter setup [--ci github] [--preset ${presets}]`);
   });
 });
