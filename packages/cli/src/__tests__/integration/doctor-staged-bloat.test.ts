@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../../index';
 import { CLIError, EXIT_CODE } from '../../index';
 import { BLOAT_SCOPE_MSG, doctorCommand } from '../../commands/doctor';
+import { HOOK_SCOPED_DOCTOR_ENV, HOOK_SCOPED_DOCTOR_FILE } from '../../commands/hook';
 
 const options: CLIOptions = { configPath: '.charter', format: 'json', ciMode: true, yes: false };
 
@@ -189,5 +190,101 @@ describe('doctor --staged', () => {
     await doctorCommand({ ...options, format: 'text' }, ['--adf-only', '--staged']);
     vi.restoreAllMocks();
     expect(logs.join('\n')).toContain(`  [info] adf vendor bloat (not blocking): ${BLOAT_SCOPE_MSG.outsideHeader}`);
+  });
+});
+
+describe(`${HOOK_SCOPED_DOCTOR_ENV}: the hook's verify:adf run leaves bloat to the scoped gate`, () => {
+  const TOKEN = '4242-1700000000';
+  const OTHER = '4243-1700000001';
+  /** The per-run file for a token (the hook names it after the token). */
+  const tokenFile = (token: string = TOKEN): string => path.join(tmp, '.git', `${HOOK_SCOPED_DOCTOR_FILE}-${token}`);
+  const UNSCOPED_WARN = { name: 'adf vendor bloat', status: 'WARN', details: `Vendor file bloat detected:\n    ${CLAUDE_BLOAT}\n    ${GEMINI_BLOAT}\n    Run: charter adf tidy --dry-run` };
+
+  async function withEnv<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+    const before = process.env[HOOK_SCOPED_DOCTOR_ENV];
+    if (value === undefined) delete process.env[HOOK_SCOPED_DOCTOR_ENV];
+    else process.env[HOOK_SCOPED_DOCTOR_ENV] = value;
+    try {
+      return await fn();
+    } finally {
+      if (before === undefined) delete process.env[HOOK_SCOPED_DOCTOR_ENV];
+      else process.env[HOOK_SCOPED_DOCTOR_ENV] = before;
+    }
+  }
+
+  async function doctorWithStderr(args: string[]): Promise<{ code: number; checks: Check[]; stderr: string[] }> {
+    const stderr: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { stderr.push(a.map(String).join(' ')); });
+    try {
+      const r = await doctor(args);
+      return { code: r.code, checks: r.checks, stderr };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it.each<[string, string | undefined, Array<[string, string]>]>([
+    ['set to 1 with no token file (a CI misconfiguration)', '1', []],
+    ['set to the token with no token file', TOKEN, []],
+    ['set to the token, with only another run\'s file present', TOKEN, [[`${HOOK_SCOPED_DOCTOR_FILE}-${OTHER}`, OTHER]]],
+    ['set to the token, with its file holding a different token', TOKEN, [[`${HOOK_SCOPED_DOCTOR_FILE}-${TOKEN}`, OTHER]]],
+    ['set to the token, with only the old shared file name holding it', TOKEN, [[HOOK_SCOPED_DOCTOR_FILE, TOKEN]]],
+    ['set to a path-like value whose target holds it', '../x', [['../x', '../x'], [`${HOOK_SCOPED_DOCTOR_FILE}-../x`, '../x']]],
+    ['unset, with a token file present', undefined, [[`${HOOK_SCOPED_DOCTOR_FILE}-${TOKEN}`, TOKEN]]],
+  ])('%s: full strictness, exactly as without it', async (_label, value, files) => {
+    const baseline = await withEnv(undefined, () => doctor(['--adf-only']));
+    for (const [name, content] of files) {
+      const p = path.join(tmp, '.git', name);
+      if (name.includes('/')) fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, `${content}\n`);
+    }
+    const r = await withEnv(value, () => doctorWithStderr(['--adf-only']));
+    expect(r.code).toBe(EXIT_CODE.POLICY_VIOLATION);
+    expect(bloatRows(r.checks)).toEqual([UNSCOPED_WARN]);
+    expect(r.checks).toEqual(baseline.checks);
+    expect(r.stderr).toEqual([]);
+  });
+
+  it('with the matching token file: the bloat row is INFO, said on stderr, and --ci passes', async () => {
+    fs.writeFileSync(tokenFile(), `${TOKEN}\n`);
+    const r = await withEnv(TOKEN, () => doctorWithStderr(['--adf-only']));
+    expect(r.code).toBe(EXIT_CODE.SUCCESS);
+    expect(bloatRows(r.checks)).toEqual([{
+      name: 'adf vendor bloat (checked by pre-commit hook)',
+      status: 'INFO',
+      details: `${BLOAT_SCOPE_MSG.hookChecked}\n    ${BLOAT_SCOPE_MSG.hookCheckedFound}\n    ${CLAUDE_BLOAT}\n    ${GEMINI_BLOAT}`,
+    }]);
+    expect(r.stderr).toEqual([BLOAT_SCOPE_MSG.hookCheckedStderr]);
+  });
+
+  it('two hook runs\' files side by side: each token relaxes with its own file, and loses it when only that file goes', async () => {
+    fs.writeFileSync(tokenFile(TOKEN), `${TOKEN}\n`);
+    fs.writeFileSync(tokenFile(OTHER), `${OTHER}\n`);
+    expect((await withEnv(TOKEN, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.SUCCESS);
+    expect((await withEnv(OTHER, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.SUCCESS);
+    fs.rmSync(tokenFile(OTHER));
+    expect((await withEnv(TOKEN, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.SUCCESS);
+    expect((await withEnv(OTHER, () => doctorWithStderr(['--adf-only']))).code).toBe(EXIT_CODE.POLICY_VIOLATION);
+  });
+
+  it('with the matching token file, every other WARN (malformed VENDORS, missing default module) still fails --ci', async () => {
+    fs.appendFileSync('.ai/manifest.adf', '\n\u{1F3F7} VENDORS:\n  - CLAUDE.md: bogus\n');
+    fs.rmSync('.ai/state.adf');
+    fs.writeFileSync(tokenFile(), `${TOKEN}\n`);
+    const r = await withEnv(TOKEN, () => doctorWithStderr(['--adf-only']));
+    expect(r.code).toBe(EXIT_CODE.POLICY_VIOLATION);
+    expect(r.checks.find(c => c.name === 'adf vendor mode')?.status).toBe('WARN');
+    expect(r.checks.find(c => c.name === 'adf default modules')?.status).toBe('WARN');
+    expect(bloatRows(r.checks).some(c => c.status === 'WARN')).toBe(false);
+  });
+
+  it('--staged takes precedence: the token never widens or narrows the scoped check', async () => {
+    git('add', 'CLAUDE.md');
+    const scoped = await withEnv(undefined, () => doctor(['--adf-only', '--staged']));
+    fs.writeFileSync(tokenFile(), `${TOKEN}\n`);
+    const r = await withEnv(TOKEN, () => doctorWithStderr(['--adf-only', '--staged']));
+    expect(r.checks).toEqual(scoped.checks);
+    expect(r.code).toBe(EXIT_CODE.POLICY_VIOLATION);
+    expect(r.stderr).toEqual([]);
   });
 });

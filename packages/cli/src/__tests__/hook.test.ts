@@ -4,9 +4,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  HOOK_SCOPED_DOCTOR_ENV,
+  HOOK_SCOPED_DOCTOR_FILE,
   HOOK_TIDY_BLOCK_TEMPLATE,
   hookCommand,
   PRE_COMMIT_GATE_SCOPE_MARKER,
+  PRE_COMMIT_VERIFY_SCOPE_MARKER,
   PRE_COMMIT_HOOK_CONTENT,
   PRE_COMMIT_HOOK_MARKER,
   PRE_COMMIT_SCOPE_MARKER,
@@ -280,6 +283,26 @@ describe('hookCommand', () => {
 
   describe('doctor: pre-commit hook row (#320)', () => {
     const OLD_HOOK = `#!/usr/bin/env sh\n${PRE_COMMIT_HOOK_MARKER}\nset -eu\n\n# Vendor file auto-tidy: extract bloat from staged vendor config files\ngit add .ai/*.adf 2>/dev/null || true\n`;
+    // The gate #360 shipped: scoped only when package.json has no verify:adf script.
+    const GATE_360 = `# ADF evidence gate: check LOC ceilings if manifest exists
+${PRE_COMMIT_GATE_SCOPE_MARKER}
+if [ -f ".ai/manifest.adf" ]; then
+  echo '[pre-commit] Running ADF evidence check...'
+  if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then
+    pnpm run verify:adf || {
+      echo ''
+      echo '[pre-commit] ADF verification FAILED.'
+      echo '  Run: pnpm run verify:adf'
+      exit 1
+    }
+  else
+    npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text && npx charter adf evidence --auto-measure --ci || {
+      exit 1
+    }
+  fi
+fi
+`;
+    const HOOK_360 = PRE_COMMIT_HOOK_CONTENT.slice(0, PRE_COMMIT_HOOK_CONTENT.indexOf('# ADF evidence gate')) + GATE_360;
 
     async function doctorChecks(): Promise<Array<{ name: string; status: string; details: string }>> {
       const logs: string[] = [];
@@ -305,8 +328,8 @@ describe('hookCommand', () => {
     });
 
     it('#357: INFO for a #356-era hook (staged-only tidy, unscoped gate)', async () => {
-      // The #356 hook: the current text without the gate marker and with its unscoped gate.
-      const hook356 = PRE_COMMIT_HOOK_CONTENT
+      // The #356 hook: the #360 text without the gate marker and with its unscoped gate.
+      const hook356 = HOOK_360
         .replace(`${PRE_COMMIT_GATE_SCOPE_MARKER}\n`, '')
         .replace(/npx charter doctor --adf-only --ci --staged --tidy-skipped "\$TIDY_SKIPPED" --format text/, 'npx charter doctor --adf-only --ci --format text');
       expect(hook356).toContain(PRE_COMMIT_SCOPE_MARKER);
@@ -326,10 +349,52 @@ describe('hookCommand', () => {
       expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
     });
 
-    it('#357: the generated gate passes --staged and the tidy skips, and no longer claims a skip caused the block', () => {
+    it('#357: INFO for a #360-era hook (gate unscoped, and pnpm-only, in repos with verify:adf)', async () => {
+      expect(HOOK_360).toContain(PRE_COMMIT_GATE_SCOPE_MARKER);
+      expect(HOOK_360).not.toContain(PRE_COMMIT_VERIFY_SCOPE_MARKER);
+      writeHook(path.join(tempDir, '.git', 'hooks'), HOOK_360);
+      fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify({ scripts: { 'verify:adf': 'charter doctor --adf-only --ci' } }));
+      const rows = (await doctorChecks()).filter(c => c.name === 'pre-commit hook');
+      expect(rows).toEqual([{
+        name: 'pre-commit hook',
+        status: 'INFO',
+        details: 'The Charter pre-commit hook at .git/hooks/pre-commit predates the commit-scoped gate for repos with a verify:adf script, as this one has: it runs pnpm run verify:adf in place of that gate, so its doctor blocks a commit on vendor bloat in files the commit does not include, and the gate fails where pnpm is not installed. Re-run: charter hook install --pre-commit',
+      }]);
+
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      expect(await hookCommand(baseOptions, ['install', '--pre-commit'])).toBe(0);
+      vi.restoreAllMocks();
+      expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
+    });
+
+    it.each([
+      ['no package.json', null],
+      ['a package.json without verify:adf', JSON.stringify({ scripts: { test: 'vitest' } })],
+    ])('#357: no row for a #360-era hook with %s (its gate is already scoped there)', async (_label, pkg) => {
+      writeHook(path.join(tempDir, '.git', 'hooks'), HOOK_360);
+      if (pkg !== null) fs.writeFileSync(path.join(tempDir, 'package.json'), pkg);
+      expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
+    });
+
+    it('#357: the generated gate always runs the scoped doctor, then verify:adf (with the token) or evidence', () => {
       const gate = PRE_COMMIT_HOOK_CONTENT.slice(PRE_COMMIT_HOOK_CONTENT.indexOf('\n# ADF evidence gate'));
       expect(gate).toContain(PRE_COMMIT_GATE_SCOPE_MARKER);
-      expect(gate).toContain('npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text && npx charter adf evidence --auto-measure --ci');
+      expect(gate).toContain(PRE_COMMIT_VERIFY_SCOPE_MARKER);
+      const doctorAt = gate.indexOf('  npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {');
+      const branchAt = gate.indexOf(`if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then`);
+      // The scoped doctor runs before, and outside, the verify:adf branch.
+      expect(doctorAt).toBeGreaterThan(-1);
+      expect(branchAt).toBeGreaterThan(doctorAt);
+      expect(gate).toContain('    "$PM" run verify:adf || {');
+      expect(gate).not.toContain('pnpm run verify:adf');
+      // One file per hook run, named after its token; a failing rev-parse never aborts the hook.
+      expect(gate).toContain(`SCOPE_FILE=$(git rev-parse --git-path "${HOOK_SCOPED_DOCTOR_FILE}-$SCOPE_TOKEN" 2>/dev/null) || SCOPE_FILE=""`);
+      // The braces put the redirection's own error under 2>/dev/null too.
+      expect(gate).toContain(`if [ -n "$SCOPE_FILE" ] && { printf '%s\\n' "$SCOPE_TOKEN" > "$SCOPE_FILE"; } 2>/dev/null; then`);
+      expect(gate).toContain('[pre-commit] Could not write the scope token in the git dir');
+      expect(gate).toContain(`      ${HOOK_SCOPED_DOCTOR_ENV}="$SCOPE_TOKEN"\n      export ${HOOK_SCOPED_DOCTOR_ENV}\n`);
+      expect(gate).toContain(`trap 'rm -f "$SCOPE_FILE"' EXIT`);
+      expect(gate).toContain('    npx charter adf evidence --auto-measure --ci || {');
       expect(gate).not.toContain('Blocked because');
       expect(gate).not.toContain('totalExtracted');
       expect(gate.match(/npx charter/g)?.length).toBe(5); // two calls, three echoed hints

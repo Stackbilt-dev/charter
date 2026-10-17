@@ -10,6 +10,9 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { runGit, isGitRepo, getGitErrorMessage } from '../git-helpers';
 import { getFlag } from '../flags';
+import { HOOK_SCOPED_DOCTOR_ENV, HOOK_SCOPED_DOCTOR_FILE } from './hook-scope';
+
+export { HOOK_SCOPED_DOCTOR_ENV, HOOK_SCOPED_DOCTOR_FILE };
 
 interface HookInstallResult {
   status: 'INSTALLED' | 'SKIPPED';
@@ -128,6 +131,11 @@ export const PRE_COMMIT_SCOPE_MARKER = '# Charter pre-commit vendor tidy: scoped
 // commit stages (doctor --staged --tidy-skipped). A #356-era hook carries the two
 // markers above but not this one, so doctor can tell it to re-run install.
 export const PRE_COMMIT_GATE_SCOPE_MARKER = '# Charter pre-commit evidence gate: blocks on vendor bloat only in staged files';
+// Fourth marker: a #360-era hook carries the three markers above but, in a repo
+// with a verify:adf script, ran `pnpm run verify:adf` instead of the scoped
+// doctor, so its whole-tree doctor still blocked on unrelated bloat, and the gate
+// failed wherever pnpm is not installed.
+export const PRE_COMMIT_VERIFY_SCOPE_MARKER = '# Charter pre-commit evidence gate: scoped in verify:adf repos too, run with the repo package manager';
 
 /**
  * The vendor tidy block of the pre-commit hook (#320). {CLI} is `npx charter`
@@ -234,28 +242,57 @@ set -eu
 ${renderHookTidyBlock('npx charter')}
 # ADF evidence gate: check LOC ceilings if manifest exists
 ${PRE_COMMIT_GATE_SCOPE_MARKER}
+${PRE_COMMIT_VERIFY_SCOPE_MARKER}
 if [ -f ".ai/manifest.adf" ]; then
   echo '[pre-commit] Running ADF evidence check...'
+  # --staged: vendor bloat blocks only in files this commit stages, and not in
+  # the ones the tidy block skipped (TIDY_SKIPPED); doctor reports the rest as
+  # INFO. Every other doctor check blocks as before. Runs with or without verify:adf.
+  npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {
+    echo ''
+    echo '[pre-commit] ADF verification FAILED.'
+    if [ -n "$TIDY_SKIPPED" ]; then
+      echo "  Run: npx charter doctor --adf-only --ci --staged --tidy-skipped \\"\${TIDY_SKIPPED# }\\" --format text"
+    else
+      echo '  Run: npx charter doctor --adf-only --ci --staged --format text'
+    fi
+    exit 1
+  }
   if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then
-    pnpm run verify:adf || {
+    # The package manager the lockfile names, when it is installed; npm otherwise
+    # (it ships with node, and npx above needs it anyway).
+    PM=npm
+    if [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
+      PM=pnpm
+    elif [ -f "yarn.lock" ] && command -v yarn >/dev/null 2>&1; then
+      PM=yarn
+    fi
+    # The doctor inside verify:adf would re-check vendor bloat in every file. The
+    # scoped doctor above has checked it for this commit, so verify:adf gets a
+    # one-time token, matched against a file in the git dir named after it (one
+    # per hook run) and removed on exit: with both, doctor reports the bloat check
+    # as INFO. Every other check, and the rest of verify:adf, still blocks.
+    SCOPE_TOKEN="$$-$(date +%s)"
+    SCOPE_FILE=$(git rev-parse --git-path "${HOOK_SCOPED_DOCTOR_FILE}-$SCOPE_TOKEN" 2>/dev/null) || SCOPE_FILE=""
+    trap 'rm -f "$SCOPE_FILE"' EXIT
+    trap 'rm -f "$SCOPE_FILE"; exit 1' HUP INT TERM
+    if [ -n "$SCOPE_FILE" ] && { printf '%s\\n' "$SCOPE_TOKEN" > "$SCOPE_FILE"; } 2>/dev/null; then
+      ${HOOK_SCOPED_DOCTOR_ENV}="$SCOPE_TOKEN"
+      export ${HOOK_SCOPED_DOCTOR_ENV}
+    else
+      echo "[pre-commit] Could not write the scope token in the git dir, so this time the doctor inside verify:adf checks vendor bloat in every file, as CI does."
+    fi
+    "$PM" run verify:adf || {
       echo ''
       echo '[pre-commit] ADF verification FAILED.'
-      echo '  Run: pnpm run verify:adf'
+      echo "  Run: $PM run verify:adf (outside this hook, its doctor also checks vendor bloat in files the commit leaves out)"
       exit 1
     }
   else
-    # --staged: vendor bloat blocks only in files this commit stages, and not in
-    # the ones the tidy block skipped (TIDY_SKIPPED); doctor reports the rest as
-    # INFO. Every other doctor check blocks as before.
-    npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text && npx charter adf evidence --auto-measure --ci || {
+    npx charter adf evidence --auto-measure --ci || {
       echo ''
       echo '[pre-commit] ADF verification FAILED.'
-      if [ -n "$TIDY_SKIPPED" ]; then
-        echo "  Run: npx charter doctor --adf-only --ci --staged --tidy-skipped \\"\${TIDY_SKIPPED# }\\" --format text"
-      else
-        echo '  Run: npx charter doctor --adf-only --ci --staged --format text'
-      fi
-      echo '   && npx charter adf evidence --auto-measure --ci'
+      echo '  Run: npx charter adf evidence --auto-measure --ci'
       exit 1
     }
   fi
@@ -489,7 +526,9 @@ function printHelp(): void {
   console.log('  files (CLAUDE.md, .cursorrules, AGENTS.md, etc.) and runs ADF evidence checks.');
   console.log('  Bloat is routed to .adf modules; only the files tidy wrote are re-staged. A vendor file');
   console.log('  with unstaged changes is skipped. The gate (doctor --staged) blocks on vendor bloat only in');
-  console.log('  staged files tidy did not skip. Re-run this command to upgrade an older hook.');
+  console.log('  staged files tidy did not skip. If package.json has a verify:adf script, it runs next,');
+  console.log('  with the package manager the lockfile names (npm if none), and its doctor leaves');
+  console.log('  vendor bloat to that scoped check. Re-run this command to upgrade an older hook.');
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
   console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');
