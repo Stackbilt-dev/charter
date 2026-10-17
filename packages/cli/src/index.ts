@@ -93,7 +93,7 @@ Options:
                      .charter/.backup/), and merge the preset template into .ai/*.adf (adds missing sections and
                      modules; never replaces; never overwrites .charter/). Use --reset-adf to replace .ai/.
                      init/setup: replace .charter/ templates, each backed up first. adf init: see 'charter adf --help'
-  --preset <name>    Stack preset: worker, frontend, backend, fullstack
+  --preset <name>    Stack preset: worker, frontend, backend, fullstack, docs, rust-wasm
   --detect-only      Setup only: print detected stack/preset and exit
   --no-dependency-sync
                      Setup only: do not rewrite devDependencies["@stackbilt/cli"]

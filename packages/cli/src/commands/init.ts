@@ -609,12 +609,21 @@ class GuidedLineReader {
   }
 }
 
-/** `init --guided` writes text prompts to stdout, so it cannot produce a JSON document (#375). */
-function guidedFormatRefusal(options: CLIOptions): string | null {
-  if (options.format === 'text') return null;
-  return `charter init --guided asks questions and cannot run with --format ${options.format}. ` +
-    'Nothing was written. Run `charter init --preset <worker|frontend|backend|fullstack|docs|rust-wasm>` instead ' +
+/**
+ * Why `init --guided` cannot run here (#375): its prompts go to stdout, so it
+ * cannot produce a JSON document, and under --ci an open stdin that never
+ * closes would leave it waiting forever. Null when it can run.
+ */
+function guidedRefusal(options: CLIOptions): { errorCode: string; message: string } | null {
+  const alternative = 'Nothing was written. Run `charter init --preset <worker|frontend|backend|fullstack|docs|rust-wasm>` instead ' +
     '(add --force to replace existing templates; each is backed up first).';
+  if (options.format !== 'text') {
+    return { errorCode: 'GUIDED_REQUIRES_TEXT', message: `charter init --guided asks questions and cannot run with --format ${options.format}. ${alternative}` };
+  }
+  if (options.ciMode) {
+    return { errorCode: 'GUIDED_REFUSED_CI', message: `charter init --guided asks questions and cannot run with --ci. ${alternative}` };
+  }
+  return null;
 }
 
 /** Exit code for a questionnaire cut short: 130 for Ctrl-C, as a shell reports SIGINT, else 1. */
@@ -633,12 +642,12 @@ const LANGUAGE_PRESET_MAP: Record<string, StackPreset> = {
 
 async function guidedInit(options: CLIOptions, force: boolean, presetFlag?: StackPreset): Promise<number> {
   // #375: refuse before any question is printed or file written.
-  const formatRefusal = guidedFormatRefusal(options);
-  if (formatRefusal) {
+  const refusal = guidedRefusal(options);
+  if (refusal) {
     if (options.format === 'json') {
-      console.log(JSON.stringify({ error: formatRefusal, errorCode: 'GUIDED_REQUIRES_TEXT', guided: true, writesPerformed: 0 }, null, 2));
+      console.log(JSON.stringify({ error: refusal.message, errorCode: refusal.errorCode, guided: true, writesPerformed: 0 }, null, 2));
     } else {
-      console.error(formatRefusal);
+      console.error(refusal.message);
     }
     return EXIT_CODE.POLICY_VIOLATION;
   }

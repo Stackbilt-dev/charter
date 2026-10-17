@@ -84,7 +84,7 @@ npx charter setup --preset fullstack --ci github --yes
 Setup-specific options:
 
 - `--ci github` — generate GitHub Actions governance workflow
-- `--preset <worker|frontend|backend|fullstack>` — stack preset
+- `--preset <worker|frontend|backend|fullstack|docs|rust-wasm>` — stack preset
 - `--detect-only` — preview detection results without writing files
 - `--no-dependency-sync` — skip rewriting `@stackbilt/cli` devDependency
 

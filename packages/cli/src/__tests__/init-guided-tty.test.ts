@@ -22,12 +22,18 @@ import type { CLIOptions } from '../index';
 let input = new PassThrough();
 let output = new PassThrough();
 let lastRl: readlineTypes.Interface | null = null;
+/** true: run readline in terminal mode over a fake TTY, so raw keystrokes (\x03, \x04) go through its key handling. */
+let terminalMode = false;
 vi.mock('node:readline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:readline')>();
   return {
     ...actual,
     createInterface: (opts: { input: unknown; output: unknown }) => {
-      lastRl = actual.createInterface({ ...opts, input, output, terminal: false });
+      if (terminalMode) {
+        Object.assign(input, { isTTY: true, setRawMode: () => input, isRaw: false });
+        Object.assign(output, { isTTY: true, columns: 120, rows: 40 });
+      }
+      lastRl = actual.createInterface({ ...opts, input, output, terminal: terminalMode });
       return lastRl;
     },
   };
@@ -86,6 +92,7 @@ beforeEach(() => {
   input = new PassThrough();
   output = new PassThrough();
   lastRl = null;
+  terminalMode = false;
   out = [];
   errOut = [];
   vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(a.map(String).join(' ')); });
@@ -202,11 +209,67 @@ describe('init --guided when stdin closes before every answer (#375)', () => {
     });
   }
 
-  it('TTY: Ctrl-C (readline SIGINT) mid-questionnaire: exit 130, nothing written', async () => {
+  it('readline SIGINT event mid-questionnaire: exit 130, nothing written', async () => {
     setTTY(true);
     output.on('data', () => { lastRl?.emit('SIGINT'); });
     expect(await initCommand(TEXT, ['--guided'])).toBe(130);
     expectAborted();
+  });
+});
+
+describe('init --guided with readline in terminal mode (raw keystrokes over a fake TTY)', () => {
+  let screen = '';
+  beforeEach(() => {
+    terminalMode = true;
+    setTTY(true);
+    screen = '';
+    output.on('data', (c: Buffer) => { screen += c.toString(); });
+  });
+
+  /** Wait until the screen shows `text` (readline repaints asynchronously), then send `keys`. */
+  async function when(text: string, keys: string): Promise<void> {
+    for (let i = 0; i < 500 && !screen.includes(text); i++) await new Promise(r => setImmediate(r));
+    expect(screen).toContain(text);
+    input.write(keys);
+  }
+
+  it('typed answers with Enter (\\r) scaffold .charter/ and exit 0', async () => {
+    const run = initCommand(TEXT, ['--guided']);
+    await when('framework?', 'go\r');
+    expect(lastRl?.terminal).toBe(true);
+    await when('Cloudflare Workers?', 'n\r');
+    await when('auth governance', 'y\r');
+    expect(await run).toBe(0);
+    expect(out).toContain('    Preset: backend');
+    expect(fs.readFileSync('.charter/policies/governance.md', 'utf-8')).toContain('## Auth Governance');
+  });
+
+  it('Ctrl-C (\\x03) at the second question: exit 130, "Aborted; nothing was written.", nothing written', async () => {
+    const run = initCommand(TEXT, ['--guided']);
+    await when('framework?', 'typescript\r');
+    await when('Cloudflare Workers?', '\x03');
+    expect(await run).toBe(130);
+    expect(errOut).toContain('Aborted; nothing was written.');
+    expect(fs.readdirSync('.')).toEqual([]);
+  });
+
+  it('Ctrl-D (\\x04) on an empty line: exit 1, nothing written', async () => {
+    const run = initCommand(TEXT, ['--guided']);
+    await when('framework?', 'typescript\r');
+    await when('Cloudflare Workers?', '\x04');
+    expect(await run).toBe(1);
+    expect(errOut).toContain('Aborted; nothing was written.');
+    expect(fs.readdirSync('.')).toEqual([]);
+  });
+
+  it('Ctrl-D after typed text deletes a character instead of aborting', async () => {
+    const run = initCommand(TEXT, ['--guided']);
+    // "gox", cursor left, Ctrl-D deletes the "x" under the cursor: the answer is "go".
+    await when('framework?', 'gox\x1b[D\x04\r');
+    await when('Cloudflare Workers?', 'n\r');
+    await when('auth governance', 'n\r');
+    expect(await run).toBe(0);
+    expect(out).toContain('    Preset: backend');
   });
 });
 
@@ -228,7 +291,52 @@ describe('init --guided --format json', () => {
   });
 });
 
+describe('init --guided --ci', () => {
+  it('is refused up front: exit 1, nothing asked or written, message names the alternative', async () => {
+    setTTY(true);
+    const asked: string[] = [];
+    output.on('data', (c: Buffer) => asked.push(c.toString()));
+    expect(await initCommand({ ...TEXT, ciMode: true }, ['--guided'])).toBe(1);
+    expect(asked).toEqual([]);
+    expect(out).toEqual([]);
+    expect(errOut.join('\n')).toContain('cannot run with --ci');
+    expect(errOut.join('\n')).toContain('charter init --preset');
+    expect(fs.readdirSync('.')).toEqual([]);
+  });
+
+  it('under --format json --ci the JSON refusal wins', async () => {
+    expect(await initCommand({ ...JSON_OPTS, ciMode: true }, ['--guided'])).toBe(1);
+    expect(JSON.parse(out.join('\n')).errorCode).toBe('GUIDED_REQUIRES_TEXT');
+  });
+});
+
 describe('promptYesNo', () => {
+  it('Ctrl-C in terminal mode prints "Aborted." and exits the process with 130', async () => {
+    terminalMode = true;
+    setTTY(true);
+    // The mocked exit returns, so the prompt's promise is left unsettled, as the real process would be gone.
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    let settled = false;
+    void promptYesNo('Register these modules now? (y/N) ').then(() => { settled = true; });
+    output.once('data', () => input.write('\x03'));
+    for (let i = 0; i < 500 && exit.mock.calls.length === 0; i++) await new Promise(r => setImmediate(r));
+    expect(exit).toHaveBeenCalledWith(130);
+    expect(errOut).toContain('Aborted.');
+    expect(errOut).not.toContain('  No answer (input closed); treating it as N.');
+    expect(settled).toBe(false);
+  });
+
+  it('Ctrl-D (\\x04) on an empty line in terminal mode is N with the note, not an exit', async () => {
+    terminalMode = true;
+    setTTY(true);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const answer = promptYesNo('Replace them? (y/N) ');
+    output.once('data', () => input.write('\x04'));
+    expect(await answer).toBe(false);
+    expect(exit).not.toHaveBeenCalled();
+    expect(errOut).toContain('  No answer (input closed); treating it as N.');
+  });
+
   it('stdin closing before an answer is N, with a note on stderr', async () => {
     setTTY(true);
     output.on('data', () => input.end());
@@ -257,5 +365,6 @@ describe('help text', () => {
     const presets = '<worker|frontend|backend|fullstack|docs|rust-wasm>';
     expect(help).toContain(`charter init [--preset ${presets}]`);
     expect(help).toContain(`charter setup [--ci github] [--preset ${presets}]`);
+    expect(help).toContain('Stack preset: worker, frontend, backend, fullstack, docs, rust-wasm');
   });
 });

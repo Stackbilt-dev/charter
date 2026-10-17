@@ -403,9 +403,13 @@ export function scaffoldReportLines(outcomes: ScaffoldOutcome[], mode: ScaffoldM
  * Prompt user for a yes/no answer via readline.
  *
  * Only `y` is yes. If stdin closes before an answer (Ctrl-D on an empty line,
- * Ctrl-C, EOF), the answer is no and a note says so on stderr: a pending
+ * EOF), the answer is no and a note says so on stderr: a pending
  * `rl.question` callback never fires on close, so without this the promise
  * never settled and the CLI exited 0 mid-run (#375).
+ *
+ * Ctrl-C is a request to stop, not an answer: it prints `Aborted.` and exits
+ * the process with 130 right here, so no caller carries on (bootstrap would
+ * otherwise go on to migrate configs and install packages).
  */
 export function promptYesNo(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) {
@@ -417,6 +421,14 @@ export function promptYesNo(question: string): Promise<boolean> {
   });
   return new Promise((resolve) => {
     let answered = false;
+    // Terminal mode: with a listener, readline emits this on Ctrl-C instead of closing.
+    rl.on('SIGINT', () => {
+      answered = true;
+      rl.close();
+      console.error('');
+      console.error('Aborted.');
+      process.exit(130);
+    });
     rl.once('close', () => {
       if (answered) return;
       answered = true;

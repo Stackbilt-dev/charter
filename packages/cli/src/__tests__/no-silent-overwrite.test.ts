@@ -129,8 +129,6 @@ function write(rel: string, text: string): void {
 }
 
 const read = (rel: string): string => fs.readFileSync(rel, 'utf-8');
-/** `init --guided` as on a terminal; the readline mock answers every question. */
-const setTTY = (): void => { Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true }); };
 /** A path as bootstrap phase 2 prints it: platform separators. */
 const P = (rel: string): string => path.normalize(rel);
 
@@ -685,7 +683,6 @@ describe('setup --force and init --guided honour failed backups', () => {
   });
 
   it('init --guided --force warns and exits 1 when nothing could be replaced', async () => {
-    setTTY();
     writeHandCharter();
     write('.charter/.backup', 'not a directory\n');
     expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
@@ -694,7 +691,6 @@ describe('setup --force and init --guided honour failed backups', () => {
   });
 
   it('init --guided --force JSON is refused up front (#375): exit 1, one JSON document, nothing written', async () => {
-    setTTY();
     writeHandCharter();
     const before = tree();
     expect(await initCommand(JSON_OPTS, ['--guided', '--force'])).toBe(1);
@@ -705,7 +701,6 @@ describe('setup --force and init --guided honour failed backups', () => {
   });
 
   it('init --guided --force replaces with backups and exits 0 when backups work', async () => {
-    setTTY();
     writeHandCharter();
     expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(0);
     expect(out.some(l => l.startsWith('  Replaced .charter/config.json (backup: .charter/.backup/config.json.'))).toBe(true);
@@ -928,7 +923,6 @@ describe('the success banner prints only on success', () => {
   });
 
   it('init --guided --force with config.json absent: no banner when every backup failed', async () => {
-    setTTY();
     writeHandCharter();
     fs.rmSync('.charter/config.json');
     write('.charter/.backup', 'not a directory\n');
@@ -992,7 +986,6 @@ describe('a run that exits 1 still names the files it created', () => {
   });
 
   it('init --guided --force with config.json absent lists the created config.json', async () => {
-    setTTY();
     writeHandCharter();
     fs.rmSync('.charter/config.json');
     write('.charter/.backup', 'not a directory\n');

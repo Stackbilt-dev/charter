@@ -73,6 +73,7 @@ vi.mock('node:readline', async (importOriginal) => {
       question: (_q: string, cb: (a: string) => void) => { promptCalls++; cb(promptAnswer); },
       close: () => undefined,
       once: () => undefined,
+      on: () => undefined,
     }),
   };
 });
