@@ -961,3 +961,52 @@ describe('dirLabel', () => {
     expect(Date.now() - started).toBeLessThan(2000);
   });
 });
+
+// ============================================================================
+// PR #373 round 4
+// ============================================================================
+
+describe('a run that exits 1 still names the files it created', () => {
+  it('init --force with config.json absent lists the created config.json', async () => {
+    writeHandCharter();
+    fs.rmSync('.charter/config.json');
+    write('.charter/.backup', 'not a directory\n');
+    expect(await initCommand(TEXT, ['--force'])).toBe(1);
+    expect(fs.existsSync('.charter/config.json')).toBe(true);
+    expect(out).toContain('  Created .charter/config.json');
+    expect(out.some(l => l.includes('Created .charter/ directory'))).toBe(false);
+  });
+
+  it('init --guided --force with config.json absent lists the created config.json', async () => {
+    writeHandCharter();
+    fs.rmSync('.charter/config.json');
+    write('.charter/.backup', 'not a directory\n');
+    expect(await initCommand(TEXT, ['--guided', '--force'])).toBe(1);
+    expect(out).toContain('  Created .charter/config.json');
+    expect(out.some(l => l.includes('Created .charter/ directory'))).toBe(false);
+  });
+});
+
+describe('--reset-adf: whitespace-only differences and an absent .ai/', () => {
+  it('a scaffold that differs from the template only in surrounding whitespace counts as nothing to replace', async () => {
+    expect(await adfCommand(TEXT, ['init'])).toBe(0);
+    write('.ai/core.adf', `\n${CORE_SCAFFOLD}\n\n`);
+    write('.ai/state.adf', `${STATE_SCAFFOLD}   \n`);
+    const before = tree();
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    out = [];
+    expect(await adfCommand(TEXT, ['init', '--reset-adf'])).toBe(0);
+    expect(tree()).toEqual(before);
+    expect(errOut).toEqual([]);
+    expect(fs.existsSync('.ai/.backup')).toBe(false);
+  });
+
+  it('bootstrap --reset-adf without --yes and no .ai/ leaves a hand-edited .charter/ unchanged', async () => {
+    writeHandCharter();
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    expect(await bootstrapCommand(TEXT, ['--reset-adf', ...BOOT])).toBe(0);
+    for (const [f, t] of Object.entries(HAND)) expect(read(f)).toBe(t);
+    expect(fs.existsSync('.charter/.backup')).toBe(false);
+    expect(read('.ai/core.adf')).toBe(CORE_SCAFFOLD);
+  });
+});

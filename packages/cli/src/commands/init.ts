@@ -399,7 +399,8 @@ export async function initCommand(options: CLIOptions, args: string[] = []): Pro
     return exitCode;
   }
 
-  printInitChanges(result, false);
+  // On exit 1 there is no banner to stand in for the Created lines, so name them.
+  printInitChanges(result, exitCode !== EXIT_CODE.SUCCESS);
   // No success banner when --force could replace nothing (exit 1).
   if (exitCode !== EXIT_CODE.SUCCESS) return exitCode;
   console.log('');
@@ -626,7 +627,8 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
     // only to the template this run wrote, never to a kept hand-edited file (#369).
     const policyLabel = `${dirLabel(options.configPath)}policies/governance.md`;
     const wrotePolicy = result.createdFiles.includes(policyLabel) || result.replaced.some(r => r.file === policyLabel);
-    printInitChanges(result, false);
+    // On exit 1 there is no banner to stand in for the Created lines, so name them.
+    printInitChanges(result, initExitCode(result) !== EXIT_CODE.SUCCESS);
     if (useAuth && wrotePolicy) {
       const policyPath = path.join(options.configPath, 'policies', 'governance.md');
       if (fs.existsSync(policyPath)) {
