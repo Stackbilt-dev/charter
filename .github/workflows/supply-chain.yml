@@ -1,5 +1,8 @@
 name: Supply Chain
 
+# Ported from the organization's shared supply-chain workflows and inlined
+# here so the jobs run on this public repo. Action pins follow ci.yml.
+
 on:
   push:
     branches: [main]
@@ -11,12 +14,48 @@ permissions:
 
 jobs:
   sbom:
-    uses: Stackbilt-dev/stackbilt_llc/.github/workflows/supply-chain-sbom.yml@fe2f8dc7de1e0404dee1634d47c6e54a9b46c020
-    with:
-      node-version: '20'
-      package-manager: 'pnpm'
-    secrets: inherit
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sbom-sha256: ${{ steps.hash.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Generate CycloneDX SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm@4.2.1 --output-format JSON --output-file sbom.json
+
+      - name: Hash SBOM artifact
+        id: hash
+        run: |
+          SBOM_SHA=$(sha256sum sbom.json | awk '{print $1}')
+          echo "sha256=${SBOM_SHA}" >> "$GITHUB_OUTPUT"
+          echo "SBOM SHA-256: ${SBOM_SHA}"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
+          retention-days: 90
 
   dep-review:
+    name: Dependency Review
     if: github.event_name == 'pull_request'
-    uses: Stackbilt-dev/stackbilt_llc/.github/workflows/supply-chain-dep-review.yml@fe2f8dc7de1e0404dee1634d47c6e54a9b46c020
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
