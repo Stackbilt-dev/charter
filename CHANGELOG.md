@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-17
+
 **Breaking:** `charter adf compile --write` changes a vendor file's mode only with `--mode compiled`. In 1.9.3 it refused a thin pointer unless you passed `--force`, which then replaced it with compiled output. Now `--force` never converts a pointer, `--target all --write` skips pointer and unmanaged files (exit 0), and a single `--target` refuses them (exit 1). Convert with `charter adf compile --target all --write --mode compiled`, or record a file's mode once with `charter adf vendor set <file> compiled`. `charter bootstrap --force` also no longer overwrites hand-authored or compiled vendor files. Installed git hooks keep their 1.x behaviour until you re-run `charter hook install`. See [Upgrading to 2.0](./docs/upgrading-to-2.0.md).
 
 ### Added
