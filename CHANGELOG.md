@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`charter init --guided` with a piped or non-TTY stdin stopped partway through the questions, wrote nothing, and exited 0** (`#375`), so a script or CI job could not tell it from a successful run. Guided mode now checks up front, before printing a question or writing a file: when stdin is not a TTY, it exits 1 with a message on stderr naming `charter init --preset <...>` (with `--force` to replace existing templates) as the non-interactive alternative. It never reads answers from a pipe. `--format json` is refused the same way, on a TTY or not, with one JSON document (`error`, `errorCode: "GUIDED_REQUIRES_TEXT"`, `guided: true`, `writesPerformed: 0`); before, guided printed its banner and prompts into the JSON output. The root cause: a pending `readline` question never settles when stdin hits EOF, so the CLI's promise was left pending and Node exited 0 once the event loop drained. Closing stdin before the last answer on a terminal (Ctrl-D, or Ctrl-C) now prints `Aborted; nothing was written.` and exits 1.
+
 ## [2.1.0] - 2026-10-17
 
 **`charter bootstrap --force` no longer replaces `.ai/*.adf`; it merges.** In 2.0.0, `--force` replaced `manifest.adf`, `core.adf`, `state.adf` and the preset modules with the template, silently dropping custom triggers, `RULES` lines, constraints and `METRICS` ceilings (the copies only survived in `.ai/.backup/`). If a script relies on `--force` to reset `.ai/`, change it to `charter bootstrap --reset-adf --yes` (add `--force` as well to keep rewriting pointers and `.mcp.json`). See [#354](https://github.com/Stackbilt-dev/charter/issues/354).

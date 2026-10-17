@@ -539,10 +539,56 @@ function isValidPreset(value: string | undefined): value is StackPreset {
 // --guided interactive init
 // ============================================================================
 
-function askQuestion(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+/** stdin closed (EOF / Ctrl-D, or Ctrl-C) before the questionnaire finished. */
+class GuidedAborted extends Error {}
+
+/**
+ * Returns a function that asks one question. It rejects with GuidedAborted
+ * if readline closes before the answer: a pending `rl.question` callback
+ * never fires on EOF, so without this the promise never settles, the event
+ * loop drains, and the CLI exits 0 having written nothing (#375). A question
+ * asked after the interface already closed rejects the same way.
+ */
+function questionAsker(rl: readline.Interface): (question: string) => Promise<string> {
+  let closed = false;
+  rl.once('close', () => { closed = true; });
+  return (question) => new Promise((resolve, reject) => {
+    if (closed) {
+      reject(new GuidedAborted());
+      return;
+    }
+    const onClose = () => reject(new GuidedAborted());
+    rl.once('close', onClose);
+    try {
+      rl.question(question, (answer) => {
+        rl.removeListener('close', onClose);
+        resolve(answer.trim());
+      });
+    } catch {
+      // Node throws ERR_USE_AFTER_CLOSE when the interface closed underneath us.
+      rl.removeListener('close', onClose);
+      reject(new GuidedAborted());
+    }
   });
+}
+
+/** Why `init --guided` cannot run here, or null when stdin is an interactive terminal and output is text. */
+function guidedRefusal(options: CLIOptions): { errorCode: string; message: string } | null {
+  const alternative = 'Run `charter init --preset <worker|frontend|backend|fullstack|docs|rust-wasm>` instead ' +
+    '(add --force to replace existing templates; each is backed up first).';
+  if (options.format !== 'text') {
+    return {
+      errorCode: 'GUIDED_REQUIRES_TEXT',
+      message: `charter init --guided asks questions interactively and cannot run with --format ${options.format}. Nothing was written. ${alternative}`,
+    };
+  }
+  if (!process.stdin.isTTY) {
+    return {
+      errorCode: 'GUIDED_REQUIRES_TTY',
+      message: `charter init --guided needs an interactive terminal, but stdin is not a TTY (a pipe, a file or CI). Nothing was written. ${alternative}`,
+    };
+  }
+  return null;
 }
 
 const LANGUAGE_PRESET_MAP: Record<string, StackPreset> = {
@@ -557,10 +603,23 @@ const LANGUAGE_PRESET_MAP: Record<string, StackPreset> = {
 };
 
 async function guidedInit(options: CLIOptions, force: boolean): Promise<number> {
+  // #375: decide up front, before any question is printed or file written.
+  // Answers are never read from a pipe.
+  const refusal = guidedRefusal(options);
+  if (refusal) {
+    if (options.format === 'json') {
+      console.log(JSON.stringify({ error: refusal.message, errorCode: refusal.errorCode, guided: true, writesPerformed: 0 }, null, 2));
+    } else {
+      console.error(refusal.message);
+    }
+    return EXIT_CODE.POLICY_VIOLATION;
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
+  const askQuestion = questionAsker(rl);
 
   try {
     console.log('');
@@ -568,26 +627,27 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
     console.log('  --------------------');
     console.log('');
 
-    // Q1: Primary language
-    const langAnswer = await askQuestion(
-      rl,
-      '  What\'s your primary language/framework? (TypeScript, Python, Go, React, etc.) '
-    );
+    let langAnswer: string;
+    let cfAnswer: string;
+    let authAnswer: string;
+    try {
+      // Q1: Primary language
+      langAnswer = await askQuestion('  What\'s your primary language/framework? (TypeScript, Python, Go, React, etc.) ');
+      // Q2: Cloudflare Workers
+      cfAnswer = await askQuestion('  Do you use Cloudflare Workers? (y/N) ');
+      // Q3: Auth governance
+      authAnswer = await askQuestion('  Do you want auth governance patterns? (y/N) ');
+    } catch (err) {
+      if (!(err instanceof GuidedAborted)) throw err;
+      // EOF (Ctrl-D) or Ctrl-C mid-questionnaire: nothing has been written yet.
+      console.error('');
+      console.error('Aborted; nothing was written.');
+      return EXIT_CODE.POLICY_VIOLATION;
+    }
+
     const langKey = langAnswer.toLowerCase().replace(/\s+/g, '');
     const detectedPreset = LANGUAGE_PRESET_MAP[langKey];
-
-    // Q2: Cloudflare Workers
-    const cfAnswer = await askQuestion(
-      rl,
-      '  Do you use Cloudflare Workers? (y/N) '
-    );
     const useCloudflare = cfAnswer.toLowerCase() === 'y' || cfAnswer.toLowerCase() === 'yes';
-
-    // Q3: Auth governance
-    const authAnswer = await askQuestion(
-      rl,
-      '  Do you want auth governance patterns? (y/N) '
-    );
     const useAuth = authAnswer.toLowerCase() === 'y' || authAnswer.toLowerCase() === 'yes';
 
     rl.close();
@@ -609,12 +669,8 @@ async function guidedInit(options: CLIOptions, force: boolean): Promise<number> 
       },
     };
 
+    // Text output only: --format json was refused above (#375).
     const result = initializeCharter(options.configPath, force, initOpts);
-
-    if (options.format === 'json') {
-      console.log(JSON.stringify({ ...result, guided: true, preset, useCloudflare, useAuth }, null, 2));
-      return initExitCode(result);
-    }
 
     if (!result.created) {
       printInitChanges(result);
