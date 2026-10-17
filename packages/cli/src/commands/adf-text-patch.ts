@@ -103,7 +103,12 @@ function applyOne(text: string, op: PatchOperation): string | null {
   if (op.op === 'ADD_SECTION') {
     const add = bodyLines(op.content, '  ');
     if (!add) return null;
-    const head = `${op.decoration ? `${op.decoration} ` : ''}${op.key}${op.weight ? ` [${op.weight}]` : ''}:`;
+    // The parser drops U+FE0F after a decoration, so the AST holds a bare text-style
+    // symbol such as U+26A0; write it back with the selector, as the scaffolds do (#371).
+    const deco = op.decoration && !/\p{Emoji_Presentation}/u.test(op.decoration) && !op.decoration.endsWith('\uFE0F')
+      ? `${op.decoration}\uFE0F`
+      : op.decoration;
+    const head = `${deco ? `${deco} ` : ''}${op.key}${op.weight ? ` [${op.weight}]` : ''}:`;
     const block = [head, ...add].join(eol);
     if (text.length === 0) return block + eol;
     return text.endsWith('\n') ? `${text}${eol}${block}${eol}` : `${text}${eol}${eol}${block}`;

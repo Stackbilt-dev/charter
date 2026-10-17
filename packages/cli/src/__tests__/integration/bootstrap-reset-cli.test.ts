@@ -126,10 +126,11 @@ function workerRepo(): string {
   return dir;
 }
 
+const CF_RULE = 'No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)';
 const read = (dir: string, rel: string): string => fs.readFileSync(path.join(dir, rel), 'utf-8');
 
 describe('populate never reformats or overwrites user content (built CLI)', () => {
-  it('CRLF, non-canonical order, no scaffold text, CF constraint missing: --force --yes changes only the inserted bullet', () => {
+  it('CRLF, non-canonical order, no scaffold text, CF constraint missing: --force --yes changes nothing and says why (#371)', () => {
     const dir = workerRepo();
     expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
     const core = [
@@ -149,17 +150,43 @@ describe('populate never reformats or overwrites user content (built CLI)', () =
     fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
     const r = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
     expect(r.status).toBe(0);
-    const after = read(dir, '.ai/core.adf');
-    const inserted = '    - No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)\r\n';
-    // The only change is populate's (pre-existing, #371) constraint re-add, inserted in place.
-    expect(after).toBe(core.replace('    - Never commit secrets\r\n', `    - Never commit secrets\r\n${inserted}`));
+    // CONSTRAINTS differs from the template (defaults deleted/reworded), so the
+    // stack constraint is not added (#371): the file is byte-identical.
+    expect(read(dir, '.ai/core.adf')).toBe(core);
     expect(r.stdout).toContain('  Unchanged by merge: .ai/core.adf');
-    expect(r.stdout).toContain('  Added CONSTRAINTS item in .ai/core.adf: No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)');
-    // A second run has nothing left to do.
+    expect(r.stdout).not.toContain('Added CONSTRAINTS item');
+    expect(r.stdout).toContain('CONSTRAINTS was edited (it differs from the template), so populate did not add the stack constraint: No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)');
+    // A second run has nothing left to do either.
     const again = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
-    expect(read(dir, '.ai/core.adf')).toBe(after);
+    expect(read(dir, '.ai/core.adf')).toBe(core);
     expect(again.stdout).toContain('  No scaffold content to replace');
   });
+
+  for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
+    it(`#371: a deleted default and a deleted populate bullet stay deleted across bootstrap ${flags.join(' ') || '(no flags)'} re-runs`, () => {
+      const dir = workerRepo();
+      // type: module with no tsconfig/typescript: populate also wants the ESM rule.
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...JSON.parse(WORKER_PKG), type: 'module' }));
+      const boot = [...flags, '--preset', 'worker', '--skip-install', '--skip-doctor'];
+      expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+      const first = read(dir, '.ai/core.adf');
+      expect(first.split(CF_RULE).length - 1).toBe(1);
+      expect(first).toContain('Use .js extensions for all ESM imports');
+      // A second bootstrap over its own result is idempotent.
+      expect(run(dir, boot, 'ignore').status).toBe(0);
+      expect(read(dir, '.ai/core.adf')).toBe(first);
+
+      const edited = first.replace('  - Never commit secrets or credentials\n', '').replace(`  - ${CF_RULE}\n`, '');
+      fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
+      for (let i = 0; i < 2; i++) {
+        const r = run(dir, [...boot, '--format', 'json'], 'ignore');
+        expect(r.status).toBe(0);
+        expect(read(dir, '.ai/core.adf')).toBe(edited);
+        const populate = JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'populate');
+        expect(populate.warnings.join('\n')).toContain(`CONSTRAINTS was edited (it differs from the template), so populate did not add the stack constraint: ${CF_RULE}`);
+      }
+    });
+  }
 
   for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
     it(`a partially edited CONTEXT and STATE survive bootstrap ${flags.join(' ') || '(no flags)'}`, () => {

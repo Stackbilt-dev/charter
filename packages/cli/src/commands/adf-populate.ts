@@ -52,6 +52,16 @@ function normalized(section: AdfSection): string[] {
   return sectionText(section).split('\n').map(l => l.trim()).filter(l => l !== '');
 }
 
+/**
+ * CONSTRAINTS gets stack bullets only while it is still exactly the template's
+ * CONSTRAINTS (#371). Unlike CONTEXT, an empty section does not count as
+ * untouched: emptying CONSTRAINTS means the defaults were deleted, and a deleted
+ * default counts as an edit (#354 Q3).
+ */
+export function isTemplateConstraints(section: AdfSection, file: string): boolean {
+  return section.content.type === 'list' && normalized(section).length > 0 && isUntouchedScaffold(section, file);
+}
+
 export function isUntouchedScaffold(section: AdfSection, file: string): boolean {
   const lines = normalized(section);
   if (lines.length === 0) return true;
@@ -75,8 +85,10 @@ function sectionText(section: AdfSection): string {
 // ============================================================================
 
 /**
- * 'force' replaces CONTEXT/STATE even when customized; 'scaffold-only' replaces
- * only sections that still hold scaffold text. The CLI picks 'force' under
+ * 'force' replaces CONTEXT/STATE even when customized, and adds missing stack
+ * CONSTRAINTS bullets to any list section; 'scaffold-only' replaces only sections
+ * that still hold scaffold text, and adds stack CONSTRAINTS only to a section that
+ * is missing or still exactly the template's (#371). The CLI picks 'force' under
  * --force or --yes. `charter bootstrap` passes 'scaffold-only' explicitly, so its
  * own --yes never re-enables force (#354).
  */
@@ -87,7 +99,10 @@ export interface PopulateResult {
   ops: number;
   /** 'skipped': nothing to do. 'refused': edits were due but could not be applied safely (see reason). */
   status: 'populated' | 'skipped' | 'refused' | 'missing';
-  /** Why a file with pending operations was left as is. */
+  /**
+   * Why a file with pending operations was left as is, or (on any status) why
+   * part of it was: e.g. stack constraints not added to an edited CONSTRAINTS (#371).
+   */
   reason?: string;
   /** One line per applied operation, e.g. "Filled CONTEXT". */
   changes?: string[];
@@ -149,10 +164,10 @@ export async function adfPopulateCommand(
 
   const results: PopulateResult[] = [];
 
-  const fileTasks: Array<{ file: string; build: () => PatchOperation[] | null }> = [
+  const fileTasks: Array<{ file: string; build: (notes: string[]) => PatchOperation[] | null }> = [
     {
       file: path.join(aiDir, 'core.adf'),
-      build: () => buildCoreOps(aiDir, projectName, description, readmeSummary, detection, contexts, force),
+      build: notes => buildCoreOps(aiDir, projectName, description, readmeSummary, detection, contexts, force, notes),
     },
     {
       file: path.join(aiDir, 'state.adf'),
@@ -174,10 +189,12 @@ export async function adfPopulateCommand(
       continue;
     }
 
-    const built = task.build();
+    const notes: string[] = [];
+    const built = task.build(notes);
+    const note = notes.length > 0 ? { reason: notes.join('; ') } : {};
     const ops = built ? normalizeOps(built) : null;
     if (!ops || ops.length === 0) {
-      results.push({ file: task.file, ops: 0, status: 'skipped' });
+      results.push({ file: task.file, ops: 0, status: 'skipped', ...note });
       continue;
     }
 
@@ -190,7 +207,7 @@ export async function adfPopulateCommand(
     }
     if (!dryRun) fs.writeFileSync(task.file, edit.next);
 
-    results.push({ file: task.file, ops: ops.length, status: 'populated', changes: ops.map(describeOp) });
+    results.push({ file: task.file, ops: ops.length, status: 'populated', changes: ops.map(describeOp), ...note });
   }
 
   internal.report?.(results);
@@ -223,7 +240,7 @@ export async function adfPopulateCommand(
       if (r.status === 'missing') continue;
       const icon = r.status === 'populated' ? '[ok]' : r.status === 'refused' ? '[refused]' : '[skip]';
       const detail = r.status === 'populated'
-        ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied`
+        ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied${r.reason ? `; ${r.reason}` : ''}`
         : r.reason ?? 'already customized — use --force to overwrite';
       console.log(`    ${icon} ${r.file}  (${detail})`);
     }
@@ -247,7 +264,8 @@ function buildCoreOps(
   readmeSummary: string | undefined,
   detection: DetectionResult,
   contexts: PackageContext[],
-  force: boolean
+  force: boolean,
+  notes: string[],
 ): PatchOperation[] | null {
   const filePath = path.join(aiDir, 'core.adf');
   const input = fs.readFileSync(filePath, 'utf-8');
@@ -279,15 +297,16 @@ function buildCoreOps(
     });
   }
 
-  // Add stack-specific constraints (additive, never overwrite existing)
+  // Stack-specific constraints (additive, never overwrite existing). Only a
+  // missing CONSTRAINTS section, or one still exactly the template's, receives
+  // them (#371): any edit, including deleting a default or one of populate's own
+  // earlier bullets, leaves the section alone. --force keeps the additive re-add.
   const constraintsSection = doc.sections.find(s => s.key === 'CONSTRAINTS');
-  if (constraintsSection && constraintsSection.content.type === 'list') {
-    const existingItems = constraintsSection.content.items;
-
+  const existingItems = constraintsSection?.content.type === 'list' ? constraintsSection.content.items : [];
+  const wanted: string[] = [];
+  {
     const addConstraint = (value: string, matchFn: (item: string) => boolean) => {
-      if (!existingItems.some(matchFn)) {
-        ops.push({ op: 'ADD_BULLET', section: 'CONSTRAINTS', value });
-      }
+      if (!existingItems.some(matchFn)) wanted.push(value);
     };
 
     // ESM import extensions: gated on TypeScript's moduleResolution, not on
@@ -317,6 +336,34 @@ function buildCoreOps(
         'Internal packages use pnpm workspace:^ protocol, never relative paths',
         item => item.includes('workspace') || (item.includes('pnpm') && item.includes('package'))
       );
+    }
+  }
+
+  if (wanted.length > 0) {
+    if (!constraintsSection) {
+      ops.push({
+        op: 'ADD_SECTION',
+        key: 'CONSTRAINTS',
+        decoration: '\u26A0', // as parsed; the text edit writes it as the scaffold's U+26A0 U+FE0F
+        weight: 'load-bearing',
+        content: { type: 'list', items: wanted },
+      });
+    } else {
+      // An emptied section parses as empty text, not as an empty list.
+      const empty = normalized(constraintsSection).length === 0;
+      const appendable = constraintsSection.content.type === 'list' && existingItems.length > 0;
+      if (appendable && (force || isTemplateConstraints(constraintsSection, filePath))) {
+        for (const value of wanted) ops.push({ op: 'ADD_BULLET', section: 'CONSTRAINTS', value });
+      } else if (force && empty) {
+        // No bullet to append after; --force fills the empty section.
+        ops.push({ op: 'REPLACE_SECTION', key: 'CONSTRAINTS', content: { type: 'list', items: wanted } });
+      } else {
+        const why = appendable || empty ? 'was edited (it differs from the template)' : 'is not a list';
+        notes.push(
+          `CONSTRAINTS ${why}, so populate did not add the stack constraint${wanted.length === 1 ? '' : 's'}: `
+          + `${wanted.map(normalizeValue).join(' | ')} (add by hand, or run 'charter adf populate --force')`,
+        );
+      }
     }
   }
 
