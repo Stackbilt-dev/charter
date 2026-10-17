@@ -44,7 +44,7 @@
   "devDependencies": {
     "@stackbilt/cli": "workspace:*",
     "@types/node": "^26.6.1",
-    "tsx": "^4.23.13",
+    "tsx": "^4.23.15",
     "typescript": "~5.8.2",
     "vite": "7.3.5",
     "vitest": "^5.0.1",
