@@ -19,6 +19,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run supply-chain:check
       - run: pnpm run build
+      # Same check release.yml runs before publishing; exercised here so a
+      # change to the script can't first fail at release time.
+      - name: Verify packed packages are publishable
+        run: pnpm run publish:check
       - name: Verify context routing benchmark
         run: pnpm run benchmark:context
       - name: Measure brief token budget
