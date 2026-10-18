@@ -136,10 +136,17 @@ export const PRE_COMMIT_GATE_SCOPE_MARKER = '# Charter pre-commit evidence gate:
 // doctor, so its whole-tree doctor still blocked on unrelated bloat, and the gate
 // failed wherever pnpm is not installed.
 export const PRE_COMMIT_VERIFY_SCOPE_MARKER = '# Charter pre-commit evidence gate: scoped in verify:adf repos too, run with the repo package manager';
+// Fifth marker (#366): every Charter call goes through charter_cli, which runs the
+// CLI with the repo's package manager (yarn, pnpm exec, npx --no-install). An
+// older hook called `npx charter`, which cannot resolve Charter under Yarn
+// Plug'n'Play and, where Charter is not installed, fetches the unrelated registry
+// package `charter`.
+export const PRE_COMMIT_PM_CLI_MARKER = '# Charter pre-commit CLI: run through the repo package manager, never downloaded';
 
 /**
- * The vendor tidy block of the pre-commit hook (#320). {CLI} is `npx charter`
- * here and `node packages/cli/dist/bin.js` in the repo's own .githooks/pre-commit;
+ * The vendor tidy block of the pre-commit hook (#320). {CLI} is `charter_cli`
+ * (the shell function HOOK_CLI_RESOLVE_BLOCK defines) here and
+ * `node packages/cli/dist/bin.js` in the repo's own .githooks/pre-commit;
  * that is the only difference allowed between the two, and hook.test.ts checks it.
  * POSIX sh: no arrays, no [[, no jq. Works under set -eu and set -euo pipefail:
  * greps fed by a pipe read all their input (no -q), so under pipefail an early
@@ -235,11 +242,78 @@ export function renderHookTidyBlock(cli: string): string {
   return HOOK_TIDY_BLOCK_TEMPLATE.split('{CLI}').join(cli);
 }
 
+/** The shell function the generated hook runs Charter with (#366). */
+export const HOOK_CLI = 'charter_cli';
+
+/**
+ * Picks the package manager and defines charter_cli (#366). POSIX sh, no output
+ * unless a warning is due. Precedence (the #365 verify:adf order, plus PnP):
+ *   1. Yarn Plug'n'Play: .pnp.cjs / .pnp.js, or .yarnrc.yml with nodeLinker: pnp
+ *   2. pnpm-lock.yaml -> pnpm
+ *   3. yarn.lock -> yarn
+ *   4. otherwise npm
+ * A yarn or pnpm repo whose binary is not on PATH falls back to npm, with a
+ * warning (only when .ai/manifest.adf exists, as nothing else would run).
+ * charter_cli: yarn charter (yarn --silent charter on Yarn 1, whose run banner
+ * would otherwise land in the tidy block's parsed stdout), pnpm exec charter, or
+ * npx --no-install charter. --no-install makes npx use only a local or global
+ * install and never download: the registry package named "charter" is unrelated.
+ */
+export const HOOK_CLI_RESOLVE_BLOCK = `# Charter CLI resolution (#366): run Charter with the package manager this repo uses.
+${PRE_COMMIT_PM_CLI_MARKER}
+CHARTER_PNP=0
+if [ -f ".pnp.cjs" ] || [ -f ".pnp.js" ]; then
+  CHARTER_PNP=1
+elif [ -f ".yarnrc.yml" ] && grep -E "^[[:space:]]*nodeLinker:[[:space:]]*[\\"']?pnp([\\"'[:space:]#]|\\$)" .yarnrc.yml >/dev/null 2>&1; then
+  CHARTER_PNP=1
+fi
+LOCK_PM=npm
+if [ "$CHARTER_PNP" = "1" ]; then
+  LOCK_PM=yarn
+elif [ -f "pnpm-lock.yaml" ]; then
+  LOCK_PM=pnpm
+elif [ -f "yarn.lock" ]; then
+  LOCK_PM=yarn
+fi
+PM=npm
+if [ "$LOCK_PM" != "npm" ]; then
+  if command -v "$LOCK_PM" >/dev/null 2>&1; then
+    PM="$LOCK_PM"
+  elif [ -f ".ai/manifest.adf" ]; then
+    echo "[pre-commit] Warning: this repo uses $LOCK_PM, but $LOCK_PM is not on PATH; running Charter with npx --no-install (and verify:adf with npm) instead." >&2
+    if [ "$CHARTER_PNP" = "1" ]; then
+      echo "[pre-commit] Yarn Plug'n'Play has no node_modules, so npx finds Charter only if it is installed globally. To fix: corepack enable (or install yarn), then commit again." >&2
+    fi
+  fi
+fi
+CHARTER_YARN_FLAGS=""
+case "$PM" in
+  yarn)
+    CHARTER_RUN="yarn charter"
+    if [ -f ".ai/manifest.adf" ]; then
+      case "$(yarn --version 2>/dev/null || true)" in
+        1.*) CHARTER_YARN_FLAGS="--silent" ;;
+      esac
+    fi
+    ;;
+  pnpm) CHARTER_RUN="pnpm exec charter" ;;
+  *) CHARTER_RUN="npx --no-install charter" ;;
+esac
+charter_cli() {
+  case "$PM" in
+    yarn) yarn $CHARTER_YARN_FLAGS charter "$@" ;;
+    pnpm) pnpm exec charter "$@" ;;
+    *) npx --no-install charter "$@" ;;
+  esac
+}
+`;
+
 export const PRE_COMMIT_HOOK_CONTENT = `#!/usr/bin/env sh
 ${PRE_COMMIT_HOOK_MARKER}
 set -eu
 
-${renderHookTidyBlock('npx charter')}
+${HOOK_CLI_RESOLVE_BLOCK}
+${renderHookTidyBlock(HOOK_CLI)}
 # ADF evidence gate: check LOC ceilings if manifest exists
 ${PRE_COMMIT_GATE_SCOPE_MARKER}
 ${PRE_COMMIT_VERIFY_SCOPE_MARKER}
@@ -248,25 +322,20 @@ if [ -f ".ai/manifest.adf" ]; then
   # --staged: vendor bloat blocks only in files this commit stages, and not in
   # the ones the tidy block skipped (TIDY_SKIPPED); doctor reports the rest as
   # INFO. Every other doctor check blocks as before. Runs with or without verify:adf.
-  npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {
+  ${HOOK_CLI} doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {
     echo ''
     echo '[pre-commit] ADF verification FAILED.'
     if [ -n "$TIDY_SKIPPED" ]; then
-      echo "  Run: npx charter doctor --adf-only --ci --staged --tidy-skipped \\"\${TIDY_SKIPPED# }\\" --format text"
+      echo "  Run: $CHARTER_RUN doctor --adf-only --ci --staged --tidy-skipped \\"\${TIDY_SKIPPED# }\\" --format text"
     else
-      echo '  Run: npx charter doctor --adf-only --ci --staged --format text'
+      echo "  Run: $CHARTER_RUN doctor --adf-only --ci --staged --format text"
     fi
+    echo '  If charter itself was not found: add @stackbilt/cli as a devDependency and install it (this hook never downloads Charter).'
     exit 1
   }
   if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then
-    # The package manager the lockfile names, when it is installed; npm otherwise
-    # (it ships with node, and npx above needs it anyway).
-    PM=npm
-    if [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
-      PM=pnpm
-    elif [ -f "yarn.lock" ] && command -v yarn >/dev/null 2>&1; then
-      PM=yarn
-    fi
+    # PM is the package manager the lockfile names, when it is installed; npm
+    # otherwise (it ships with node). See the CLI resolution block above.
     # The doctor inside verify:adf would re-check vendor bloat in every file. The
     # scoped doctor above has checked it for this commit, so verify:adf gets a
     # one-time token, matched against a file in the git dir named after it (one
@@ -289,10 +358,11 @@ if [ -f ".ai/manifest.adf" ]; then
       exit 1
     }
   else
-    npx charter adf evidence --auto-measure --ci || {
+    ${HOOK_CLI} adf evidence --auto-measure --ci || {
       echo ''
       echo '[pre-commit] ADF verification FAILED.'
-      echo '  Run: npx charter adf evidence --auto-measure --ci'
+      echo "  Run: $CHARTER_RUN adf evidence --auto-measure --ci"
+      echo '  If charter itself was not found: add @stackbilt/cli as a devDependency and install it (this hook never downloads Charter).'
       exit 1
     }
   fi
@@ -528,7 +598,10 @@ function printHelp(): void {
   console.log('  with unstaged changes is skipped. The gate (doctor --staged) blocks on vendor bloat only in');
   console.log('  staged files tidy did not skip. If package.json has a verify:adf script, it runs next,');
   console.log('  with the package manager the lockfile names (npm if none), and its doctor leaves');
-  console.log('  vendor bloat to that scoped check. Re-run this command to upgrade an older hook.');
+  console.log('  vendor bloat to that scoped check. Every Charter call runs through the same package');
+  console.log('  manager: yarn charter (Yarn, including Plug\'n\'Play), pnpm exec charter, or');
+  console.log('  npx --no-install charter, which never downloads a package. Re-run this command to');
+  console.log('  upgrade an older hook.');
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
   console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');

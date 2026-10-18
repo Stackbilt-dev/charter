@@ -2,7 +2,7 @@
  * Integration tests: the real pre-commit hook in real git repos (#320).
  *
  * Each repo installs the hook `charter hook install --pre-commit` generates
- * (PRE_COMMIT_HOOK_CONTENT), with `npx charter` replaced by the built CLI behind
+ * (PRE_COMMIT_HOOK_CONTENT), with its charter_cli function (#366) redefined to run the built CLI behind
  * a logging shim, so these tests exercise the shipped text and can prove which
  * CLI calls the hook made. Paths are passed to the shell double-quoted with
  * forward slashes: Node accepts C:/... on Windows and Git's sh leaves them alone.
@@ -19,7 +19,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
+import { HOOK_CLI, HOOK_CLI_RESOLVE_BLOCK, HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
 import { BLOAT_SCOPE_MSG } from '../../commands/doctor';
 
 // ============================================================================
@@ -179,7 +179,10 @@ function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
   // The generated hook, as `charter hook install --pre-commit` writes it.
   const hookDir = path.join(tmp, '.githooks');
   fs.mkdirSync(hookDir, { recursive: true });
-  const full = PRE_COMMIT_HOOK_CONTENT.split('npx charter').join(`node "${posix(shim)}"`);
+  // #366: charter_cli is redefined right after the generated one, so package-manager
+  // detection still runs (verify:adf uses it) and every Charter call reaches the shim.
+  const full = PRE_COMMIT_HOOK_CONTENT.replace(HOOK_CLI_RESOLVE_BLOCK, `${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI}() { node "${posix(shim)}" "$@"; }\n`);
+  expect(full).not.toBe(PRE_COMMIT_HOOK_CONTENT);
   const hook = opts.tidyOnly ? full.slice(0, full.indexOf('# ADF evidence gate')) : full;
   expect(hook).toContain('# Charter pre-commit vendor tidy: scoped to staged files');
   fs.writeFileSync(path.join(hookDir, 'pre-commit'), hook);
