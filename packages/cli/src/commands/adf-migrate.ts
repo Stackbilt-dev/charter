@@ -99,14 +99,22 @@ export function discoverAgentConfigFiles(): string[] {
 }
 
 
-const POINTER_TEMPLATES: Record<string, string> = {
-  'CLAUDE.md': POINTER_CLAUDE_MD,
-  '.cursorrules': POINTER_CURSORRULES,
-  'agents.md': POINTER_AGENTS_MD,
-  'AGENTS.md': POINTER_AGENTS_MD,
-  'GEMINI.md': POINTER_GEMINI_MD,
-  'copilot-instructions.md': POINTER_COPILOT_MD,
-};
+/**
+ * The pointer template for a file name, or undefined when it has none. Resolved at
+ * call time, not module load: the CLI loads index -> doctor -> adf -> adf-migrate,
+ * so adf.ts's constants are still undefined while this module initialises (#355).
+ */
+function pointerTemplateFor(baseName: string): string | undefined {
+  const templates: Record<string, string> = {
+    'CLAUDE.md': POINTER_CLAUDE_MD,
+    '.cursorrules': POINTER_CURSORRULES,
+    'agents.md': POINTER_AGENTS_MD,
+    'AGENTS.md': POINTER_AGENTS_MD,
+    'GEMINI.md': POINTER_GEMINI_MD,
+    'copilot-instructions.md': POINTER_COPILOT_MD,
+  };
+  return templates[baseName];
+}
 
 // ============================================================================
 // Command Entry
@@ -606,7 +614,7 @@ function writePointerWithRetained(
   }
 
   // Replace mode (original behavior): thin pointer for all files
-  let pointer = POINTER_TEMPLATES[baseName];
+  let pointer = pointerTemplateFor(baseName);
 
   if (!pointer) {
     // Generic pointer for files without a template

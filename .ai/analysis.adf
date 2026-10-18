@@ -9,7 +9,7 @@ ADF: 0.1
   - CLI command handlers in packages/cli/src/commands/blast.ts and surface.ts
   - Feed governance signals: blast radius ≥20 files → CROSS_CUTTING warning
 
-⚠ CONSTRAINTS [load-bearing]:
+⚠️ CONSTRAINTS [load-bearing]:
   - blast and surface commands must support --format json for stable machine output
   - blast: --root and --depth flags must be in VALUE_FLAGS to avoid positional sweep
   - blast must handle ESM .js → .ts rewrite, tsconfig extends chains, src/index.* fallback
