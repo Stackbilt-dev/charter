@@ -16,7 +16,7 @@ const options: CLIOptions = { configPath: '.charter', format: 'text', ciMode: fa
 
 const GENERIC_POINTER_LINE = '> This project uses [ADF](https://github.com/Stackbilt-dev/charter) for AI agent context management.';
 
-describe('adf migrate --replace pointer templates after loading the CLI entry (#355)', () => {
+describe('adf migrate pointer templates after loading the CLI entry (#355)', () => {
   let originalCwd: string;
   let tempDir: string;
 
@@ -42,10 +42,10 @@ describe('adf migrate --replace pointer templates after loading the CLI entry (#
     expect(POINTER_AGENTS_MD).toContain('# AGENTS.md');
   });
 
-  for (const [file, template] of [['GEMINI.md', () => POINTER_GEMINI_MD], ['AGENTS.md', () => POINTER_AGENTS_MD]] as const) {
-    it(`writes the named ${file} template, not the generic pointer`, async () => {
+  for (const mode of [[], ['--replace']] as const) for (const [file, template] of [['GEMINI.md', () => POINTER_GEMINI_MD], ['AGENTS.md', () => POINTER_AGENTS_MD]] as const) {
+    it(`writes the named ${file} template, not the generic pointer (${mode[0] ?? 'default mode'})`, async () => {
       fs.writeFileSync(file, `# ${file}\n\n## General\n\n- Always write a changelog entry.\n`);
-      expect(await adfMigrateCommand(options, ['--source', file, '--replace', '--no-backup'])).toBe(0);
+      expect(await adfMigrateCommand(options, ['--source', file, ...mode, '--no-backup'])).toBe(0);
 
       const written = fs.readFileSync(file, 'utf-8');
       expect(written.startsWith(template())).toBe(true);
