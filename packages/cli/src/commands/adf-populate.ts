@@ -14,7 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseAdf } from '@stackbilt/adf';
 import type { AdfSection, PatchOperation } from '@stackbilt/adf';
-import { applyOpsAsText } from './adf-text-patch';
+import { applyOpsAsText, type TextPatchOperation } from './adf-text-patch';
 import { BACKEND_SCAFFOLD, CORE_SCAFFOLD, FRONTEND_SCAFFOLD, STATE_SCAFFOLD } from './adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
@@ -53,13 +53,24 @@ function normalized(section: AdfSection): string[] {
 }
 
 /**
- * CONSTRAINTS gets stack bullets only while it is still exactly the template's
- * CONSTRAINTS (#371). Unlike CONTEXT, an empty section does not count as
- * untouched: emptying CONSTRAINTS means the defaults were deleted, and a deleted
- * default counts as an edit (#354 Q3).
+ * CONSTRAINTS gets stack bullets only while it is untouched (#371): the
+ * template's bullets, in order, followed by nothing but bullets populate itself
+ * added (`added`, from the populate record; each at most once, any order).
+ * Unlike CONTEXT, an empty section does not count as untouched: emptying
+ * CONSTRAINTS means the defaults were deleted, and a deleted default counts as an
+ * edit (#354 Q3). Only the bullets are compared, not the header's weight or
+ * decoration.
  */
-export function isTemplateConstraints(section: AdfSection, file: string): boolean {
-  return section.content.type === 'list' && normalized(section).length > 0 && isUntouchedScaffold(section, file);
+export function isTemplateConstraints(section: AdfSection, file: string, added: readonly string[] = []): boolean {
+  if (section.content.type !== 'list') return false;
+  const template = templateSection(file, section.key);
+  if (!template) return false;
+  const want = normalized(template);
+  const lines = normalized(section);
+  if (lines.length < want.length || want.some((l, i) => lines[i] !== l)) return false;
+  const rest = lines.slice(want.length).map(normalizeValue);
+  const own = new Set(added.map(normalizeValue));
+  return rest.every(l => own.has(l)) && new Set(rest).size === rest.length;
 }
 
 export function isUntouchedScaffold(section: AdfSection, file: string): boolean {
@@ -87,8 +98,8 @@ function sectionText(section: AdfSection): string {
 /**
  * 'force' replaces CONTEXT/STATE even when customized, and adds missing stack
  * CONSTRAINTS bullets to any list section; 'scaffold-only' replaces only sections
- * that still hold scaffold text, and adds stack CONSTRAINTS only to a section that
- * is missing or still exactly the template's (#371). The CLI picks 'force' under
+ * that still hold scaffold text, and adds stack CONSTRAINTS only to an untouched
+ * section, never one recorded in .ai/.populate.json (#371). The CLI picks 'force' under
  * --force or --yes. `charter bootstrap` passes 'scaffold-only' explicitly, so its
  * own --yes never re-enables force (#354).
  */
@@ -106,6 +117,76 @@ export interface PopulateResult {
   reason?: string;
   /** One line per applied operation, e.g. "Filled CONTEXT". */
   changes?: string[];
+  /** Stack constraints detected but not added, and why (#371). Each is reported once, then recorded as offered. */
+  notAdded?: ConstraintsNotAdded;
+}
+
+export interface ConstraintsNotAdded {
+  section: 'CONSTRAINTS';
+  /** 'edited': the section differs from the template; 'not-a-list': it holds text; 'removed': it was deleted after populate recorded it. */
+  why: 'edited' | 'not-a-list' | 'removed';
+  constraints: string[];
+}
+
+// ============================================================================
+// Populate record (.ai/.populate.json, #371)
+// ============================================================================
+
+/**
+ * What populate has added to, or offered for, each file's CONSTRAINTS. Without
+ * it, a section holding the template plus the one bullet populate added looks,
+ * once the user deletes that bullet, exactly like a fresh scaffold. Committed
+ * with the rest of `.ai/`, so the memory travels with the repo.
+ */
+export interface PopulateRecord {
+  version: 1;
+  constraints: Record<string, { added: string[]; offered: string[] }>;
+}
+
+export const POPULATE_RECORD_FILE = '.populate.json';
+
+type RecordRead = { status: 'absent' | 'ok'; record: PopulateRecord } | { status: 'invalid'; record: PopulateRecord; detail: string };
+
+function emptyRecord(): PopulateRecord {
+  return { version: 1, constraints: {} };
+}
+
+function readPopulateRecord(file: string): RecordRead {
+  if (!fs.existsSync(file)) return { status: 'absent', record: emptyRecord() };
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<PopulateRecord>;
+    if (raw?.version !== 1 || typeof raw.constraints !== 'object' || raw.constraints === null) {
+      return { status: 'invalid', record: emptyRecord(), detail: 'not a version 1 record' };
+    }
+    const constraints: PopulateRecord['constraints'] = {};
+    for (const [key, entry] of Object.entries(raw.constraints)) {
+      const list = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map(normalizeValue) : [];
+      constraints[key] = { added: list(entry?.added), offered: list(entry?.offered) };
+    }
+    return { status: 'ok', record: { version: 1, constraints } };
+  } catch (err) {
+    return { status: 'invalid', record: emptyRecord(), detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Deterministic: keys and lists sorted, lists de-duplicated, two-space indent, trailing newline. */
+export function serializePopulateRecord(record: PopulateRecord): string {
+  const sorted = (xs: string[]): string[] => [...new Set(xs)].sort();
+  const constraints: PopulateRecord['constraints'] = {};
+  for (const key of Object.keys(record.constraints).sort()) {
+    const e = record.constraints[key];
+    constraints[key] = { added: sorted(e.added), offered: sorted(e.offered) };
+  }
+  return JSON.stringify({ version: 1, constraints }, null, 2) + '\n';
+}
+
+/** Constraint bookkeeping for one file, filled by buildCoreOps and committed once its edit is applied. */
+interface ConstraintLedger {
+  /** The file's entry in the record, or undefined when the record has none for it. */
+  recorded?: { added: string[]; offered: string[] };
+  add: string[];
+  offer: string[];
+  notAdded?: ConstraintsNotAdded;
 }
 
 /**
@@ -119,7 +200,7 @@ export function normalizeValue(value: string): string {
   return value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function normalizeOps(ops: PatchOperation[]): PatchOperation[] {
+function normalizeOps(ops: TextPatchOperation[]): TextPatchOperation[] {
   return ops.map(op => {
     if (op.op === 'ADD_BULLET') return { ...op, value: normalizeValue(op.value) };
     if (op.op !== 'REPLACE_SECTION' && op.op !== 'ADD_SECTION') return op;
@@ -133,7 +214,7 @@ function normalizeOps(ops: PatchOperation[]): PatchOperation[] {
   }).filter(op => op.op !== 'ADD_BULLET' || op.value !== '');
 }
 
-function describeOp(op: PatchOperation): string {
+function describeOp(op: TextPatchOperation): string {
   if (op.op === 'ADD_BULLET') return `Added ${op.section} item: ${op.value}`;
   if (op.op === 'REPLACE_SECTION' || op.op === 'ADD_SECTION') return `Filled ${op.key}`;
   return op.op;
@@ -164,10 +245,20 @@ export async function adfPopulateCommand(
 
   const results: PopulateResult[] = [];
 
-  const fileTasks: Array<{ file: string; build: (notes: string[]) => PatchOperation[] | null }> = [
+  const recordPath = path.join(aiDir, POPULATE_RECORD_FILE);
+  const recordRead = readPopulateRecord(recordPath);
+  const record = recordRead.record;
+  const ledgers = new Map<string, ConstraintLedger>();
+  const ledgerFor = (file: string): ConstraintLedger => {
+    const key = path.basename(file);
+    if (!ledgers.has(key)) ledgers.set(key, { recorded: record.constraints[key], add: [], offer: [] });
+    return ledgers.get(key)!;
+  };
+
+  const fileTasks: Array<{ file: string; build: (notes: string[]) => TextPatchOperation[] | null }> = [
     {
       file: path.join(aiDir, 'core.adf'),
-      build: notes => buildCoreOps(aiDir, projectName, description, readmeSummary, detection, contexts, force, notes),
+      build: notes => buildCoreOps(aiDir, projectName, description, readmeSummary, detection, contexts, force, notes, ledgerFor('core.adf')),
     },
     {
       file: path.join(aiDir, 'state.adf'),
@@ -191,7 +282,11 @@ export async function adfPopulateCommand(
 
     const notes: string[] = [];
     const built = task.build(notes);
-    const note = notes.length > 0 ? { reason: notes.join('; ') } : {};
+    const ledger = ledgers.get(path.basename(task.file));
+    const note = {
+      ...(notes.length > 0 ? { reason: notes.join('; ') } : {}),
+      ...(ledger?.notAdded ? { notAdded: ledger.notAdded } : {}),
+    };
     const ops = built ? normalizeOps(built) : null;
     if (!ops || ops.length === 0) {
       results.push({ file: task.file, ops: 0, status: 'skipped', ...note });
@@ -202,6 +297,8 @@ export async function adfPopulateCommand(
     // re-parse as exactly the intended change is not written.
     const edit = applyOpsAsText(fs.readFileSync(task.file, 'utf-8'), ops);
     if (edit.status === 'refused') {
+      // Nothing was written, so nothing is recorded as added or offered.
+      if (ledger) { ledger.add = []; ledger.offer = []; }
       results.push({ file: task.file, ops: 0, status: 'refused', reason: `could not be edited in place: ${edit.detail}` });
       continue;
     }
@@ -209,6 +306,11 @@ export async function adfPopulateCommand(
 
     results.push({ file: task.file, ops: ops.length, status: 'populated', changes: ops.map(describeOp), ...note });
   }
+
+  // The record changes only when something was added or offered, so a run with
+  // nothing to do leaves .populate.json untouched, byte for byte.
+  const recordRow = updatePopulateRecord(recordPath, recordRead, ledgers, dryRun);
+  if (recordRow) results.push(recordRow);
 
   internal.report?.(results);
 
@@ -239,7 +341,9 @@ export async function adfPopulateCommand(
     for (const r of results) {
       if (r.status === 'missing') continue;
       const icon = r.status === 'populated' ? '[ok]' : r.status === 'refused' ? '[refused]' : '[skip]';
-      const detail = r.status === 'populated'
+      const detail = r.status === 'populated' && r.ops === 0
+        ? (r.changes ?? []).join('; ')
+        : r.status === 'populated'
         ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied${r.reason ? `; ${r.reason}` : ''}`
         : r.reason ?? 'already customized — use --force to overwrite';
       console.log(`    ${icon} ${r.file}  (${detail})`);
@@ -251,6 +355,33 @@ export async function adfPopulateCommand(
   }
 
   return EXIT_CODE.SUCCESS;
+}
+
+function updatePopulateRecord(
+  file: string,
+  read: RecordRead,
+  ledgers: Map<string, ConstraintLedger>,
+  dryRun: boolean,
+): PopulateResult | null {
+  const pending = [...ledgers].filter(([, l]) => l.add.length > 0 || l.offer.length > 0);
+  if (pending.length === 0) return null;
+  if (read.status === 'invalid') {
+    return {
+      file, ops: 0, status: 'refused',
+      reason: `could not be read (${read.detail}); left as is, so this run's stack constraints are not recorded`,
+    };
+  }
+  const next: PopulateRecord = JSON.parse(JSON.stringify(read.record));
+  for (const [key, l] of pending) {
+    const entry = (next.constraints[key] ??= { added: [], offered: [] });
+    entry.added.push(...l.add.map(normalizeValue));
+    entry.offered.push(...l.offer.map(normalizeValue));
+  }
+  const text = serializePopulateRecord(next);
+  if (read.status === 'ok' && fs.readFileSync(file, 'utf-8') === text) return null;
+  if (!dryRun) fs.writeFileSync(file, text);
+  const label = file.split(path.sep).join('/');
+  return { file, ops: 0, status: 'populated', changes: [`${read.status === 'absent' ? 'Created' : 'Updated'} ${label}`] };
 }
 
 // ============================================================================
@@ -266,11 +397,12 @@ function buildCoreOps(
   contexts: PackageContext[],
   force: boolean,
   notes: string[],
-): PatchOperation[] | null {
+  ledger: ConstraintLedger,
+): TextPatchOperation[] | null {
   const filePath = path.join(aiDir, 'core.adf');
   const input = fs.readFileSync(filePath, 'utf-8');
   const doc = parseAdf(input);
-  const ops: PatchOperation[] = [];
+  const ops: TextPatchOperation[] = [];
 
   // Build CONTEXT items from signals
   const contextItems: string[] = [
@@ -297,74 +429,96 @@ function buildCoreOps(
     });
   }
 
-  // Stack-specific constraints (additive, never overwrite existing). Only a
-  // missing CONSTRAINTS section, or one still exactly the template's, receives
-  // them (#371): any edit, including deleting a default or one of populate's own
-  // earlier bullets, leaves the section alone. --force keeps the additive re-add.
+  // Stack-specific constraints (#371). Additive only, and only into a CONSTRAINTS
+  // the user has not edited: missing (and never recorded), or the template's
+  // bullets plus any of the bullets populate itself added earlier. A constraint
+  // populate has added or offered before is never added again, even after it was
+  // deleted. Under --force, any constraint not present is appended, as before.
   const constraintsSection = doc.sections.find(s => s.key === 'CONSTRAINTS');
   const existingItems = constraintsSection?.content.type === 'list' ? constraintsSection.content.items : [];
+  const recorded = ledger.recorded;
+  const known = new Set([...(recorded?.added ?? []), ...(recorded?.offered ?? [])]);
   const wanted: string[] = [];
-  {
-    const addConstraint = (value: string, matchFn: (item: string) => boolean) => {
-      if (!existingItems.some(matchFn)) wanted.push(value);
-    };
+  const addConstraint = (value: string, matchFn: (item: string) => boolean) => {
+    if (existingItems.some(matchFn)) return;
+    if (!force && known.has(normalizeValue(value))) return;
+    wanted.push(value);
+  };
 
-    // ESM import extensions: gated on TypeScript's moduleResolution, not on
-    // package.json `type` (#294). Every ESM package must agree that extensions
-    // are required before the rule is emitted — one bundler package vetoes it.
-    const esmSignals = contexts
-      .filter(ctx => readJsonFile(path.resolve(ctx.source))?.type === 'module')
-      .map(ctx => esmExtensionSignal(ctx, contexts));
-    const requiresEsmExtensions =
-      esmSignals.includes('required') && !esmSignals.includes('not-required');
-    if (requiresEsmExtensions) {
-      addConstraint(
-        'Use .js extensions for all ESM imports (never .ts in import paths)',
-        item => item.includes('.js extensions') || (item.includes('ESM') && item.includes('import'))
-      );
-    }
-
-    if (detection.signals.hasCloudflare) {
-      addConstraint(
-        'No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)',
-        item => item.includes('Worker handler') || (item.includes('Node') && item.includes('CF'))
-      );
-    }
-
-    if (detection.signals.hasPnpm && detection.monorepo) {
-      addConstraint(
-        'Internal packages use pnpm workspace:^ protocol, never relative paths',
-        item => item.includes('workspace') || (item.includes('pnpm') && item.includes('package'))
-      );
-    }
+  // ESM import extensions: gated on TypeScript's moduleResolution, not on
+  // package.json `type` (#294). Every ESM package must agree that extensions
+  // are required before the rule is emitted — one bundler package vetoes it.
+  const esmSignals = contexts
+    .filter(ctx => readJsonFile(path.resolve(ctx.source))?.type === 'module')
+    .map(ctx => esmExtensionSignal(ctx, contexts));
+  const requiresEsmExtensions =
+    esmSignals.includes('required') && !esmSignals.includes('not-required');
+  if (requiresEsmExtensions) {
+    addConstraint(
+      'Use .js extensions for all ESM imports (never .ts in import paths)',
+      item => item.includes('.js extensions') || (item.includes('ESM') && item.includes('import'))
+    );
   }
 
-  if (wanted.length > 0) {
-    if (!constraintsSection) {
+  if (detection.signals.hasCloudflare) {
+    addConstraint(
+      'No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)',
+      item => item.includes('Worker handler') || (item.includes('Node') && item.includes('CF'))
+    );
+  }
+
+  if (detection.signals.hasPnpm && detection.monorepo) {
+    addConstraint(
+      'Internal packages use pnpm workspace:^ protocol, never relative paths',
+      item => item.includes('workspace') || (item.includes('pnpm') && item.includes('package'))
+    );
+  }
+
+  if (wanted.length === 0) return ops.length > 0 ? ops : null;
+
+  const offer = (why: ConstraintsNotAdded['why']) => {
+    const state = why === 'removed' ? 'was removed' : why === 'not-a-list' ? 'is not a list' : 'has been edited';
+    const values = wanted.map(normalizeValue);
+    notes.push(
+      `CONSTRAINTS ${state}, so populate did not add the stack constraint${values.length === 1 ? '' : 's'}: `
+      + `${values.join(' | ')}. Add ${values.length === 1 ? 'it' : 'them'} by hand if you want ${values.length === 1 ? 'it' : 'them'}`,
+    );
+    ledger.notAdded = { section: 'CONSTRAINTS', why, constraints: values };
+    ledger.offer.push(...values);
+  };
+
+  if (!constraintsSection) {
+    // Recreated only while populate has no record for this file: a recorded file
+    // whose CONSTRAINTS is gone had it deleted on purpose.
+    if (recorded && !force) {
+      offer('removed');
+    } else {
       ops.push({
         op: 'ADD_SECTION',
         key: 'CONSTRAINTS',
         decoration: '\u26A0', // as parsed; the text edit writes it as the scaffold's U+26A0 U+FE0F
         weight: 'load-bearing',
         content: { type: 'list', items: wanted },
+        // Where the scaffold has it: after CONTEXT, else after GUIDE, else before METRICS.
+        anchor: { after: ['CONTEXT', 'GUIDE'], before: ['METRICS'] },
       });
-    } else {
-      // An emptied section parses as empty text, not as an empty list.
-      const empty = normalized(constraintsSection).length === 0;
-      const appendable = constraintsSection.content.type === 'list' && existingItems.length > 0;
-      if (appendable && (force || isTemplateConstraints(constraintsSection, filePath))) {
-        for (const value of wanted) ops.push({ op: 'ADD_BULLET', section: 'CONSTRAINTS', value });
-      } else if (force && empty) {
-        // No bullet to append after; --force fills the empty section.
-        ops.push({ op: 'REPLACE_SECTION', key: 'CONSTRAINTS', content: { type: 'list', items: wanted } });
-      } else {
-        const why = appendable || empty ? 'was edited (it differs from the template)' : 'is not a list';
-        notes.push(
-          `CONSTRAINTS ${why}, so populate did not add the stack constraint${wanted.length === 1 ? '' : 's'}: `
-          + `${wanted.map(normalizeValue).join(' | ')} (add by hand, or run 'charter adf populate --force')`,
-        );
-      }
+      ledger.add.push(...wanted);
     }
+    return ops.length > 0 ? ops : null;
+  }
+
+  // An emptied section parses as empty text, not as an empty list.
+  const empty = normalized(constraintsSection).length === 0;
+  const appendable = constraintsSection.content.type === 'list' && existingItems.length > 0;
+  if (appendable && (force || isTemplateConstraints(constraintsSection, filePath, recorded?.added ?? []))) {
+    for (const value of wanted) ops.push({ op: 'ADD_BULLET', section: 'CONSTRAINTS', value });
+    ledger.add.push(...wanted);
+  } else if (force && empty) {
+    // No bullet to append after; --force fills the empty section.
+    ops.push({ op: 'REPLACE_SECTION', key: 'CONSTRAINTS', content: { type: 'list', items: wanted } });
+    ledger.add.push(...wanted);
+  } else {
+    offer(appendable || empty ? 'edited' : 'not-a-list');
   }
 
   return ops.length > 0 ? ops : null;

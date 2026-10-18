@@ -148,6 +148,8 @@ describe('populate never reformats or overwrites user content (built CLI)', () =
       '  - mine',
     ].join('\r\n') + '\r\n';
     fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
+    // A repo from before the populate record (#371): no .ai/.populate.json.
+    fs.rmSync(path.join(dir, '.ai', '.populate.json'));
     const r = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
     expect(r.status).toBe(0);
     // CONSTRAINTS differs from the template (defaults deleted/reworded), so the
@@ -155,11 +157,40 @@ describe('populate never reformats or overwrites user content (built CLI)', () =
     expect(read(dir, '.ai/core.adf')).toBe(core);
     expect(r.stdout).toContain('  Unchanged by merge: .ai/core.adf');
     expect(r.stdout).not.toContain('Added CONSTRAINTS item');
-    expect(r.stdout).toContain('CONSTRAINTS was edited (it differs from the template), so populate did not add the stack constraint: No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)');
-    // A second run has nothing left to do either.
+    expect(r.stdout).toContain(`CONSTRAINTS has been edited, so populate did not add the stack constraint: ${CF_RULE}. Add it by hand if you want it`);
+    expect(r.stdout).not.toMatch(/populate --force/);
+    expect(r.stdout).toContain('  Created .ai/.populate.json');
+    // Warned once: the constraint is now recorded as offered, so a second run is quiet.
+    const record = read(dir, '.ai/.populate.json');
     const again = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
     expect(read(dir, '.ai/core.adf')).toBe(core);
     expect(again.stdout).toContain('  No scaffold content to replace');
+    expect(again.stdout).not.toContain('CONSTRAINTS has been edited');
+    expect(read(dir, '.ai/.populate.json')).toBe(record);
+  });
+
+  it('#371: bootstrap --format json reports a not-added constraint as a structured field, once', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+    const core = read(dir, '.ai/core.adf').replace('  - Never commit secrets or credentials\n', '');
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
+    // The stack gains plain-JS ESM after the section was edited.
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...JSON.parse(WORKER_PKG), type: 'module' }));
+    const step = (): { details: { notAdded: unknown[] }; warnings: string[] } => {
+      const r = run(dir, ['--format', 'json', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+      expect(r.status).toBe(0);
+      return JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'populate');
+    };
+    const first = step();
+    expect(first.details.notAdded).toEqual([{
+      file: '.ai/core.adf', section: 'CONSTRAINTS', why: 'edited',
+      constraints: ['Use .js extensions for all ESM imports (never .ts in import paths)'],
+    }]);
+    expect(first.warnings.join('\n')).toContain('CONSTRAINTS has been edited');
+    const second = step();
+    expect(second.details.notAdded).toEqual([]);
+    expect(second.warnings).toEqual([]);
+    expect(read(dir, '.ai/core.adf')).toBe(core);
   });
 
   for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
@@ -168,13 +199,17 @@ describe('populate never reformats or overwrites user content (built CLI)', () =
       // type: module with no tsconfig/typescript: populate also wants the ESM rule.
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...JSON.parse(WORKER_PKG), type: 'module' }));
       const boot = [...flags, '--preset', 'worker', '--skip-install', '--skip-doctor'];
-      expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+      const fresh = run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+      expect(fresh.status).toBe(0);
+      expect(fresh.stdout).toContain('  Created .ai/.populate.json');
       const first = read(dir, '.ai/core.adf');
+      const record = read(dir, '.ai/.populate.json');
       expect(first.split(CF_RULE).length - 1).toBe(1);
       expect(first).toContain('Use .js extensions for all ESM imports');
-      // A second bootstrap over its own result is idempotent.
+      // A second bootstrap over its own result is idempotent, record included.
       expect(run(dir, boot, 'ignore').status).toBe(0);
       expect(read(dir, '.ai/core.adf')).toBe(first);
+      expect(read(dir, '.ai/.populate.json')).toBe(record);
 
       const edited = first.replace('  - Never commit secrets or credentials\n', '').replace(`  - ${CF_RULE}\n`, '');
       fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
@@ -182,8 +217,26 @@ describe('populate never reformats or overwrites user content (built CLI)', () =
         const r = run(dir, [...boot, '--format', 'json'], 'ignore');
         expect(r.status).toBe(0);
         expect(read(dir, '.ai/core.adf')).toBe(edited);
+        expect(read(dir, '.ai/.populate.json')).toBe(record);
+        // CF_RULE is recorded as added: nothing new, so nothing to warn about.
         const populate = JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'populate');
-        expect(populate.warnings.join('\n')).toContain(`CONSTRAINTS was edited (it differs from the template), so populate did not add the stack constraint: ${CF_RULE}`);
+        expect(populate.details.notAdded).toEqual([]);
+        expect(populate.warnings).toEqual([]);
+      }
+    });
+  }
+
+  for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
+    it(`#371: plain Worker (one constraint): deleting it sticks across bootstrap ${flags.join(' ') || '(no flags)'} re-runs`, () => {
+      const dir = workerRepo();
+      expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+      const edited = read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, '');
+      fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
+      for (let i = 0; i < 2; i++) {
+        const r = run(dir, [...flags, '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+        expect(r.status).toBe(0);
+        expect(r.stdout).not.toContain('Added CONSTRAINTS item');
+        expect(read(dir, '.ai/core.adf')).toBe(edited);
       }
     });
   }

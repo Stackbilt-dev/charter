@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adfCommand } from '../commands/adf';
+import { applyOpsAsText } from '../commands/adf-text-patch';
 import type { CLIOptions } from '../index';
 
 const OPTIONS: CLIOptions = {
@@ -256,15 +257,18 @@ function workerRepo(esm = false): string {
   return tmp;
 }
 
-interface Row { file: string; status: string; reason?: string; changes?: string[] }
+interface Row { file: string; status: string; reason?: string; changes?: string[]; notAdded?: { section: string; why: string; constraints: string[] } }
 
-async function populateJson(args: string[] = []): Promise<Row> {
+async function populateRows(args: string[] = []): Promise<Row[]> {
   const lines: string[] = [];
   vi.mocked(console.log).mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(' ')); });
   expect(await adfCommand({ ...OPTIONS, format: 'json' }, ['populate', ...args])).toBe(0);
   vi.mocked(console.log).mockImplementation(() => {});
-  const rows = (JSON.parse(lines.join('\n')) as { results: Row[] }).results;
-  return rows.find(r => r.file === CORE)!;
+  return (JSON.parse(lines.join('\n')) as { results: Row[] }).results;
+}
+
+async function populateJson(args: string[] = []): Promise<Row> {
+  return (await populateRows(args)).find(r => r.file === CORE)!;
 }
 
 const readCore = (): string => fs.readFileSync(CORE, 'utf-8');
@@ -300,7 +304,7 @@ describe('adf populate — CONSTRAINTS edits are respected (#371)', () => {
     expect(core).not.toContain(CF_RULE);
     expect(row.status).toBe('populated');
     expect(row.changes).toEqual(['Filled CONTEXT']);
-    expect(row.reason).toContain('CONSTRAINTS was edited');
+    expect(row.reason).toContain('CONSTRAINTS has been edited');
     expect(row.reason).toContain(CF_RULE);
     expect(fromConstraints(core)).toBe(fromConstraints(edited));
   });
@@ -313,7 +317,7 @@ describe('adf populate — CONSTRAINTS edits are respected (#371)', () => {
     const row = await populateJson();
     expect(readCore()).not.toContain(CF_RULE);
     expect(fromConstraints(readCore())).toBe(fromConstraints(before));
-    expect(row.reason).toContain('CONSTRAINTS was edited');
+    expect(row.reason).toContain('CONSTRAINTS has been edited');
   });
 
   it('a reworded default leaves CONSTRAINTS untouched', async () => {
@@ -335,10 +339,10 @@ describe('adf populate — CONSTRAINTS edits are respected (#371)', () => {
     const row = await populateJson();
     expect(readCore()).not.toContain(CF_RULE);
     expect(fromConstraints(readCore())).toBe(fromConstraints(emptied));
-    expect(row.reason).toContain('CONSTRAINTS was edited');
+    expect(row.reason).toContain('CONSTRAINTS has been edited');
   });
 
-  it("deleting one of populate's own earlier bullets is an edit: it is not re-added", async () => {
+  it("deleting one of populate's own earlier bullets: it is not re-added, silently (it is recorded)", async () => {
     workerRepo(true);
     await adfCommand(OPTIONS, ['init']);
     await populateJson();
@@ -348,7 +352,62 @@ describe('adf populate — CONSTRAINTS edits are respected (#371)', () => {
     fs.writeFileSync(CORE, edited);
     const row = await populateJson();
     expect(readCore()).toBe(edited);
-    expect(row.reason).toContain(CF_RULE);
+    expect(row.status).toBe('skipped');
+    expect(row.reason).toBeUndefined();
+  });
+
+  it('single constraint (plain Worker): deleting the one bullet populate added sticks across runs (finding 2)', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    const template = readCore();
+    await populateJson();
+    expect(count(readCore(), CF_RULE)).toBe(1);
+    // Deleting it leaves CONSTRAINTS byte-for-byte the template's again.
+    const edited = readCore().replace(`  - ${CF_RULE}\n`, '');
+    expect(fromConstraints(edited)).toBe(fromConstraints(template));
+    fs.writeFileSync(CORE, edited);
+    for (let i = 0; i < 2; i++) {
+      const row = await populateJson();
+      expect(readCore()).toBe(edited);
+      expect(row.reason).toBeUndefined();
+    }
+  });
+
+  it('not-a-list CONSTRAINTS: left alone, hint says to add by hand, never mentions --force', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    const core = readCore();
+    const header = 'CONSTRAINTS [load-bearing]:';
+    const start = core.indexOf(header);
+    const textual = core.slice(0, start) + `${header} none yet\n` + core.slice(core.indexOf('\n\n', start) + 1);
+    fs.writeFileSync(CORE, textual);
+    const row = await populateJson();
+    expect(fromConstraints(readCore())).toBe(fromConstraints(textual));
+    expect(row.reason).toContain('CONSTRAINTS is not a list, so populate did not add the stack constraint');
+    expect(row.reason).toContain('Add it by hand if you want it');
+    expect(row.reason).not.toContain('--force');
+    expect(row.notAdded).toEqual({ section: 'CONSTRAINTS', why: 'not-a-list', constraints: [CF_RULE] });
+  });
+
+  it('duplicate CONSTRAINTS headers: the first is the one judged and edited', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, `${readCore()}\nCONSTRAINTS:\n  - second section\n`);
+    await populateJson();
+    const after = readCore();
+    // The first (template) section gets the bullet; the second is untouched.
+    expect(after).toContain(`  - Pure functions in library code; side effects only in entry points\n  - ${CF_RULE}\n`);
+    expect(after.endsWith('\nCONSTRAINTS:\n  - second section\n')).toBe(true);
+    expect(count(after, CF_RULE)).toBe(1);
+
+    // Edited first section: neither is touched.
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    const edited = `${readCore().replace(SECRETS_DEFAULT, '')}\nCONSTRAINTS:\n  - second section\n`;
+    fs.writeFileSync(CORE, edited);
+    const row = await populateJson();
+    expect(fromConstraints(readCore())).toBe(fromConstraints(edited));
+    expect(row.notAdded?.why).toBe('edited');
   });
 
   it('a missing CONSTRAINTS section is created with the stack constraints, once', async () => {
@@ -418,6 +477,152 @@ describe('adf populate — CONSTRAINTS edits are respected (#371)', () => {
     const lines: string[] = [];
     vi.mocked(console.log).mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(' ')); });
     await adfCommand(OPTIONS, ['populate']);
-    expect(lines.find(l => l.includes(CORE))).toMatch(/1 op applied; CONSTRAINTS was edited/);
+    expect(lines.find(l => l.includes(CORE))).toMatch(/1 op applied; CONSTRAINTS has been edited/);
+  });
+});
+
+describe('adf populate — the populate record, .ai/.populate.json (#371)', () => {
+  const RECORD = path.join('.ai', '.populate.json');
+  const readRecord = (): string => fs.readFileSync(RECORD, 'utf-8');
+
+  it('is created on the first add, deterministic, and not rewritten by a run with nothing to do', async () => {
+    workerRepo(true);
+    await adfCommand(OPTIONS, ['init']);
+    expect(fs.existsSync(RECORD)).toBe(false);
+    const rows = await populateRows();
+    expect(rows.find(r => r.file === RECORD)?.changes).toEqual(['Created .ai/.populate.json']);
+    expect(readRecord()).toBe(JSON.stringify({
+      version: 1,
+      constraints: { 'core.adf': { added: [CF_RULE, ESM_FULL].sort(), offered: [] } },
+    }, null, 2) + '\n');
+
+    const before = fs.statSync(RECORD).mtimeMs;
+    const text = readRecord();
+    const again = await populateRows();
+    expect(again.find(r => r.file === RECORD)).toBeUndefined();
+    expect(readRecord()).toBe(text);
+    expect(fs.statSync(RECORD).mtimeMs).toBe(before);
+  });
+
+  it('is not written by --dry-run', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    const rows = await populateRows(['--dry-run']);
+    expect(rows.find(r => r.file === RECORD)?.changes).toEqual(['Created .ai/.populate.json']);
+    expect(fs.existsSync(RECORD)).toBe(false);
+  });
+
+  it('a deleted CONSTRAINTS section is not recreated once the file has a record', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    const core = readCore();
+    const start = core.indexOf('\u26A0\uFE0F CONSTRAINTS');
+    const removed = core.slice(0, start) + core.slice(core.indexOf('\n\n', start) + 2);
+    fs.writeFileSync(CORE, removed);
+    const row = await populateJson();
+    expect(readCore()).toBe(removed);
+    // CF_RULE is recorded as added, so there is nothing new to offer either.
+    expect(row.reason).toBeUndefined();
+  });
+
+  it('an edited section: a newly detected constraint is warned about once, recorded as offered, then quiet', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson(); // adds CF_RULE, records it
+    fs.writeFileSync(CORE, readCore().replace(SECRETS_DEFAULT, ''));
+    const edited = readCore();
+    // The stack gains plain-JS ESM: a new constraint for an edited section.
+    write(process.cwd(), 'package.json', JSON.stringify({ name: 'demo-371', type: 'module', devDependencies: { wrangler: '^3.0.0' } }));
+
+    const first = await populateJson();
+    expect(readCore()).toBe(edited);
+    expect(first.reason).toContain(`CONSTRAINTS has been edited, so populate did not add the stack constraint: ${ESM_FULL}. Add it by hand if you want it`);
+    expect(first.reason).not.toContain('--force');
+    expect(first.notAdded).toEqual({ section: 'CONSTRAINTS', why: 'edited', constraints: [ESM_FULL] });
+    expect(JSON.parse(readRecord()).constraints['core.adf']).toEqual({ added: [CF_RULE], offered: [ESM_FULL] });
+
+    const record = readRecord();
+    const second = await populateJson();
+    expect(second.reason).toBeUndefined();
+    expect(second.notAdded).toBeUndefined();
+    expect(readRecord()).toBe(record);
+    expect(readCore()).toBe(edited);
+  });
+
+  it('an untouched section (template plus recorded bullets) still gets a newly detected constraint', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    write(process.cwd(), 'package.json', JSON.stringify({ name: 'demo-371', type: 'module', devDependencies: { wrangler: '^3.0.0' } }));
+    const row = await populateJson();
+    expect(row.changes).toContain(`Added CONSTRAINTS item: ${ESM_FULL}`);
+    expect(row.reason).toBeUndefined();
+    expect(JSON.parse(readRecord()).constraints['core.adf'].added).toEqual([CF_RULE, ESM_FULL].sort());
+  });
+
+  it('--force appends a recorded-but-deleted constraint, as before, and keeps it recorded', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    fs.writeFileSync(CORE, readCore().replace(`  - ${CF_RULE}\n`, '').replace(SECRETS_DEFAULT, ''));
+    const record = readRecord();
+    const row = await populateJson(['--force']);
+    expect(row.changes).toContain(`Added CONSTRAINTS item: ${CF_RULE}`);
+    expect(readRecord()).toBe(record);
+  });
+
+  it('an unreadable record is left as is and reported; nothing is recorded', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(RECORD, '{ not json');
+    const rows = await populateRows();
+    const recordRow = rows.find(r => r.file === RECORD);
+    expect(recordRow?.status).toBe('refused');
+    expect(readRecord()).toBe('{ not json');
+  });
+});
+
+describe('adf populate — where a created CONSTRAINTS goes (#371)', () => {
+  const body = `\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - ${CF_RULE}\n`;
+
+  it('after CONTEXT when there is one', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, 'ADF: 0.1\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n\n\u{1F4CB} CONTEXT:\n  - mine\n\nGUIDE:\n  - g\n');
+    await populateJson();
+    expect(readCore()).toBe(`ADF: 0.1\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n\n\u{1F4CB} CONTEXT:\n  - mine\n\n${body}\nGUIDE:\n  - g\n`);
+  });
+
+  it('with no CONTEXT, populate appends one and CONSTRAINTS follows it, keeping CRLF', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, 'ADF: 0.1\r\n\r\nNOTES:\r\n  - n\r\n\r\n\u{1F4CA} METRICS:\r\n  entry_loc: 1 / 2 [lines]\r\n');
+    const row = await populateJson();
+    // CONTEXT is added too (appended, as before); CONSTRAINTS goes after it.
+    expect(row.status).toBe('populated');
+    const after = readCore();
+    expect(after).not.toMatch(/[^\r]\n/);
+    expect(after.indexOf('CONSTRAINTS')).toBeGreaterThan(after.indexOf('CONTEXT'));
+  });
+
+  it('at the end of a CONTEXT that is the last section without a trailing newline', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, 'ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - mine');
+    await populateJson();
+    expect(readCore()).toBe(`ADF: 0.1\n\n\u{1F4CB} CONTEXT:\n  - mine\n\n${body.slice(0, -1)}`);
+  });
+
+  it('before METRICS when neither CONTEXT nor GUIDE is present (text-patch, guard intact)', () => {
+    const text = 'ADF: 0.1\n\nNOTES:\n  - n\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n';
+    const r = applyOpsAsText(text, [{
+      op: 'ADD_SECTION', key: 'CONSTRAINTS', decoration: '⚠', weight: 'load-bearing',
+      content: { type: 'list', items: ['x'] }, anchor: { after: ['CONTEXT', 'GUIDE'], before: ['METRICS'] },
+    }]);
+    expect(r).toEqual({
+      status: 'applied',
+      next: 'ADF: 0.1\n\nNOTES:\n  - n\n\n\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - x\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n',
+    });
   });
 });
