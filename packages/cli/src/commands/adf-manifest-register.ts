@@ -120,10 +120,11 @@ export interface ModuleRegistration {
    */
   registeredAs?: string;
   /**
-   * 'already-registered' only: the DEFAULT_LOAD entry `registeredAs` was (or,
-   * under dryRun, would be) respelled to `module`, the name on disk.
+   * 'already-registered' only: the DEFAULT_LOAD entry `registeredAs` was
+   * respelled to `module`, the name on disk ('written'), or would be under
+   * dryRun ('planned').
    */
-  respelled?: boolean;
+  respelled?: 'written' | 'planned';
 }
 
 export interface RegisterManifestModulesResult {
@@ -496,7 +497,7 @@ function listItemIndex(section: AdfDocument['sections'][number] | undefined, mod
  * On a case-insensitive filesystem, a required DEFAULT_LOAD module (core.adf,
  * state.adf) listed under another spelling (`Core.adf`) is one file, so it is
  * not added again: its DEFAULT_LOAD bullet is respelled in place to the name
- * on disk (status 'already-registered', `respelled: true`), because doctor
+ * on disk (status 'already-registered', `respelled`), because doctor
  * checks the exact name. When that edit fails the guard, the entry is kept and
  * a warning says to rename it. Listed under ON_DEMAND, it is reported and left.
  */
@@ -560,7 +561,8 @@ export function registerManifestModules(
     // given a second bullet, which `adf bundle` would load twice.
     if (found && (exact.has(entry.module) || !required || found.policy === 'ON_DEMAND')) {
       if (required && found.policy === 'ON_DEMAND') {
-        warn(`${found.path} is listed under ON_DEMAND in ${manifestPath}; not moved. Move ${found.path} from ON_DEMAND to DEFAULT_LOAD in .ai/manifest.adf`);
+        const as = found.path !== entry.module ? ` as ${entry.module}` : '';
+        warn(`${found.path} is listed under ON_DEMAND in ${manifestPath}; not moved. Move ${found.path} from ON_DEMAND to DEFAULT_LOAD${as} in .ai/manifest.adf`);
       }
       registrations.push(alreadyRegistered(entry, found.policy, found.triggers, found.path));
       continue;
@@ -600,7 +602,7 @@ export function registerManifestModules(
       respelled.push(registrations.length);
       registrations.push({
         ...reg,
-        respelled: true,
+        respelled: options.dryRun ? 'planned' : 'written',
         reason: `already registered as ${found.path} under DEFAULT_LOAD, the same file here; entry ${options.dryRun ? 'would be ' : ''}respelled to ${target}`,
       });
       continue;
@@ -708,7 +710,9 @@ export interface RegisterAction {
 /** `infra.adf → ON_DEMAND: deploy, ci [planned]` */
 export function formatRegisterDetail(reg: ModuleRegistration): string {
   const as = reg.registeredAs ? ` as ${reg.registeredAs}` : '';
-  const respelled = reg.respelled ? `; respelled to ${reg.module}` : '';
+  const respelled = reg.respelled === 'written' ? `; respelled to ${reg.module}`
+    : reg.respelled === 'planned' ? `; would be respelled to ${reg.module}`
+    : '';
   const suffix = reg.status === 'planned' ? ' [planned]'
     : reg.status === 'already-registered' ? ` [already registered${as}${respelled}]`
     : reg.status === 'skipped' ? ` [skipped: ${reg.skipReason}]`

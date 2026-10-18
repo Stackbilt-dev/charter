@@ -365,13 +365,14 @@ describe('registerManifestModules', () => {
       fs.writeFileSync(path.join(tempDir, 'core.adf'), CORE);
       const dry = registerManifestModules(manifestPath, [plan('core.adf')], { ...ci, dryRun: true });
       expect(dry.written).toBe(false);
-      expect(dry.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf', respelled: true });
+      expect(dry.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf', respelled: 'planned' });
       expect(dry.registrations[0].reason).toContain('would be respelled to core.adf');
+      expect(formatRegisterDetail(dry.registrations[0])).toBe('core.adf → DEFAULT_LOAD [already registered as Core.adf; would be respelled to core.adf]');
       expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(MISCASED);
 
       const result = registerManifestModules(manifestPath, [plan('core.adf')], ci);
       expect(result.written).toBe(true);
-      expect(result.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf', respelled: true });
+      expect(result.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf', respelled: 'written' });
       expect(formatRegisterDetail(result.registrations[0])).toBe('core.adf → DEFAULT_LOAD [already registered as Core.adf; respelled to core.adf]');
       expect(warnings).toEqual([]);
       // Only that one token changed.
@@ -405,7 +406,7 @@ describe('registerManifestModules', () => {
       fs.writeFileSync(manifestPath, MANIFEST.replace('  - core.adf\n', '  - CORE.adf\n'));
       fs.writeFileSync(path.join(tempDir, 'Core.adf'), CORE);
       const result = registerManifestModules(manifestPath, [plan('core.adf')], ci);
-      expect(result.registrations[0]).toMatchObject({ module: 'Core.adf', registeredAs: 'CORE.adf', respelled: true });
+      expect(result.registrations[0]).toMatchObject({ module: 'Core.adf', registeredAs: 'CORE.adf', respelled: 'written' });
       expect(parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).defaultLoad).toEqual(['Core.adf', 'state.adf']);
       const again = registerManifestModules(manifestPath, [plan('core.adf')], ci);
       expect(again.written).toBe(false);
@@ -434,7 +435,7 @@ describe('registerManifestModules', () => {
       expect(result.written).toBe(false);
       expect(result.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', loadPolicy: 'ON_DEMAND', registeredAs: 'Core.adf' });
       expect(warnings).toEqual([
-        `Core.adf is listed under ON_DEMAND in ${manifestPath}; not moved. Move Core.adf from ON_DEMAND to DEFAULT_LOAD in .ai/manifest.adf`,
+        `Core.adf is listed under ON_DEMAND in ${manifestPath}; not moved. Move Core.adf from ON_DEMAND to DEFAULT_LOAD as core.adf in .ai/manifest.adf`,
       ]);
       expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(text);
     });
