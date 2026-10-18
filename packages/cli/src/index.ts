@@ -68,7 +68,9 @@ Usage:
   charter hook install --pre-commit [--force]
                                    Install git pre-commit hook for ADF evidence gate
   charter hook print --claude      Print Claude Code session hook config (paste into .claude/settings.json)
-  charter adf <subcommand>         ADF context format tools (init, fmt, patch, create, bundle, sync, evidence, migrate, metrics)
+  charter adf <subcommand>         ADF context format tools; details: charter adf --help
+                                   (init, fmt, patch, create, populate, bundle, sync, evidence, migrate, tidy,
+                                   metrics, context, compile, suggest, vendor)
   charter serve [--name <name>] [--ai-dir <dir>]
                                    Expose ADF project context as an MCP server (stdio, for Claude Code/Codex/Cursor)
   charter score [--ai-dir <dir>] AI-readiness audit for the current repo
@@ -80,7 +82,11 @@ Usage:
                                    --exclude <glob>: skip paths matching glob (repeatable; supports ** and *)
   charter telemetry report         Local telemetry summary (passive CLI observability)
   charter why                      Explain why teams adopt Charter and expected ROI
-  charter doctor [--adf-only]      Check CLI + config health (or ADF-only wiring checks)
+  charter doctor [--adf-only] [--ci] [--format text|json]
+                                   Check CLI + config health (or ADF-only wiring checks)
+                                   --ci: exit 1 on any WARN; --format json: print the checks as JSON
+                                   --staged [--tidy-skipped "<files>"]: pre-commit hook only; vendor bloat
+                                   blocks only in staged files (minus those tidy skipped), the rest is INFO
   charter --help                   Show this help
   charter --version                Show version
 
