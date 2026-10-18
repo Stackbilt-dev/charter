@@ -14,7 +14,7 @@ ADF: 0.1
   - Hash algo: crypto.createHash('sha256').update(content).digest('hex').slice(0, 16)
   - Sync: loadLockFile / hashSource in packages/cli/src/commands/adf.ts
 
-⚠ CONSTRAINTS [load-bearing]:
+⚠️ CONSTRAINTS [load-bearing]:
   - ADF package has zero runtime dependencies
   - Parser is tolerant (handles messy LLM output); formatter is strict (canonical emission)
   - Patcher is immutable (deep clone via JSON.parse/stringify; original never mutated)

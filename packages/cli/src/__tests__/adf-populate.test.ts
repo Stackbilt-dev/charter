@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { formatAdf, parseAdf } from '@stackbilt/adf';
 import { adfCommand } from '../commands/adf';
 import { applyOpsAsText } from '../commands/adf-text-patch';
 import { dropRecordEntries } from '../commands/adf-populate-record';
@@ -701,6 +702,19 @@ describe('adf populate — where a created CONSTRAINTS goes (#371)', () => {
       status: 'applied',
       next: 'ADF: 0.1\n\nNOTES:\n  - n\n\n\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - x\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n',
     });
+  });
+
+  it('writes an added section header in the form adf fmt emits (#351)', () => {
+    const add = (key: string, decoration: string) => applyOpsAsText('ADF: 0.1\n', [{
+      op: 'ADD_SECTION', key, decoration, content: { type: 'list', items: ['x'] },
+    }]);
+    for (const [key, decoration] of [['CONSTRAINTS', '⚠'], ['FILES', '\u{1F5C2}'], ['TOOLS', '\u{1F6E0}'],['NOTES', '⚙']]) {
+      const r = add(key, decoration);
+      expect(r.status).toBe('applied');
+      const next = (r as { next: string }).next;
+      expect(formatAdf(parseAdf(next))).toBe(next);
+    }
+    expect((add('NOTES', '⚙') as { next: string }).next).toBe('ADF: 0.1\n\n⚙ NOTES:\n  - x\n');
   });
 });
 

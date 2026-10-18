@@ -17,12 +17,24 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   STATE: '\u{1F9E0}',
   BUDGET: '\u{1F4B0}',
   SYNC: '\u{1F504}',
-  // Bare U+1F3F7, no U+FE0F: parseAdf drops the variation selector, so only the
-  // bare form round-trips through formatAdf byte for byte (#318).
+  // Bare U+1F3F7 (no U+FE0F), as shipped by #318; either form round-trips via
+  // canonicalDecoration below.
   VENDORS: '\u{1F3F7}',
   CADENCE: '\u{1F4CA}',
   GUIDE: '\u{1F4D6}',
 };
+
+/**
+ * The decoration to emit for `key`. parseAdf drops a U+FE0F variation selector
+ * after a decoration, so a parsed `⚠` for CONSTRAINTS is the standard `⚠️` with
+ * the selector lost: emit the standard form. Any other decoration is emitted as
+ * given (#351).
+ */
+export function canonicalDecoration(key: string, decoration: string): string {
+  const standard = STANDARD_DECORATIONS[key];
+  const bare = (d: string): string => d.replace(/️/g, '');
+  return standard !== undefined && bare(standard) === bare(decoration) ? standard : decoration;
+}
 
 export const CANONICAL_KEY_ORDER: string[] = [
   'TASK',
