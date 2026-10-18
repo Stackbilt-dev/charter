@@ -12,6 +12,8 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adfCommand } from '../commands/adf';
 import { applyOpsAsText } from '../commands/adf-text-patch';
+import { dropRecordEntries } from '../commands/adf-populate-record';
+import { CORE_SCAFFOLD } from '../commands/adf';
 import type { CLIOptions } from '../index';
 
 const OPTIONS: CLIOptions = {
@@ -646,7 +648,7 @@ describe('adf populate — the populate record, .ai/.populate.json (#371)', () =
 describe('adf populate — where a created CONSTRAINTS goes (#371)', () => {
   const body = `\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - ${CF_RULE}\n`;
 
-  it('the scaffold with CONSTRAINTS deleted: it comes back where the scaffold has it (after GUIDE, before METRICS)', async () => {
+  it('the scaffold with CONSTRAINTS deleted: it comes back where the scaffold has it (anchored after GUIDE, which precedes METRICS)', async () => {
     workerRepo();
     await adfCommand(OPTIONS, ['init']);
     const scaffold = readCore();
@@ -760,3 +762,155 @@ describe('adf populate — round 3 review fixes (#371)', () => {
     expect(fs.readdirSync(path.join('.ai', '.backup')).some(f => f.startsWith('.populate.json.'))).toBe(false);
   });
 });
+
+describe('adf populate — round 4 review fixes (#371)', () => {
+  const RECORD = path.join('.ai', '.populate.json');
+  const readOnly = (file: string): void => fs.chmodSync(file, 0o444);
+  const writable = (file: string): void => { if (fs.existsSync(file)) fs.chmodSync(file, 0o644); };
+  afterEach(() => writable(RECORD));
+
+  /** Deletes the whole CONSTRAINTS block, so a populate that may add constraints recreates it. */
+  const withoutConstraints = (core: string): string => {
+    const start = core.indexOf('\u26A0\uFE0F CONSTRAINTS');
+    return core.slice(0, start) + core.slice(core.indexOf('\n\n', start) + 2);
+  };
+  const captured = (): string[] => {
+    const lines: string[] = [];
+    vi.mocked(console.log).mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(' ')); });
+    return lines;
+  };
+
+  it('a read-only record: populate does not throw, adds no constraints, and says why on both rows', async () => {
+    workerRepo(true);
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    fs.writeFileSync(CORE, readCore().replace(`  - ${CF_RULE}\n`, ''));
+    // A new constraint would be due: forget ESM_FULL from the record.
+    fs.writeFileSync(RECORD, JSON.stringify({ version: 1, constraints: { 'core.adf': { added: [CF_RULE], offered: [] } } }));
+    const record = readRecord371();
+    const core = withoutConstraints(readCore());
+    fs.writeFileSync(CORE, core);
+    readOnly(RECORD);
+    const rows = await populateRows();
+    expect(readCore()).toBe(core);
+    expect(readRecord371()).toBe(record);
+    const recordRow = rows.find(r => r.file === RECORD)!;
+    expect(recordRow.status).toBe('refused');
+    expect(recordRow.reason).toMatch(/^cannot be written \(.+\), so populate added no stack constraints this run; fix its permissions$/);
+    const coreRow = rows.find(r => r.file === CORE) as Row & { constraintsSkipped?: string };
+    expect(coreRow.constraintsSkipped).toBe('stack constraints not checked: .ai/.populate.json cannot be written (see its row)');
+    expect(coreRow.reason).toBeUndefined();
+  });
+
+  it('an invalid record: the core.adf text row says constraints were not checked, not just "CONTEXT already customized"', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    fs.writeFileSync(RECORD, '{"version":2}');
+    const lines = captured();
+    await adfCommand(OPTIONS, ['populate']);
+    const line = lines.find(l => l.includes(CORE))!;
+    expect(line).toContain('stack constraints not checked: .ai/.populate.json is invalid (see its row)');
+    expect(line).not.toContain('no stack constraints to add');
+  });
+
+  it('adf init --reset-adf with a read-only record still completes the reset, warns, and exits 0', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    fs.writeFileSync(CORE, readCore().replace(SECRETS_DEFAULT, ''));
+    fs.rmSync(path.join('.ai', '.adf.lock'));
+    const record = readRecord371();
+    readOnly(RECORD);
+    const lines = captured();
+    expect(await adfCommand({ ...OPTIONS, yes: true }, ['init', '--reset-adf', '--yes'])).toBe(0);
+    const out = lines.join('\n');
+    expect(out).toMatch(/Replaced \.ai\/core\.adf \(backup: /);
+    expect(out).toContain("Could not drop core.adf from .ai/.populate.json (");
+    expect(out).toContain('so populate will treat its stack constraints as already handled. Fix the file\'s permissions and remove that entry by hand.');
+    expect(fs.existsSync(path.join('.ai', '.adf.lock'))).toBe(true);
+    expect(readCore()).toBe(CORE_SCAFFOLD);
+    expect(readRecord371()).toBe(record);
+  });
+
+  it('a failed record backup leaves the record as is and returns the warning (never throws)', () => {
+    workerRepo();
+    fs.mkdirSync('.ai');
+    fs.writeFileSync(RECORD, JSON.stringify({ version: 1, constraints: { 'core.adf': { added: [CF_RULE], offered: [] } } }));
+    const record = readRecord371();
+    fs.writeFileSync('not-a-dir', 'x');
+    const note = dropRecordEntries('.ai', ['core.adf'], 'not-a-dir', 'stamp', '.ai/');
+    expect(note).toMatch(/^Could not drop core\.adf from \.ai\/\.populate\.json \(backup failed: .+\), so populate will treat its stack constraints as already handled\./);
+    expect(readRecord371()).toBe(record);
+  });
+
+  for (const [label, prepare] of [
+    ['missing (the reset creates it)', () => fs.rmSync(CORE)],
+    ['already the template', () => { /* the bullet populate added is deleted below; the file is the template */ }],
+  ] as Array<[string, () => void]>) {
+    it(`adf init --reset-adf drops the entry when core.adf is ${label}, so populate adds the rule again`, async () => {
+      workerRepo();
+      await adfCommand(OPTIONS, ['init']);
+      const template = readCore();
+      await populateJson();
+      fs.writeFileSync(CORE, template);
+      prepare();
+      expect(await adfCommand({ ...OPTIONS, yes: true }, ['init', '--reset-adf', '--yes'])).toBe(0);
+      expect(JSON.parse(readRecord371()).constraints).toEqual({});
+      const row = await populateJson();
+      expect(row.changes).toContain(`Added CONSTRAINTS item: ${CF_RULE}`);
+    });
+  }
+
+  it('adf init --reset-adf with an invalid record leaves it untouched and warns', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, readCore().replace(SECRETS_DEFAULT, ''));
+    fs.writeFileSync(RECORD, '{ broken');
+    const lines = captured();
+    expect(await adfCommand({ ...OPTIONS, yes: true }, ['init', '--reset-adf', '--yes'])).toBe(0);
+    expect(readRecord371()).toBe('{ broken');
+    expect(lines.join('\n')).toMatch(/\.ai\/\.populate\.json is invalid \(.+\), so the reset could not drop core\.adf.* from it; populate adds no stack constraints until it is fixed or deleted\./);
+  });
+
+  it('duplicate GUIDE/CONTEXT headers: the first occurrences decide, the guard accepts it', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, 'ADF: 0.1\n\nGUIDE:\n  - g1\n\n\u{1F4CB} CONTEXT:\n  - mine\n\nGUIDE:\n  - g2\n\nMETRICS:\n  entry_loc: 1 / 2 [lines]\n');
+    const row = await populateJson();
+    expect(row.status).toBe('populated');
+    expect(readCore()).toBe(`ADF: 0.1\n\nGUIDE:\n  - g1\n\n\u{1F4CB} CONTEXT:\n  - mine\n\n\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - ${CF_RULE}\n\nGUIDE:\n  - g2\n\nMETRICS:\n  entry_loc: 1 / 2 [lines]\n`);
+  });
+
+  for (const key of ['', 'x/', 'a\\']) {
+    it(`a record key with no file name (${JSON.stringify(key)}) makes the record invalid`, async () => {
+      workerRepo();
+      await adfCommand(OPTIONS, ['init']);
+      fs.writeFileSync(RECORD, JSON.stringify({ version: 1, constraints: { [key]: { added: ['w'], offered: [] } } }));
+      const rows = await populateRows();
+      expect(rows.find(r => r.file === RECORD)?.reason).toContain('does not name a module file');
+    });
+  }
+
+  it('an entry with empty lists counts as not recorded: a missing CONSTRAINTS is recreated', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, withoutConstraints(readCore()));
+    fs.writeFileSync(RECORD, JSON.stringify({ version: 1, constraints: { 'core.adf': {} } }));
+    const row = await populateJson();
+    expect(row.changes).toContain('Filled CONSTRAINTS');
+  });
+
+  it('a JSON.parse failure is reported on one line', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(RECORD, 'garbage\nmore\n');
+    const rows = await populateRows();
+    const reason = rows.find(r => r.file === RECORD)!.reason!;
+    expect(reason).not.toMatch(/\n/);
+  });
+});
+
+function readRecord371(): string {
+  return fs.readFileSync(path.join('.ai', '.populate.json'), 'utf-8');
+}

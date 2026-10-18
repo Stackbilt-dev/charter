@@ -189,12 +189,17 @@ export function writeAdfScaffolds(opts: ScaffoldWriteOptions): ScaffoldWriteResu
     });
   }
 
-  // A replaced module starts over (#371): drop populate's record of the stack
-  // constraints it added to or offered for it, so they are filled in again. The
-  // record is backed up first, like the modules; the run's warnings say so.
-  const replacedModules = scaffolds.map(s => s.name).filter(n => outcomes.get(n)?.kind === 'replaced');
-  if (replacedModules.length > 0) {
-    const note = dropRecordEntries(aiDir, replacedModules, backupDir, timestamp, prefix);
+  // A module the reset leaves at its template (replaced, created, or already the
+  // template) starts over (#371): drop populate's record of the stack constraints
+  // it added to or offered for it, so they are filled in again. The record is
+  // backed up first, like the modules; the run's warnings say so. This never
+  // throws: a record that cannot be dropped from only adds a warning.
+  const atTemplate = new Set(['replaced', 'created', 'unchanged']);
+  const resetModules = mode === 'reset'
+    ? scaffolds.map(s => s.name).filter(n => n !== manifestName && atTemplate.has(outcomes.get(n)?.kind ?? ''))
+    : [];
+  if (resetModules.length > 0) {
+    const note = dropRecordEntries(aiDir, resetModules, backupDir, timestamp, prefix);
     if (note) {
       warnings.push(note);
       if (note.startsWith('Dropped')) files.push(`${prefix}${POPULATE_RECORD_FILE}`);

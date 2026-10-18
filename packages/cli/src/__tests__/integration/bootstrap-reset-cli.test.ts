@@ -352,3 +352,31 @@ describe('#371 round 3: the populate record under bootstrap (built CLI)', () => 
     expect(step.details.refused).toEqual([{ file: '.ai/.populate.json', reason: 'could not be read (version is 2, not 1), so populate added no stack constraints this run; fix or delete it' }]);
   });
 });
+
+describe('#371 round 4: a read-only record never aborts bootstrap --reset-adf (built CLI)', () => {
+  it('the reset completes, adf-init passes, populate adds no constraints, and both warn', () => {
+    const dir = workerRepo();
+    const BOOT = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
+    expect(run(dir, ['--yes', ...BOOT], 'ignore').status).toBe(0);
+    const recordFile = path.join(dir, '.ai', '.populate.json');
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, '').replace('  - Never commit secrets or credentials\n', ''));
+    const record = read(dir, '.ai/.populate.json');
+    fs.chmodSync(recordFile, 0o444);
+    try {
+      const r = run(dir, ['--reset-adf', '--yes', '--format', 'json', ...BOOT], 'ignore');
+      expect(r.status).toBe(0);
+      const steps = JSON.parse(r.stdout).steps as Array<{ name: string; status: string; warnings: string[] }>;
+      const init = steps.find(s => s.name === 'adf-init')!;
+      expect(init.status).toBe('pass');
+      expect(init.warnings.join('\n')).toContain('Could not drop core.adf from .ai/.populate.json (');
+      const populate = steps.find(s => s.name === 'populate')!;
+      expect(populate.warnings.join('\n')).toContain('.ai/.populate.json cannot be written (');
+      expect(read(dir, '.ai/.populate.json')).toBe(record);
+      // core.adf is the template again; the recorded rule stays out, as the warning says.
+      expect(read(dir, '.ai/core.adf')).not.toContain(CF_RULE);
+      expect(read(dir, '.ai/core.adf')).toContain('Never commit secrets or credentials');
+    } finally {
+      fs.chmodSync(recordFile, 0o644);
+    }
+  });
+});

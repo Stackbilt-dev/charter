@@ -20,7 +20,9 @@ import {
   cloneRecord,
   normalizeValue,
   readPopulateRecord,
+  recordedEntry,
   recordKey,
+  recordWriteProblem,
   serializePopulateRecord,
   type RecordEntry,
   type RecordRead,
@@ -135,6 +137,8 @@ export interface PopulateResult {
   changes?: string[];
   /** Stack constraints detected but not added, and why (#371). Each is reported once, then recorded as offered. */
   notAdded?: ConstraintsNotAdded;
+  /** Set when stack constraints were not checked at all, because the record is invalid or cannot be written (see its row). */
+  constraintsSkipped?: string;
 }
 
 export interface ConstraintsNotAdded {
@@ -148,7 +152,7 @@ export interface ConstraintsNotAdded {
 interface ConstraintLedger {
   /** The file's entry in the record, or undefined when the record has none for it. */
   recorded?: RecordEntry;
-  /** Set while the record is invalid: no stack constraints are added for any file (#371). */
+  /** Set while the record is invalid or cannot be written: no stack constraints are added for any file (#371). */
   blocked?: string;
   add: string[];
   offer: string[];
@@ -203,16 +207,18 @@ export async function adfPopulateCommand(
   const recordPath = path.join(aiDir, POPULATE_RECORD_FILE);
   const recordRead = readPopulateRecord(recordPath);
   const record = recordRead.record;
+  const recordLabel = recordPath.split(path.sep).join('/');
+  // A constraint that cannot be recorded is not added (#371): it would come back
+  // after the user deletes it. So an invalid or read-only record blocks them all.
+  const writeProblem = recordRead.status === 'ok' ? recordWriteProblem(recordPath) : null;
+  const blocked = recordRead.status === 'invalid'
+    ? `stack constraints not checked: ${recordLabel} is invalid (see its row)`
+    : writeProblem !== null ? `stack constraints not checked: ${recordLabel} cannot be written (see its row)` : undefined;
   const ledgers = new Map<string, ConstraintLedger>();
   const ledgerFor = (file: string): ConstraintLedger => {
     const key = path.basename(file);
     if (!ledgers.has(key)) {
-      ledgers.set(key, {
-        recorded: record.constraints.get(recordKey(key)),
-        ...(recordRead.status === 'invalid' ? { blocked: recordRead.detail } : {}),
-        add: [],
-        offer: [],
-      });
+      ledgers.set(key, { recorded: recordedEntry(record, key), ...(blocked ? { blocked } : {}), add: [], offer: [] });
     }
     return ledgers.get(key)!;
   };
@@ -248,6 +254,8 @@ export async function adfPopulateCommand(
     const note = {
       ...(notes.length > 0 ? { reason: notes.join('; ') } : {}),
       ...(ledger?.notAdded ? { notAdded: ledger.notAdded } : {}),
+      // Not a `reason`: bootstrap warns for every reason, and the record's own row already warns.
+      ...(ledger?.blocked ? { constraintsSkipped: ledger.blocked } : {}),
     };
     const ops = built ? normalizeOps(built) : null;
     if (!ops || ops.length === 0) {
@@ -271,7 +279,7 @@ export async function adfPopulateCommand(
 
   // The record changes only when something was added or offered, so a run with
   // nothing to do leaves .populate.json untouched, byte for byte.
-  const recordRow = updatePopulateRecord(recordPath, recordRead, ledgers, dryRun);
+  const recordRow = updatePopulateRecord(recordPath, recordRead, writeProblem, ledgers, dryRun);
   if (recordRow) results.push(recordRow);
 
   internal.report?.(results);
@@ -305,13 +313,16 @@ export async function adfPopulateCommand(
       const icon = r.status === 'populated' || r.status === 'recorded' ? '[ok]' : r.status === 'refused' ? '[refused]' : '[skip]';
       // core.adf's skip never suggests --force (#371): there it would also re-add
       // constraints the user deleted. The other modules' only content is CONTEXT/STATE.
-      const skipped = path.basename(r.file) === 'core.adf'
-        ? 'CONTEXT already customized; no stack constraints to add'
-        : 'already customized — use --force to overwrite';
+      const skipped = path.basename(r.file) !== 'core.adf'
+        ? 'already customized — use --force to overwrite'
+        : r.constraintsSkipped
+        ? `CONTEXT already customized; ${r.constraintsSkipped}`
+        : 'CONTEXT already customized; no stack constraints to add';
+      const extra = [r.reason, r.constraintsSkipped].filter(Boolean).map(x => `; ${x}`).join('');
       const detail = r.status === 'recorded'
         ? (r.changes ?? []).join('; ')
         : r.status === 'populated'
-        ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied${r.reason ? `; ${r.reason}` : ''}`
+        ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied${extra}`
         : r.reason ?? skipped;
       console.log(`    ${icon} ${r.file}  (${detail})`);
     }
@@ -327,9 +338,16 @@ export async function adfPopulateCommand(
 function updatePopulateRecord(
   file: string,
   read: RecordRead,
+  writeProblem: string | null,
   ledgers: Map<string, ConstraintLedger>,
   dryRun: boolean,
 ): PopulateResult | null {
+  if (writeProblem !== null) {
+    return {
+      file, ops: 0, status: 'refused',
+      reason: `cannot be written (${writeProblem}), so populate added no stack constraints this run; fix its permissions`,
+    };
+  }
   if (read.status === 'invalid') {
     // Reported on every run while it lasts (once per run); never rewritten. The
     // wording has no "left as is": bootstrap appends that itself.
@@ -342,7 +360,7 @@ function updatePopulateRecord(
   if (pending.length === 0) return null;
   const next = cloneRecord(read.record);
   for (const [key, l] of pending) {
-    const k = recordKey(key);
+    const k = recordKey(key) ?? key;
     const entry = next.constraints.get(k) ?? { added: [], offered: [] };
     entry.added.push(...l.add.map(normalizeValue));
     entry.offered.push(...l.offer.map(normalizeValue));
@@ -350,7 +368,18 @@ function updatePopulateRecord(
   }
   const text = serializePopulateRecord(next);
   if (read.status === 'ok' && fs.readFileSync(file, 'utf-8') === text) return null;
-  if (!dryRun) fs.writeFileSync(file, text);
+  if (!dryRun) {
+    try {
+      fs.writeFileSync(file, text);
+    } catch (err) {
+      // Checked writable above; a failure now (a race) is reported, never thrown.
+      const msg = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, ' ');
+      return {
+        file, ops: 0, status: 'refused',
+        reason: `could not be written (${msg}), so this run's stack constraints are not recorded; fix its permissions and check CONSTRAINTS by hand`,
+      };
+    }
+  }
   const label = file.split(path.sep).join('/');
   return { file, ops: 0, status: 'recorded', changes: [`${read.status === 'absent' ? 'Created' : 'Updated'} ${label}`] };
 }

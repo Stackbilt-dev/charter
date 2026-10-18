@@ -43,9 +43,14 @@ export function normalizeValue(value: string): string {
   return value.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** A record key as a bare module file name: `.ai/core.adf` and `.ai\core.adf` both mean `core.adf`. */
-export function recordKey(key: string): string {
-  return key.split(/[\\/]/).pop() ?? key;
+/**
+ * A record key as a bare module file name: `.ai/core.adf` and `.ai\core.adf` both
+ * mean `core.adf`. Null for a key with no file name (empty, or ending in a
+ * separator), which makes the record invalid.
+ */
+export function recordKey(key: string): string | null {
+  const name = key.split(/[\\/]/).pop() ?? '';
+  return name.trim() === '' ? null : name;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -57,11 +62,19 @@ function parseList(v: unknown, where: string): string[] {
   return (v as string[]).map(normalizeValue);
 }
 
+/** An error message on one line, at most 160 characters (JSON.parse quotes the file's text). */
+function oneLine(message: string): string {
+  const flat = message.replace(/\s+/g, ' ').trim();
+  return flat.length > 160 ? `${flat.slice(0, 157)}...` : flat;
+}
+
 /**
  * Read the record. A UTF-8 BOM (as Windows PowerShell writes) is ignored. Anything
  * that is not a version 1 record of the documented shape is 'invalid', and the
  * caller must then act as if it knew nothing it may contradict: populate adds no
- * stack constraints at all while the record is invalid.
+ * stack constraints at all while the record is invalid. Fields other than
+ * `version`, `constraints` and each entry's `added`/`offered` are ignored, and
+ * dropped when populate rewrites the record.
  */
 export function readPopulateRecord(file: string): RecordRead {
   if (!fs.existsSync(file)) return { status: 'absent', record: emptyRecord() };
@@ -74,16 +87,40 @@ export function readPopulateRecord(file: string): RecordRead {
     if (!isPlainObject(raw.constraints)) throw new Error('"constraints" is not an object');
     const constraints = new Map<string, RecordEntry>();
     for (const [rawKey, entry] of Object.entries(raw.constraints)) {
-      if (!isPlainObject(entry)) throw new Error(`constraints[${JSON.stringify(rawKey)}] is not an object`);
+      const where = `constraints[${JSON.stringify(rawKey)}]`;
+      if (!isPlainObject(entry)) throw new Error(`${where} is not an object`);
       const key = recordKey(rawKey);
+      if (key === null) throw new Error(`${where} does not name a module file`);
       const prev = constraints.get(key) ?? { added: [], offered: [] };
-      prev.added.push(...parseList(entry.added, `constraints[${JSON.stringify(rawKey)}].added`));
-      prev.offered.push(...parseList(entry.offered, `constraints[${JSON.stringify(rawKey)}].offered`));
+      prev.added.push(...parseList(entry.added, `${where}.added`));
+      prev.offered.push(...parseList(entry.offered, `${where}.offered`));
       constraints.set(key, prev);
     }
     return { status: 'ok', record: { version: 1, constraints } };
   } catch (err) {
-    return { status: 'invalid', record: emptyRecord(), detail: err instanceof Error ? err.message : String(err) };
+    return { status: 'invalid', record: emptyRecord(), detail: oneLine(err instanceof Error ? err.message : String(err)) };
+  }
+}
+
+/** The file's entry, or undefined when it has none or only empty lists (nothing recorded). */
+export function recordedEntry(record: PopulateRecord, module: string): RecordEntry | undefined {
+  const key = recordKey(module);
+  const e = key === null ? undefined : record.constraints.get(key);
+  return e && (e.added.length > 0 || e.offered.length > 0) ? e : undefined;
+}
+
+/**
+ * Whether the record could be written now, without changing it: an existing file
+ * is opened for writing and closed. A missing file counts as writable (the `.ai/`
+ * directory is written by the same run anyway). Returns an error message or null.
+ */
+export function recordWriteProblem(file: string): string | null {
+  if (!fs.existsSync(file)) return null;
+  try {
+    fs.closeSync(fs.openSync(file, 'r+'));
+    return null;
+  } catch (err) {
+    return oneLine(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -105,27 +142,39 @@ export function cloneRecord(record: PopulateRecord): PopulateRecord {
 }
 
 /**
- * `--reset-adf` (#371): a module replaced with its template starts over, so
+ * `--reset-adf` (#371): a module the reset leaves at its template starts over, so
  * populate's entry for it is dropped and its stack constraints are offered again.
- * The record is backed up to `backupDir` first, like the files the reset replaced;
- * if that backup fails, or the record is invalid, it is left as is. Returns a line
- * for the run's warnings, or null when there was nothing to drop.
+ * The record is backed up to `backupDir` first, like the files the reset replaced.
+ * Never throws: a record that is invalid, or that cannot be backed up or written,
+ * is left as is and the returned line (for the run's warnings) says what to do.
+ * Returns null when there was nothing to drop.
  */
 export function dropRecordEntries(aiDir: string, modules: readonly string[], backupDir: string, stamp: string, prefix: string): string | null {
   const file = path.join(aiDir, POPULATE_RECORD_FILE);
+  const label = `${prefix}${POPULATE_RECORD_FILE}`;
   const read = readPopulateRecord(file);
-  if (read.status !== 'ok') return null;
-  const dropped = modules.map(recordKey).filter(m => read.record.constraints.has(m));
+  if (read.status === 'absent') return null;
+  if (read.status === 'invalid') {
+    return `${label} is invalid (${read.detail}), so the reset could not drop ${modules.join(', ')} from it; `
+      + 'populate adds no stack constraints until it is fixed or deleted.';
+  }
+  const dropped = modules.map(recordKey).filter((m): m is string => m !== null && read.record.constraints.has(m));
   if (dropped.length === 0) return null;
+  const failed = (msg: string): string =>
+    `Could not drop ${dropped.join(', ')} from ${label} (${oneLine(msg)}), so populate will treat ${dropped.length === 1 ? 'its' : 'their'} `
+    + `stack constraints as already handled. Fix the file's permissions and remove ${dropped.length === 1 ? 'that entry' : 'those entries'} by hand.`;
   let backupName: string;
   try {
     backupName = backupFile(file, backupDir, POPULATE_RECORD_FILE, stamp);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return `Could not back up ${prefix}${POPULATE_RECORD_FILE} (${msg}), so it still lists ${dropped.join(', ')}; delete those entries by hand to have populate offer their stack constraints again.`;
+    return failed(`backup failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   const next = cloneRecord(read.record);
   for (const m of dropped) next.constraints.delete(m);
-  fs.writeFileSync(file, serializePopulateRecord(next));
-  return `Dropped ${dropped.join(', ')} from ${prefix}${POPULATE_RECORD_FILE} (backup: ${prefix}.backup/${backupName}), so populate treats the reset ${dropped.length === 1 ? 'module' : 'modules'} as new.`;
+  try {
+    fs.writeFileSync(file, serializePopulateRecord(next));
+  } catch (err) {
+    return failed(err instanceof Error ? err.message : String(err));
+  }
+  return `Dropped ${dropped.join(', ')} from ${label} (backup: ${prefix}.backup/${backupName}), so populate treats the reset ${dropped.length === 1 ? 'module' : 'modules'} as new.`;
 }
