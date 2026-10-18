@@ -431,6 +431,88 @@ describe('compile --write --mode compiled carries retained sections', () => {
 });
 
 // ============================================================================
+// 3b. the template's ## Environment placeholder is template text (#364)
+// ============================================================================
+
+describe('the untouched ## Environment placeholder is never carried (#364)', () => {
+  // CLAUDE.md exactly as `npx @stackbilt/cli@1.9.3 bootstrap --yes` writes it
+  // (published tarball, default preset). The placeholder is unchanged since 1.9.3.
+  const V193_CLAUDE_MD = [
+    '# CLAUDE.md', '',
+    '> **DO NOT add rules, constraints, or context to this file.**',
+    '> This file is auto-managed by Charter. All project rules live in `.ai/`.',
+    '> New rules should be added to the appropriate `.ai/*.adf` module.',
+    '> See `.ai/manifest.adf` for the module routing manifest.', '',
+    '## Session Start', '',
+    'Call `charter_context` (MCP tool) before any other action. It returns the live constraint surface — open work, recent decisions, and metric ceilings — so you act within current project state rather than reconstructing it from scratch.', '',
+    'If `charter serve` is not running, read `.ai/context.snapshot.json` directly or run `charter context-refresh` to generate it.', '',
+    '## Module Index',
+    '<!-- charter:module-index:start -->',
+    '| Module | Triggers | Load |',
+    '|--------|----------|------|',
+    '| core.adf | _(always loaded)_ | DEFAULT |',
+    '| state.adf | _(always loaded)_ | DEFAULT |',
+    '| frontend.adf | React, CSS, UI | ON_DEMAND |',
+    '| backend.adf | API, Node, DB | ON_DEMAND |',
+    '<!-- charter:module-index:end -->', '',
+    '## Environment',
+    '<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->', '',
+  ].join('\n');
+  const PLACEHOLDER = '<!-- Add runtime/OS/shell-specific notes here (not stack rules) -->';
+  const USER_ENV = '## Environment\n- Windows host; use Git Bash.';
+  const withUserEnv = `${V193_CLAUDE_MD}\n${USER_ENV}\n`;
+
+  it('the 1.9.3 file still holds the current template\'s placeholder', () => {
+    expect(POINTER_CLAUDE_MD_HYBRID).toContain(`## Environment\n${PLACEHOLDER}\n`);
+    expect(V193_CLAUDE_MD).toContain(`## Environment\n${PLACEHOLDER}\n`);
+  });
+
+  it('placeholder only: nothing is carried', () => {
+    expect(composeCompiled(FRESH, V193_CLAUDE_MD, 'CLAUDE.md')).toMatchObject({ output: FRESH, retainedSections: [], retainedSource: 'none' });
+  });
+
+  it('placeholder plus a user ## Environment: only the user section is carried', () => {
+    const c = composeCompiled(FRESH, withUserEnv, 'CLAUDE.md');
+    expect(c).toMatchObject({ retainedSource: 'pointer', retainedSections: ['## Environment'], body: USER_ENV });
+    expect(c.output).toBe(`${FRESH.trimEnd()}\n\n${block(USER_ENV)}`);
+    expect(c.output).not.toContain(PLACEHOLDER);
+    expect(linesConvertWouldDrop(withUserEnv, c.output)).toEqual([]);
+  });
+
+  it('a placeholder the user wrote under is the user\'s: both sections are carried', () => {
+    const edited = withUserEnv.replace(`${PLACEHOLDER}\n`, `${PLACEHOLDER}\n- WSL for builds\n`);
+    const c = composeCompiled(FRESH, edited, 'CLAUDE.md');
+    expect(c.retainedSections).toEqual(['## Environment', '## Environment']);
+    expect(c.body).toBe(`## Environment\n${PLACEHOLDER}\n- WSL for builds\n\n${USER_ENV}`);
+  });
+
+  it('CRLF line endings and trailing spaces on the placeholder change nothing', () => {
+    const crlf = withUserEnv.replace(`${PLACEHOLDER}\n`, `${PLACEHOLDER}  \n`).replace(/\n/g, '\r\n');
+    const c = composeCompiled(FRESH, crlf, 'CLAUDE.md');
+    expect(c).toMatchObject({ retainedSource: 'pointer', retainedSections: ['## Environment'], body: USER_ENV });
+    expect(composeCompiled(FRESH, V193_CLAUDE_MD.replace(/\n/g, '\r\n'), 'CLAUDE.md').output).toBe(FRESH);
+  });
+
+  it('compile --write --mode compiled on the 1.9.3 upgrade path writes only the user section', async () => {
+    scaffold();
+    fs.writeFileSync('CLAUDE.md', withUserEnv);
+    const r = await runJson<WriteJson>(['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
+    expect(r.code).toBe(0);
+    expect(r.json.targets[0]).toMatchObject({ status: 'written', previousMode: 'pointer', retainedSections: ['## Environment'], retainedSource: 'pointer' });
+    expect(read('CLAUDE.md')).toBe(`${(await fresh('claude')).trimEnd()}\n\n${block(USER_ENV)}`);
+  });
+
+  it('compile --write --mode compiled on an untouched 1.9.3 file writes the bare render', async () => {
+    scaffold();
+    fs.writeFileSync('CLAUDE.md', V193_CLAUDE_MD.replace(/\n/g, '\r\n'));
+    const r = await runJson<WriteJson>(['compile', '--target', 'claude', '--write', '--mode', 'compiled']);
+    expect(r.code).toBe(0);
+    expect(r.json.targets[0]).toMatchObject({ status: 'written', retainedSections: [] });
+    expect(read('CLAUDE.md')).toBe(await fresh('claude'));
+  });
+});
+
+// ============================================================================
 // 4. vendor restore (K2, K3)
 // ============================================================================
 
