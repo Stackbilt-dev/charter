@@ -929,10 +929,10 @@ function printHelp(): void {
   console.log('    charter adf bundle --task "<prompt>" [--ai-dir <dir>]');
   console.log('      Resolve manifest modules for a task and output merged context.');
   console.log('');
-  console.log('    charter adf context [--files "<a,b>"] [--keywords "<text>"] [--bundle] [--ai-dir <dir>]');
+  console.log('    charter adf context <--files "<a,b>" and/or --keywords "<text>"> [--bundle] [--ai-dir <dir>]');
   console.log('      Resolve which modules apply to file paths and/or keywords; --bundle: emit the merged ADF document.');
   console.log('');
-  console.log('    charter adf sync <--check | --write | --explain> [--ai-dir <dir>]');
+  console.log('    charter adf sync <--check | --write> [--ai-dir <dir>] | charter adf sync --explain');
   console.log('      --check: verify source .adf files match their locked hashes; exit 1 if any changed since last sync');
   console.log('      --write: update .adf.lock with current source hashes');
   console.log('      --explain: show .adf.lock schema documentation');
@@ -961,7 +961,7 @@ function printHelp(): void {
   console.log('      --source <file>: tidy only this file; repeat it to tidy several, in argument order');
   console.log('      --print-paths: print only `vendor <path>` then `module <path>` lines for files tidy writes');
   console.log('        (would write, with --dry-run); no lines means nothing written. Not with --format json.');
-  console.log('      --ci: exit 1 if bloat found (with --dry-run, for pre-commit gating)');
+  console.log('      --ci: with --dry-run, exit 1 if bloat found (pre-commit gating); no effect without --dry-run');
   console.log('');
   console.log('    charter adf metrics recalibrate [--headroom <percent>] [--reason "<text>"|--auto-rationale] [--dry-run]');
   console.log('      Recalibrate metric baselines/ceilings from current LOC with required rationale.');
