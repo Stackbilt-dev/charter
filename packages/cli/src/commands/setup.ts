@@ -22,7 +22,7 @@ const CLI_VERSION = packageJson.version;
  * How the generated workflow runs Charter (#380): through the repo's package
  * manager, from the @stackbilt/cli the install step put in node_modules. A bare
  * `npx charter` names the unrelated `charter` registry package, which npx
- * fetches when the CLI is not installed. Neither form fetches anything: with no
+ * fetches when the CLI is not installed. Neither form installs anything: with no
  * local @stackbilt/cli the step fails. The npm form keeps `charter validate` in
  * the step, which doctor's CI-gate check looks for.
  */
