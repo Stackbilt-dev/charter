@@ -1,8 +1,8 @@
 /**
  * #366: the generated pre-commit hook runs every Charter call through the repo's
  * package manager. These tests run the real hook text with stub yarn / pnpm /
- * npx / npm executables first on PATH; each stub records its argv to a log and
- * exits 0 (or fails as the fixture asks). No network, no real package manager.
+ * npx / npm / charter executables first on PATH; each stub records its argv to a
+ * log and exits 0 (or fails as the fixture asks). No network, no real package manager.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   HOOK_CLI,
+  HOOK_CLI_COMMANDS,
   HOOK_CLI_RESOLVE_BLOCK,
   PNP_MARKER_FILES,
   PRE_COMMIT_HOOK_CONTENT,
@@ -24,18 +25,28 @@ const shAvailable = (() => {
   return !probe.error && probe.status === 0;
 })();
 
-const PMS = ['yarn', 'pnpm', 'npx', 'npm'] as const;
-type Pm = typeof PMS[number];
+const STUBS = ['yarn', 'pnpm', 'npx', 'npm', 'charter'] as const;
+type Stub = typeof STUBS[number];
 
-const NPM_RUNNER = 'npm [exec] [--no] [--no-update-notifier] [--] [@stackbilt/cli]';
+/** A HOOK_CLI_COMMANDS entry the way the stub log shows it: "<bin> [arg] [arg]...". */
+const logged = (command: string): string => {
+  const [bin, ...args] = command.split(' ');
+  return [bin, ...args.map(a => `[${a}]`)].join(' ');
+};
+const NPM = logged(HOOK_CLI_COMMANDS.npm);
+const PNPM = logged(HOOK_CLI_COMMANDS.pnpm);
+const YARN = logged(HOOK_CLI_COMMANDS.yarn);
+const YARN1 = logged(HOOK_CLI_COMMANDS.yarn1);
+const GLOBAL = logged(HOOK_CLI_COMMANDS.global);
 
 // Each stub logs "<name>" then each argument in brackets, so an empty argument
 // stays visible. yarn answers a leading --version with $STUB_YARN_VERSION.
-// A Charter invocation (argv naming charter or @stackbilt/cli) exits 127 when
-// $STUB_UNRESOLVED is 1, as if the CLI were not installed. Any call exits 1 when
-// its joined argv contains $STUB_FAIL_ON, unless it is the `--version` probe.
+// A Charter invocation (the charter stub itself, or argv naming charter or
+// @stackbilt/cli) exits 127 when $STUB_UNRESOLVED is 1, as if the CLI were not
+// installed, and answers --version with $STUB_CHARTER_VERSION. Any other call
+// exits 1 when its joined argv contains $STUB_FAIL_ON.
 // `<pm> run` also logs whether the scope token reached it.
-function stubScript(name: Pm): string {
+function stubScript(name: Stub): string {
   return `#!/bin/sh
 {
   printf '%s' '${name}'
@@ -47,14 +58,17 @@ if [ "${name}" = "yarn" ] && [ "\${1:-}" = "--version" ]; then
   echo "\${STUB_YARN_VERSION:-4.5.0}"
   exit 0
 fi
+is_charter=0
+[ "${name}" = "charter" ] && is_charter=1
 case " $* " in
-  *" charter "*|*" @stackbilt/cli "*)
-    if [ "\${STUB_UNRESOLVED:-0}" = "1" ]; then echo "${name}: charter: command not found" >&2; exit 127; fi
-    ;;
+  *" charter "*|*" @stackbilt/cli "*) is_charter=1 ;;
 esac
-case " $* " in
-  *" --version "*) exit 0 ;;
-esac
+if [ "$is_charter" = "1" ]; then
+  if [ "\${STUB_UNRESOLVED:-0}" = "1" ]; then echo "${name}: charter: command not found" >&2; exit 127; fi
+  case " $* " in
+    *" --version "*) echo "\${STUB_CHARTER_VERSION:-charter v2.1.0}"; exit 0 ;;
+  esac
+fi
 if [ -n "\${STUB_FAIL_ON:-}" ]; then
   case "$*" in
     *"$STUB_FAIL_ON"*) echo "${name}: stub failure" >&2; exit 1 ;;
@@ -64,31 +78,35 @@ exit 0
 `;
 }
 
-/** PATH entries that hold none of the package-manager binaries (any Windows extension). */
+/** PATH entries that hold none of the stubbed binaries (any Windows extension). */
 function pathWithoutPms(): string {
   const exts = ['', '.cmd', '.exe', '.ps1', '.bat'];
   return (process.env.PATH ?? '')
     .split(path.delimiter)
-    .filter(dir => dir && !PMS.some(pm => exts.some(ext => fs.existsSync(path.join(dir, pm + ext)))))
+    .filter(dir => dir && !STUBS.some(pm => exts.some(ext => fs.existsSync(path.join(dir, pm + ext)))))
     .join(path.delimiter);
 }
 
-// Needs a PATH with git and the POSIX tools but no real package manager.
+// Needs a PATH with git and the POSIX tools but no real package manager or charter.
 const isolatedOk = (() => {
   if (!shAvailable) return false;
-  const probe = spawnSync('sh', ['-c', 'command -v git && command -v sed && command -v grep && command -v date && ! command -v yarn && ! command -v pnpm && ! command -v npm'], {
+  const probe = spawnSync('sh', ['-c', 'command -v git && command -v sed && command -v grep && command -v date && ! command -v yarn && ! command -v pnpm && ! command -v npm && ! command -v charter'], {
     env: { ...process.env, PATH: pathWithoutPms() },
   });
   return !probe.error && probe.status === 0;
 })();
 
+/** A local npm install, as the hook detects it. */
+const LOCAL_BIN = { 'node_modules/.bin/charter': '#!/bin/sh\n' };
+
 interface Fixture {
   files?: Record<string, string>;
-  stubs?: Pm[];
+  stubs?: Stub[];
   yarnVersion?: string;
+  charterVersion?: string;
   failOn?: string;
   unresolved?: boolean;
-  /** Use a PATH with every real package manager removed, so only the stubs exist. */
+  /** Use a PATH with every real package manager and charter removed, so only the stubs exist. */
   isolatePath?: boolean;
   /** Hook text to run instead of PRE_COMMIT_HOOK_CONTENT (mutation checks). */
   hook?: string;
@@ -139,9 +157,10 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
   function runHook(fx: Fixture): HookRun {
     fs.writeFileSync(path.join(dir, 'hook.sh'), fx.hook ?? PRE_COMMIT_HOOK_CONTENT);
     for (const [name, content] of Object.entries(fx.files ?? {})) {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
       fs.writeFileSync(path.join(dir, name), content);
     }
-    for (const pm of fx.stubs ?? PMS) {
+    for (const pm of fx.stubs ?? STUBS.filter(s => s !== 'charter')) {
       const stub = path.join(stubDir, pm);
       fs.writeFileSync(stub, stubScript(pm));
       fs.chmodSync(stub, 0o755);
@@ -152,10 +171,12 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
       PATH: `${stubDir}${path.delimiter}${basePath}`,
       STUB_LOG: logFile,
       STUB_YARN_VERSION: fx.yarnVersion ?? '4.5.0',
+      STUB_CHARTER_VERSION: fx.charterVersion ?? 'charter v2.1.0',
       STUB_FAIL_ON: fx.failOn ?? '',
       STUB_UNRESOLVED: fx.unresolved ? '1' : '0',
     };
     delete env.CHARTER_HOOK_SCOPED_DOCTOR;
+    delete env.CHARTER_SKIP_TIDY;
     const result = spawnSync('sh', ['hook.sh'], { cwd: dir, env, encoding: 'utf-8' });
     const calls = fs.existsSync(logFile)
       ? fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean)
@@ -163,16 +184,17 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
     return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls };
   }
 
-  /** The three CLI calls a manifest repo without verify:adf makes, prefixed by the runner. */
+  /** The probe and the three CLI calls a manifest repo without verify:adf makes, prefixed by the runner. */
   function expectedCalls(runner: string): string[] {
     return [
+      `${runner} [--version]`,
       `${runner} [adf] [tidy] [--dry-run] [--print-paths] [--source] [CLAUDE.md]`,
       `${runner} [doctor] [--adf-only] [--ci] [--staged] [--tidy-skipped] [] [--format] [text]`,
       `${runner} [adf] [evidence] [--auto-measure] [--ci]`,
     ];
   }
 
-  const withoutVersionProbe = (calls: string[]): string[] => calls.filter(c => c !== 'yarn [--version]');
+  const withoutYarnVersion = (calls: string[]): string[] => calls.filter(c => c !== 'yarn [--version]');
 
   it('the generated hook carries the #366 marker and never resolves the bare name charter through npx/npm', () => {
     expect(PRE_COMMIT_HOOK_CONTENT).toContain(PRE_COMMIT_PM_CLI_MARKER);
@@ -182,6 +204,9 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
     const code = PRE_COMMIT_HOOK_CONTENT.split('\n').filter(l => !/^\s*(#|echo )/.test(l));
     const direct = code.filter(l => /\bcharter (adf|doctor)\b/.test(l) && !l.includes(HOOK_CLI) && !l.includes('GENERATED by charter adf compile'));
     expect(direct).toEqual([]);
+    // charter_cli runs $CHARTER_RUN, the same string the "Run:" hints print.
+    expect(HOOK_CLI_RESOLVE_BLOCK).toContain('  $CHARTER_RUN "$@"\n');
+    for (const command of Object.values(HOOK_CLI_COMMANDS)) expect(HOOK_CLI_RESOLVE_BLOCK).toContain(`CHARTER_RUN="${command}"`);
   });
 
   describe('cascade: first candidate whose marker exists and whose binary is on PATH', () => {
@@ -189,47 +214,48 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
       const run = runHook({ files: { [marker]: '' } });
       expect(run.status).toBe(0);
       expect(run.calls).toContain('yarn [--version]');
-      expect(withoutVersionProbe(run.calls)).toEqual(expectedCalls('yarn [charter]'));
-      expect(run.stderr).not.toContain('Warning');
+      expect(withoutYarnVersion(run.calls)).toEqual(expectedCalls(YARN));
+      expect(run.stderr).toBe('');
     });
 
     it('Yarn PnP from .yarnrc.yml alone (nodeLinker: pnp, not installed yet): yarn charter', () => {
       const run = runHook({ files: { '.yarnrc.yml': 'nodeLinker: pnp\n' } });
       expect(run.status).toBe(0);
-      expect(withoutVersionProbe(run.calls)).toEqual(expectedCalls('yarn [charter]'));
+      expect(withoutYarnVersion(run.calls)).toEqual(expectedCalls(YARN));
     });
 
     it('PnP plus pnpm-lock.yaml, both binaries on PATH: yarn wins', () => {
       const run = runHook({ files: { '.pnp.cjs': '', 'pnpm-lock.yaml': '' } });
       expect(run.status).toBe(0);
-      expect(withoutVersionProbe(run.calls)).toEqual(expectedCalls('yarn [charter]'));
+      expect(withoutYarnVersion(run.calls)).toEqual(expectedCalls(YARN));
     });
 
     it('pnpm-lock.yaml plus yarn.lock, both binaries on PATH: pnpm wins', () => {
       const run = runHook({ files: { 'pnpm-lock.yaml': '', 'yarn.lock': '' } });
       expect(run.status).toBe(0);
-      expect(run.calls).toEqual(expectedCalls('pnpm [exec] [charter]'));
+      expect(run.calls).toEqual(expectedCalls(PNPM));
     });
 
     it('Yarn classic (yarn.lock, yarn 1.x): yarn --silent charter, so no run banner reaches the tidy plan', () => {
       const run = runHook({ files: { 'yarn.lock': '' }, yarnVersion: '1.22.22' });
       expect(run.status).toBe(0);
-      expect(withoutVersionProbe(run.calls)).toEqual(expectedCalls('yarn [--silent] [charter]'));
+      expect(withoutYarnVersion(run.calls)).toEqual(expectedCalls(YARN1));
     });
 
     it('pnpm (pnpm-lock.yaml): pnpm exec charter', () => {
       const run = runHook({ files: { 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" } });
       expect(run.status).toBe(0);
-      expect(run.calls).toEqual(expectedCalls('pnpm [exec] [charter]'));
+      expect(run.calls).toEqual(expectedCalls(PNPM));
     });
 
     it.each([
-      ['package-lock.json', { 'package-lock.json': '{}' }],
-      ['no lockfile', {}],
-    ])('npm (%s): npm exec --no -- @stackbilt/cli, never the bare name charter', (_label, files) => {
+      ['package-lock.json', { ...LOCAL_BIN, 'package-lock.json': '{}' }],
+      ['no lockfile', LOCAL_BIN],
+      ['charter.cmd only (Windows install)', { 'node_modules/.bin/charter.cmd': '@echo off\r\n' }],
+    ])('npm with a local install (%s): npm exec @stackbilt/cli, never the bare name charter', (_label, files) => {
       const run = runHook({ files });
       expect(run.status).toBe(0);
-      expect(run.calls).toEqual(expectedCalls(NPM_RUNNER));
+      expect(run.calls).toEqual(expectedCalls(NPM));
     });
 
     it('mutation: swapping the PnP and pnpm-lock.yaml branches changes the PnP-plus-pnpm result', () => {
@@ -240,7 +266,7 @@ elif [ "$CHARTER_PNP" = "1" ] && command -v yarn >/dev/null 2>&1; then
   PM=yarn
 `);
       const run = runHook({ files: { '.pnp.cjs': '', 'pnpm-lock.yaml': '' }, hook: swapped });
-      expect(run.calls).toEqual(expectedCalls('pnpm [exec] [charter]'));
+      expect(run.calls).toEqual(expectedCalls(PNPM));
     });
 
     it('mutation: swapping the pnpm-lock.yaml and yarn.lock branches changes the two-lockfile result', () => {
@@ -251,65 +277,107 @@ elif [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
   PM=pnpm
 `);
       const run = runHook({ files: { 'pnpm-lock.yaml': '', 'yarn.lock': '' }, hook: swapped });
-      expect(withoutVersionProbe(run.calls)).toEqual(expectedCalls('yarn [charter]'));
+      expect(withoutYarnVersion(run.calls)).toEqual(expectedCalls(YARN));
     });
   });
 
   it.each([
-    ['yarn PnP', { 'yarn.lock': '', '.pnp.cjs': '' }, 'yarn [charter]', 'yarn [run] [verify:adf] token-set'],
-    ['pnpm', { 'pnpm-lock.yaml': '' }, 'pnpm [exec] [charter]', 'pnpm [run] [verify:adf] token-set'],
-    ['npm', {}, NPM_RUNNER, 'npm [run] [verify:adf] token-set'],
+    ['yarn PnP', { 'yarn.lock': '', '.pnp.cjs': '' }, YARN, 'yarn [run] [verify:adf] token-set'],
+    ['pnpm', { 'pnpm-lock.yaml': '' }, PNPM, 'pnpm [run] [verify:adf] token-set'],
+    ['npm', LOCAL_BIN, NPM, 'npm [run] [verify:adf] token-set'],
   ])('verify:adf repo (%s): scoped doctor through the package manager, then <pm> run verify:adf with the token', (_label, files, runner, verify) => {
     const run = runHook({ files: { ...files, 'package.json': JSON.stringify({ scripts: { 'verify:adf': 'charter doctor --adf-only --ci' } }) } });
     expect(run.status).toBe(0);
-    expect(withoutVersionProbe(run.calls)).toEqual([...expectedCalls(runner).slice(0, 2), verify]);
+    expect(withoutYarnVersion(run.calls)).toEqual([...expectedCalls(runner).slice(0, 3), verify]);
   });
 
   describe('failure hints', () => {
-    it('doctor ran and reported problems: blocks, names the command, no devDependency hint', () => {
-      const run = runHook({ files: { 'pnpm-lock.yaml': '' }, failOn: 'doctor' });
+    it.each([
+      ['pnpm', { 'pnpm-lock.yaml': '' }, HOOK_CLI_COMMANDS.pnpm],
+      ['npm', LOCAL_BIN, HOOK_CLI_COMMANDS.npm],
+      ['yarn', { '.pnp.cjs': '' }, HOOK_CLI_COMMANDS.yarn],
+    ])('%s: doctor ran and reported problems: blocks; the Run: line is exactly what ran; no devDependency hint', (_label, files, command) => {
+      const run = runHook({ files, failOn: 'doctor' });
       expect(run.status).toBe(1);
       expect(run.stdout).toContain('[pre-commit] ADF verification FAILED.');
-      expect(run.stdout).toContain('  Run: pnpm exec charter doctor --adf-only --ci --staged --format text');
-      expect(run.calls).toContain('pnpm [exec] [charter] [--version]');
-      expect(run.stdout).not.toContain('devDependency');
-      expect(run.stdout).not.toContain('could not be run');
+      const runLine = run.stdout.split('\n').find(l => l.startsWith('  Run: '));
+      expect(runLine).toBe(`  Run: ${command} doctor --adf-only --ci --staged --format text`);
+      expect(run.calls).toContain(`${logged(command)} [doctor] [--adf-only] [--ci] [--staged] [--tidy-skipped] [] [--format] [text]`);
+      expect(run.stdout + run.stderr).not.toContain('devDependency');
+      expect(run.calls.filter(c => c.endsWith('[--version]') && c !== 'yarn [--version]')).toHaveLength(1);
     });
 
-    it('evidence ran and failed: no devDependency hint either', () => {
-      const run = runHook({ files: {}, failOn: 'evidence' });
+    it('evidence ran and failed: the exact command, no devDependency hint', () => {
+      const run = runHook({ files: LOCAL_BIN, failOn: 'evidence' });
       expect(run.status).toBe(1);
-      expect(run.stdout).toContain(`  Run: npm exec --no -- @stackbilt/cli adf evidence --auto-measure --ci`);
-      expect(run.stdout).not.toContain('devDependency');
+      expect(run.stdout).toContain(`  Run: ${HOOK_CLI_COMMANDS.npm} adf evidence --auto-measure --ci`);
+      expect(run.stdout + run.stderr).not.toContain('devDependency');
     });
 
     it.each([
-      ['pnpm', { 'pnpm-lock.yaml': '' }, 'pnpm exec charter'],
-      ['npm', {}, 'npm exec --no -- @stackbilt/cli'],
-      ['yarn', { '.pnp.cjs': '' }, 'yarn charter'],
-    ])('%s: the CLI cannot be resolved (exit 127): blocks with the devDependency hint', (_label, files, runner) => {
+      ['pnpm', { 'pnpm-lock.yaml': '' }, HOOK_CLI_COMMANDS.pnpm],
+      ['npm (local bin present)', LOCAL_BIN, HOOK_CLI_COMMANDS.npm],
+      ['yarn', { '.pnp.cjs': '' }, HOOK_CLI_COMMANDS.yarn],
+    ])('%s: the CLI cannot be resolved (exit 127): one probe, the hint once, tidy skipped, the gate fails', (_label, files, command) => {
       const run = runHook({ files, unresolved: true });
       expect(run.status).toBe(1);
+      expect(withoutYarnVersion(run.calls)).toEqual([`${logged(command)} [--version]`]);
+      expect(run.stderr).toContain(`[pre-commit] Charter could not be run with: ${command}`);
+      expect(run.stderr.split('Add @stackbilt/cli as a devDependency').length - 1).toBe(1);
+      expect(run.stdout).not.toContain('Checking staged vendor files');
       expect(run.stdout).toContain('[pre-commit] ADF verification FAILED.');
-      expect(run.stdout).toContain(`  Charter itself could not be run with: ${runner}`);
-      expect(run.stdout).toContain('  Add @stackbilt/cli as a devDependency and install it. This hook never installs Charter.');
+      expect(run.stdout).toContain('Charter was not run: it could not be found');
+    });
+
+    it('a 1.x CLI: one upgrade warning naming 2.x; the hook still runs it', () => {
+      const run = runHook({ files: { 'pnpm-lock.yaml': '' }, charterVersion: 'charter v1.9.3' });
+      expect(run.status).toBe(0);
+      expect(run.stderr).toContain(`[pre-commit] Warning: ${HOOK_CLI_COMMANDS.pnpm} --version reports charter v1.9.3; this hook needs @stackbilt/cli 2.x`);
+      expect(run.stderr).toContain('Install or upgrade the devDependency: @stackbilt/cli@^2.');
+      expect(run.stderr.split('Warning:').length - 1).toBe(1);
+      expect(run.calls).toEqual(expectedCalls(PNPM));
+    });
+
+    it('a failed tidy dry run does not claim the vendor files are clean', () => {
+      const run = runHook({ files: LOCAL_BIN, failOn: 'dry-run' });
+      expect(run.stdout).toContain('[pre-commit] adf tidy --dry-run failed; skipping auto-tidy.');
+      expect(run.stdout).not.toContain('Vendor config files are clean');
+    });
+
+    it('a dry run that plans nothing still says the vendor files are clean', () => {
+      const run = runHook({ files: LOCAL_BIN });
+      expect(run.stdout).toContain('[pre-commit] Vendor config files are clean.');
     });
   });
 
-  describe('package manager binary missing from PATH', () => {
-    it.skipIf(!isolatedOk)('Yarn PnP without yarn: warns (with the corepack fix) and falls back to npm exec', () => {
-      const run = runHook({ files: { 'yarn.lock': '', '.pnp.cjs': '' }, stubs: ['npm'], isolatePath: true });
+  describe('npm without a local install, and missing binaries', () => {
+    it.skipIf(!isolatedOk)('no local install, no global charter: no Charter call at all, the hint once, the gate fails', () => {
+      const run = runHook({ stubs: ['npm', 'npx'], isolatePath: true });
+      expect(run.status).toBe(1);
+      expect(run.calls).toEqual([]);
+      expect(run.stderr).toContain(`[pre-commit] Charter could not be run with: ${HOOK_CLI_COMMANDS.npm}`);
+      expect(run.stderr.split('Add @stackbilt/cli as a devDependency').length - 1).toBe(1);
+    });
+
+    it.skipIf(!isolatedOk)('no local install, a global charter on PATH: runs it directly, never npm exec', () => {
+      const run = runHook({ stubs: ['npm', 'charter'], isolatePath: true });
       expect(run.status).toBe(0);
-      expect(run.stderr).toContain('[pre-commit] Warning: this repo uses yarn, but yarn is not on PATH; running Charter with npm exec --no -- @stackbilt/cli (and verify:adf with npm run) instead.');
+      expect(run.calls).toEqual(expectedCalls(GLOBAL));
+    });
+
+    it.skipIf(!isolatedOk)('Yarn PnP without yarn: warns (with the corepack fix) and falls back to npm', () => {
+      const run = runHook({ files: { 'yarn.lock': '', '.pnp.cjs': '', ...LOCAL_BIN }, stubs: ['npm'], isolatePath: true });
+      expect(run.status).toBe(0);
+      expect(run.stderr).toContain(`[pre-commit] Warning: this repo uses yarn, but yarn is not on PATH; running Charter with ${HOOK_CLI_COMMANDS.npm} (and verify:adf with npm run) instead.`);
       expect(run.stderr).toContain('corepack enable');
-      expect(run.calls).toEqual(expectedCalls(NPM_RUNNER));
+      expect(run.calls).toEqual(expectedCalls(NPM));
     });
 
     it.skipIf(!isolatedOk)('PnP plus pnpm-lock.yaml without yarn: the cascade moves on to pnpm, with a warning', () => {
       const run = runHook({ files: { '.pnp.cjs': '', 'pnpm-lock.yaml': '' }, stubs: ['pnpm', 'npm'], isolatePath: true });
       expect(run.status).toBe(0);
-      expect(run.stderr).toContain('this repo uses yarn, but yarn is not on PATH; running Charter with pnpm exec charter (and verify:adf with pnpm run) instead.');
-      expect(run.calls).toEqual(expectedCalls('pnpm [exec] [charter]'));
+      expect(run.stderr).toContain(`this repo uses yarn, but yarn is not on PATH; running Charter with ${HOOK_CLI_COMMANDS.pnpm} (and verify:adf with pnpm run) instead.`);
+      expect(run.calls).toEqual(expectedCalls(PNPM));
     });
 
     it.skipIf(!isolatedOk)('both lockfiles with only yarn installed: yarn (the #365 cascade), not npm', () => {
@@ -319,23 +387,23 @@ elif [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
         isolatePath: true,
       });
       expect(run.status).toBe(0);
-      expect(run.stderr).toContain('this repo uses pnpm, but pnpm is not on PATH; running Charter with yarn charter (and verify:adf with yarn run) instead.');
-      expect(withoutVersionProbe(run.calls)).toEqual([...expectedCalls('yarn [charter]').slice(0, 2), 'yarn [run] [verify:adf] token-set']);
+      expect(run.stderr).toContain(`this repo uses pnpm, but pnpm is not on PATH; running Charter with ${HOOK_CLI_COMMANDS.yarn} (and verify:adf with yarn run) instead.`);
+      expect(withoutYarnVersion(run.calls)).toEqual([...expectedCalls(YARN).slice(0, 3), 'yarn [run] [verify:adf] token-set']);
     });
 
     it.skipIf(!isolatedOk)('pnpm repo without pnpm: warns and falls back to npm exec / npm run', () => {
       const run = runHook({
-        files: { 'pnpm-lock.yaml': '', 'package.json': JSON.stringify({ scripts: { 'verify:adf': 'x' } }) },
+        files: { 'pnpm-lock.yaml': '', ...LOCAL_BIN, 'package.json': JSON.stringify({ scripts: { 'verify:adf': 'x' } }) },
         stubs: ['npm'],
         isolatePath: true,
       });
       expect(run.status).toBe(0);
       expect(run.stderr).toContain('this repo uses pnpm, but pnpm is not on PATH');
       expect(run.stderr).not.toContain('corepack enable');
-      expect(run.calls).toEqual([...expectedCalls(NPM_RUNNER).slice(0, 2), 'npm [run] [verify:adf] token-set']);
+      expect(run.calls).toEqual([...expectedCalls(NPM).slice(0, 3), 'npm [run] [verify:adf] token-set']);
     });
 
-    it.skipIf(!isolatedOk)('prints no package-manager warning and makes no call without .ai/manifest.adf', () => {
+    it.skipIf(!isolatedOk)('prints nothing and makes no call without .ai/manifest.adf', () => {
       fs.rmSync(path.join(dir, '.ai'), { recursive: true });
       const run = runHook({ files: { 'yarn.lock': '' }, stubs: ['npm'], isolatePath: true });
       expect(run.status).toBe(0);
@@ -359,7 +427,10 @@ elif [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
       ["nodeLinker: 'pnp' # comment\n", true],
       ['nodeLinker: pnp\r\n', true],
       ['  nodeLinker:pnp\n', true],
+      ['nodeLinker:\tpnp\t\n', true],
       ['yarnPath: .yarn/releases/yarn-4.5.0.cjs\nnodeLinker: pnp', true],
+      ['nodeLinker:\n  pnp\n', false],
+      ['nodeLinker: pnp\nx', true],
       ['nodeLinker: pnpm\n', false],
       ['nodeLinker: node-modules\n', false],
       ['nodeLinker: pnp-loose\n', false],

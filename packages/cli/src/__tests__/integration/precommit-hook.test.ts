@@ -129,7 +129,8 @@ function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
   fs.writeFileSync(path.join(binDir, 'pnpm.cmd'), `@echo pnpm %*>> "${pnpmLog}"\r\n@exit /b 97\r\n`);
   fs.writeFileSync(shim, [
     `const args = process.argv.slice(2);`,
-    `require('fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');`,
+    // The hook's one --version probe (#366) is not logged, so the call lists stay about tidy and the gate.
+    `if (args[0] !== '--version') require('fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');`,
     `if (process.env.HOOK_TEST_FAIL_TIDY === '1' && args[0] === 'adf' && args[1] === 'tidy') process.exit(3);`,
     // Test hooks for paths tidy reports: a ghost path in both runs, or an extra write in the real run only.
     `if (args[0] === 'adf' && args[1] === 'tidy' && args.includes('--print-paths')) process.on('exit', () => {`,
@@ -179,9 +180,10 @@ function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
   // The generated hook, as `charter hook install --pre-commit` writes it.
   const hookDir = path.join(tmp, '.githooks');
   fs.mkdirSync(hookDir, { recursive: true });
-  // #366: charter_cli is redefined right after the generated one, so package-manager
-  // detection still runs (verify:adf uses it) and every Charter call reaches the shim.
-  const full = PRE_COMMIT_HOOK_CONTENT.replace(HOOK_CLI_RESOLVE_BLOCK, `${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI}() { node "${posix(shim)}" "$@"; }\n`);
+  // #366: charter_cli is redefined right after the generated one, ahead of the
+  // --version probe, so package-manager detection still runs (verify:adf uses it)
+  // and every Charter call, the probe included, reaches the shim.
+  const full = PRE_COMMIT_HOOK_CONTENT.replace(HOOK_CLI_RESOLVE_BLOCK, `${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI}() { node "${posix(shim)}" "$@"; }\nCHARTER_STATE=ok\n`);
   expect(full).not.toBe(PRE_COMMIT_HOOK_CONTENT);
   const hook = opts.tidyOnly ? full.slice(0, full.indexOf('# ADF evidence gate')) : full;
   expect(hook).toContain('# Charter pre-commit vendor tidy: scoped to staged files');

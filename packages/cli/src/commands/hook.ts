@@ -184,7 +184,8 @@ if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
 
   if [ -n "$SOURCES" ]; then
     echo "[pre-commit] Checking staged vendor files:$NAMES"
-    PLAN=$({CLI} adf tidy --dry-run --print-paths $SOURCES 2>/dev/null) || { echo "[pre-commit] adf tidy --dry-run failed; skipping auto-tidy."; PLAN=""; }
+    PLAN_OK=1
+    PLAN=$({CLI} adf tidy --dry-run --print-paths $SOURCES 2>/dev/null) || { echo "[pre-commit] adf tidy --dry-run failed; skipping auto-tidy."; PLAN=""; PLAN_OK=0; }
     if printf '%s\\n' "$PLAN" | grep -E '^(vendor|module) ' >/dev/null; then
       BLOCKED=""
       IGNORED=""
@@ -230,7 +231,8 @@ if [ "\${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
         fi
         echo "[pre-commit] Vendor files tidied; re-staged only the planned files tidy wrote."
       fi
-    else
+    elif [ "$PLAN_OK" = "1" ]; then
+      # A failed dry run has said so above; it proves nothing about the files.
       echo "[pre-commit] Vendor config files are clean."
     fi
   fi
@@ -250,16 +252,31 @@ export const PNP_MARKER_FILES = ['.pnp.cjs', '.pnp.js'] as const;
 
 /**
  * POSIX ERE for a .yarnrc.yml line that selects the PnP linker (`nodeLinker: pnp`,
- * optionally quoted, then a quote, space, comment or end of line, so `pnpm` and
- * `pnp-loose` do not match). The hook greps with it; doctor uses
- * yarnrcPnpLinkerRegExp(), the same pattern with [:space:] spelled \s.
+ * optionally quoted, then a quote, blank, comment or end of line, so `pnpm` and
+ * `pnp-loose` do not match). The hook greps with it, one line at a time; doctor
+ * uses yarnrcPnpLinkerRegExp(), the same pattern with [:space:] spelled
+ * [ \t\r\f\v] so that, like grep, it never matches across a newline.
  */
 export const YARNRC_PNP_LINKER_ERE = `^[[:space:]]*nodeLinker:[[:space:]]*["']?pnp(["'[:space:]#]|$)`;
 
 /** YARNRC_PNP_LINKER_ERE as a JS RegExp over a whole file (multiline). */
 export function yarnrcPnpLinkerRegExp(): RegExp {
-  return new RegExp(YARNRC_PNP_LINKER_ERE.split('[:space:]').join('\\s'), 'm');
+  return new RegExp(YARNRC_PNP_LINKER_ERE.split('[:space:]').join(' \\t\\r\\f\\v'), 'm');
 }
+
+/**
+ * The exact commands charter_cli runs, which the hook also prints in its "Run:"
+ * hints (#366). The npm form names Charter's own package, never the bare name
+ * `charter` (an unrelated registry package); --no refuses to install, and
+ * --fetch-retries=0 makes any registry request fail at once rather than retry.
+ */
+export const HOOK_CLI_COMMANDS = {
+  yarn: 'yarn charter',
+  yarn1: 'yarn --silent charter',
+  pnpm: 'pnpm exec charter',
+  npm: 'npm exec --no --no-update-notifier --fetch-retries=0 -- @stackbilt/cli',
+  global: 'charter',
+} as const;
 
 /** Escape a string for the inside of a POSIX sh double-quoted word. */
 function shDoubleQuoted(value: string): string {
@@ -267,27 +284,20 @@ function shDoubleQuoted(value: string): string {
 }
 
 /**
- * Picks the package manager and defines charter_cli (#366). POSIX sh, no output
- * unless a warning is due (and then only when .ai/manifest.adf exists, as nothing
- * else in the hook runs without it). The first candidate whose marker exists and
- * whose binary is on PATH wins: the #365 verify:adf cascade with PnP in front.
+ * Picks the package manager and how to run Charter, once per hook run (#366).
+ * POSIX sh, no output. The first candidate whose marker exists and whose binary
+ * is on PATH wins: the #365 verify:adf cascade with PnP in front.
  *   1. Yarn Plug'n'Play (a PNP_MARKER_FILES file, or YARNRC_PNP_LINKER_ERE in
  *      .yarnrc.yml) and yarn on PATH -> yarn
  *   2. pnpm-lock.yaml and pnpm on PATH -> pnpm
  *   3. yarn.lock and yarn on PATH -> yarn
  *   4. otherwise npm
- * When the first marker found has no binary on PATH, the hook warns and names
- * the runner it uses instead.
- * charter_cli runs: yarn charter (yarn --silent charter on Yarn 1, whose run
- * banner would otherwise land in the tidy block's parsed stdout), pnpm exec
- * charter, or npm exec --no -- @stackbilt/cli. The npm form names Charter's own
- * package, never the bare name `charter` (an unrelated registry package), and
- * --no refuses to install. A local install runs with no registry request.
- * Without one, npm requests @stackbilt/cli's metadata and may run a global
- * install, but never installs or runs a downloaded package.
- * --no-update-notifier skips npm's own version check.
- * charter_cli_hint prints the devDependency advice only when charter_cli cannot
- * run `--version`, so a doctor that ran and reported problems gets no such hint.
+ * CHARTER_RUN is the HOOK_CLI_COMMANDS entry for the result, and charter_cli runs
+ * exactly that. Under npm: a local install (node_modules/.bin/charter or
+ * charter.cmd) runs through npm exec, which then makes no registry request;
+ * without one, a `charter` on PATH (a global install) runs directly; with
+ * neither, CHARTER_STATE is "missing" and charter_cli runs nothing, so the hook
+ * makes no network request at all.
  */
 export const HOOK_CLI_RESOLVE_BLOCK = `# Charter CLI resolution (#366): run Charter with the package manager this repo uses.
 ${PRE_COMMIT_PM_CLI_MARKER}
@@ -314,18 +324,28 @@ elif [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
 elif [ -f "yarn.lock" ] && command -v yarn >/dev/null 2>&1; then
   PM=yarn
 fi
-CHARTER_YARN_FLAGS=""
+# CHARTER_STATE: ok, missing (charter_cli runs nothing) or old (a 1.x CLI); set by the probe below.
+CHARTER_STATE=ok
 case "$PM" in
   yarn)
-    CHARTER_RUN="yarn charter"
+    CHARTER_RUN="${HOOK_CLI_COMMANDS.yarn}"
     if [ -f ".ai/manifest.adf" ]; then
       case "$(yarn --version 2>/dev/null || true)" in
-        1.*) CHARTER_YARN_FLAGS="--silent"; CHARTER_RUN="yarn --silent charter" ;;
+        1.*) CHARTER_RUN="${HOOK_CLI_COMMANDS.yarn1}" ;;
       esac
     fi
     ;;
-  pnpm) CHARTER_RUN="pnpm exec charter" ;;
-  *) CHARTER_RUN="npm exec --no -- @stackbilt/cli" ;;
+  pnpm) CHARTER_RUN="${HOOK_CLI_COMMANDS.pnpm}" ;;
+  *)
+    CHARTER_RUN="${HOOK_CLI_COMMANDS.npm}"
+    if [ ! -f "node_modules/.bin/charter" ] && [ ! -f "node_modules/.bin/charter.cmd" ]; then
+      if command -v charter >/dev/null 2>&1; then
+        CHARTER_RUN="${HOOK_CLI_COMMANDS.global}"
+      else
+        CHARTER_STATE=missing
+      fi
+    fi
+    ;;
 esac
 if [ "$PM" != "$LOCK_PM" ] && [ -f ".ai/manifest.adf" ]; then
   echo "[pre-commit] Warning: this repo uses $LOCK_PM, but $LOCK_PM is not on PATH; running Charter with $CHARTER_RUN (and verify:adf with $PM run) instead." >&2
@@ -333,26 +353,49 @@ if [ "$PM" != "$LOCK_PM" ] && [ -f ".ai/manifest.adf" ]; then
     echo "[pre-commit] Yarn Plug'n'Play needs yarn to load packages. To fix: corepack enable (or install yarn), then commit again." >&2
   fi
 fi
+# Runs exactly the command the hints print ($CHARTER_RUN), or nothing when Charter is missing.
 charter_cli() {
-  case "$PM" in
-    yarn) yarn $CHARTER_YARN_FLAGS charter "$@" ;;
-    pnpm) pnpm exec charter "$@" ;;
-    *) npm exec --no --no-update-notifier -- @stackbilt/cli "$@" ;;
-  esac
-}
-charter_cli_hint() {
-  if ! charter_cli --version >/dev/null 2>&1; then
-    echo "  Charter itself could not be run with: $CHARTER_RUN"
-    echo '  Add @stackbilt/cli as a devDependency and install it. This hook never installs Charter.'
+  if [ "$CHARTER_STATE" = "missing" ]; then
+    return 127
   fi
+  $CHARTER_RUN "$@"
 }
+`;
+
+/**
+ * Runs `charter_cli --version` once per hook run, before any other Charter call
+ * (#366), and only when .ai/manifest.adf exists. A CLI that cannot run sets
+ * CHARTER_STATE=missing: the hook says so once, skips tidy, and the gate fails
+ * without calling Charter again. A 1.x CLI (it ignores --staged and
+ * --print-paths, so tidy would do nothing and the gate would check every file)
+ * sets CHARTER_STATE=old and gets a one-time upgrade warning. A separate block
+ * so that tests can replace charter_cli between the two.
+ */
+export const HOOK_CLI_PROBE_BLOCK = `# Charter CLI probe (#366): one --version call per hook run.
+if [ -f ".ai/manifest.adf" ]; then
+  CHARTER_VERSION=""
+  if [ "$CHARTER_STATE" != "missing" ]; then
+    CHARTER_VERSION=$(${HOOK_CLI} --version 2>/dev/null) || CHARTER_STATE=missing
+  fi
+  case "$CHARTER_STATE:$CHARTER_VERSION" in
+    missing:*)
+      echo "[pre-commit] Charter could not be run with: $CHARTER_RUN" >&2
+      echo '[pre-commit] Add @stackbilt/cli as a devDependency and install it. This hook never installs Charter.' >&2
+      CHARTER_SKIP_TIDY=1
+      ;;
+    *"charter v0."*|*"charter v1."*)
+      CHARTER_STATE=old
+      echo "[pre-commit] Warning: $CHARTER_RUN --version reports $CHARTER_VERSION; this hook needs @stackbilt/cli 2.x (1.x ignores --staged and --print-paths, so tidy does nothing and the gate checks every file). Install or upgrade the devDependency: @stackbilt/cli@^2." >&2
+      ;;
+  esac
+fi
 `;
 
 export const PRE_COMMIT_HOOK_CONTENT = `#!/usr/bin/env sh
 ${PRE_COMMIT_HOOK_MARKER}
 set -eu
 
-${HOOK_CLI_RESOLVE_BLOCK}
+${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI_PROBE_BLOCK}
 ${renderHookTidyBlock(HOOK_CLI)}
 # ADF evidence gate: check LOC ceilings if manifest exists
 ${PRE_COMMIT_GATE_SCOPE_MARKER}
@@ -370,7 +413,9 @@ if [ -f ".ai/manifest.adf" ]; then
     else
       echo "  Run: $CHARTER_RUN doctor --adf-only --ci --staged --format text"
     fi
-    charter_cli_hint
+    if [ "$CHARTER_STATE" = "missing" ]; then
+      echo '  Charter was not run: it could not be found (see the note above).'
+    fi
     exit 1
   }
   if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then
@@ -402,7 +447,9 @@ if [ -f ".ai/manifest.adf" ]; then
       echo ''
       echo '[pre-commit] ADF verification FAILED.'
       echo "  Run: $CHARTER_RUN adf evidence --auto-measure --ci"
-      charter_cli_hint
+      if [ "$CHARTER_STATE" = "missing" ]; then
+        echo '  Charter was not run: it could not be found (see the note above).'
+      fi
       exit 1
     }
   fi
@@ -637,11 +684,13 @@ function printHelp(): void {
   console.log('  Bloat is routed to .adf modules; only the files tidy wrote are re-staged. A vendor file');
   console.log('  with unstaged changes is skipped. The gate (doctor --staged) blocks on vendor bloat only in');
   console.log('  staged files tidy did not skip. If package.json has a verify:adf script, it runs next,');
-  console.log('  with the first package manager whose lockfile (or Plug\'n\'Play marker) exists and that');
-  console.log('  is on PATH (npm if none), and its doctor leaves vendor bloat to that scoped check.');
-  console.log('  Every Charter call runs through the same package manager: yarn charter, pnpm exec');
-  console.log('  charter, or npm exec --no -- @stackbilt/cli, none of which installs a package.');
-  console.log('  Re-run this command to upgrade an older hook.');
+  console.log('  with the package manager below, and its doctor leaves vendor bloat to that scoped check.');
+  console.log('  Package manager: the first match of (1) Yarn Plug\'n\'Play (.pnp.cjs, .pnp.js, or .yarnrc.yml nodeLinker: pnp)');
+  console.log('  with yarn on PATH, (2) pnpm-lock.yaml with pnpm, (3) yarn.lock with yarn, (4) npm.');
+  console.log(`  Charter then runs as: ${HOOK_CLI_COMMANDS.yarn} (${HOOK_CLI_COMMANDS.yarn1} on Yarn 1),`);
+  console.log(`  ${HOOK_CLI_COMMANDS.pnpm}, or ${HOOK_CLI_COMMANDS.npm}`);
+  console.log(`  (npm, with node_modules/.bin/charter; else a global ${HOOK_CLI_COMMANDS.global} on PATH).`);
+  console.log('  The hook never installs Charter. Re-run this command to upgrade an older hook.');
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
   console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');

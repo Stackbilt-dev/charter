@@ -7,6 +7,7 @@ import {
   HOOK_SCOPED_DOCTOR_ENV,
   HOOK_SCOPED_DOCTOR_FILE,
   HOOK_CLI,
+  HOOK_CLI_PROBE_BLOCK,
   HOOK_CLI_RESOLVE_BLOCK,
   HOOK_TIDY_BLOCK_TEMPLATE,
   hookCommand,
@@ -307,7 +308,7 @@ fi
 `;
     // A pre-#366 hook: no CLI resolution block, every call a bare `npx charter`.
     const toPre366 = (hook: string): string => hook
-      .replace(`${HOOK_CLI_RESOLVE_BLOCK}\n`, '')
+      .replace(`${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI_PROBE_BLOCK}\n`, '')
       .split(HOOK_CLI).join('npx charter')
       .split('$CHARTER_RUN').join('npx charter');
     const HOOK_360 = toPre366(PRE_COMMIT_HOOK_CONTENT.slice(0, PRE_COMMIT_HOOK_CONTENT.indexOf('# ADF evidence gate'))) + GATE_360;

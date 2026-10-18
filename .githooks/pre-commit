@@ -36,7 +36,8 @@ if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
 
   if [ -n "$SOURCES" ]; then
     echo "[pre-commit] Checking staged vendor files:$NAMES"
-    PLAN=$(node packages/cli/dist/bin.js adf tidy --dry-run --print-paths $SOURCES 2>/dev/null) || { echo "[pre-commit] adf tidy --dry-run failed; skipping auto-tidy."; PLAN=""; }
+    PLAN_OK=1
+    PLAN=$(node packages/cli/dist/bin.js adf tidy --dry-run --print-paths $SOURCES 2>/dev/null) || { echo "[pre-commit] adf tidy --dry-run failed; skipping auto-tidy."; PLAN=""; PLAN_OK=0; }
     if printf '%s\n' "$PLAN" | grep -E '^(vendor|module) ' >/dev/null; then
       BLOCKED=""
       IGNORED=""
@@ -82,7 +83,8 @@ if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
         fi
         echo "[pre-commit] Vendor files tidied; re-staged only the planned files tidy wrote."
       fi
-    else
+    elif [ "$PLAN_OK" = "1" ]; then
+      # A failed dry run has said so above; it proves nothing about the files.
       echo "[pre-commit] Vendor config files are clean."
     fi
   fi
