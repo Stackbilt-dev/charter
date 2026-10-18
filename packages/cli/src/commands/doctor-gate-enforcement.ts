@@ -1,7 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { runGit } from '../git-helpers';
-import { PRE_COMMIT_GATE_SCOPE_MARKER, PRE_COMMIT_HOOK_MARKER, PRE_COMMIT_PM_CLI_MARKER, PRE_COMMIT_SCOPE_MARKER, PRE_COMMIT_VERIFY_SCOPE_MARKER } from './hook';
+import {
+  PNP_MARKER_FILES,
+  PRE_COMMIT_GATE_SCOPE_MARKER,
+  PRE_COMMIT_HOOK_MARKER,
+  PRE_COMMIT_PM_CLI_MARKER,
+  PRE_COMMIT_SCOPE_MARKER,
+  PRE_COMMIT_VERIFY_SCOPE_MARKER,
+  yarnrcPnpLinkerRegExp,
+} from './hook';
 
 interface GateEnforcementCheck {
   name: 'gate enforcement';
@@ -87,13 +95,14 @@ export function checkPreCommitScope(): PreCommitScopeCheck | undefined {
 }
 
 /**
- * The hook's own PnP test (#366): .pnp.cjs or .pnp.js at the repo root, or a
- * .yarnrc.yml whose nodeLinker is pnp. Same regex as HOOK_CLI_RESOLVE_BLOCK.
+ * The hook's own PnP test (#366), from the same source the hook text is built
+ * from: a PNP_MARKER_FILES file at the repo root, or a .yarnrc.yml matching
+ * YARNRC_PNP_LINKER_ERE (via yarnrcPnpLinkerRegExp).
  */
 function repoUsesYarnPnp(): boolean {
   const repoRoot = getGitPath(['rev-parse', '--show-toplevel']) || process.cwd();
-  if (fs.existsSync(path.join(repoRoot, '.pnp.cjs')) || fs.existsSync(path.join(repoRoot, '.pnp.js'))) return true;
-  return /^[ \t]*nodeLinker:[ \t]*["']?pnp(["' \t#]|$)/m.test(readText(path.join(repoRoot, '.yarnrc.yml')));
+  if (PNP_MARKER_FILES.some(f => fs.existsSync(path.join(repoRoot, f)))) return true;
+  return yarnrcPnpLinkerRegExp().test(readText(path.join(repoRoot, '.yarnrc.yml')));
 }
 
 /** The hook's own test: package.json at the repo root mentions "verify:adf". */
