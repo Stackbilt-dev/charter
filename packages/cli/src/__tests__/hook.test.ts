@@ -391,7 +391,7 @@ fi
       expect(HOOK_365).not.toContain(PRE_COMMIT_PM_CLI_MARKER);
       expect(HOOK_365).not.toContain(HOOK_CLI);
       expect(HOOK_365).toContain('  npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {');
-      expect(HOOK_365).toContain('PLAN=$(npx charter adf tidy --dry-run --print-paths $SOURCES 2>/dev/null)');
+      expect(HOOK_365).toContain('PLAN=$(npx charter adf tidy --dry-run --print-paths $SOURCES 2>&1)');
     });
 
     it.each([

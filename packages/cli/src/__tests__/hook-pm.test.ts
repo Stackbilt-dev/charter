@@ -66,7 +66,11 @@ esac
 if [ "$is_charter" = "1" ]; then
   if [ "\${STUB_UNRESOLVED:-0}" = "1" ]; then echo "${name}: charter: command not found" >&2; exit 127; fi
   case " $* " in
-    *" --version "*) echo "\${STUB_CHARTER_VERSION:-charter v2.1.0}"; exit 0 ;;
+    *" --version "*)
+      if [ "\${STUB_VERSION_FAIL:-0}" = "1" ]; then echo "Error: Cannot find module 'commander'" >&2; exit 1; fi
+      echo "\${STUB_CHARTER_VERSION:-charter v2.1.0}"; exit 0 ;;
+    *" --dry-run "*)
+      if [ -n "\${STUB_TIDY_NOTE:-}" ]; then echo "\${STUB_TIDY_NOTE}" >&2; fi ;;
   esac
 fi
 if [ -n "\${STUB_FAIL_ON:-}" ]; then
@@ -106,6 +110,12 @@ interface Fixture {
   charterVersion?: string;
   failOn?: string;
   unresolved?: boolean;
+  /** --version exits 1 with an error on stderr (an installed but broken CLI). */
+  versionFails?: boolean;
+  /** A line the tidy dry run writes to stderr. */
+  tidyNote?: string;
+  /** Write node_modules/.bin/charter (a local install). Default true. */
+  localBin?: boolean;
   /** Use a PATH with every real package manager and charter removed, so only the stubs exist. */
   isolatePath?: boolean;
   /** Hook text to run instead of PRE_COMMIT_HOOK_CONTENT (mutation checks). */
@@ -156,7 +166,8 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
 
   function runHook(fx: Fixture): HookRun {
     fs.writeFileSync(path.join(dir, 'hook.sh'), fx.hook ?? PRE_COMMIT_HOOK_CONTENT);
-    for (const [name, content] of Object.entries(fx.files ?? {})) {
+    const files = { ...(fx.localBin === false ? {} : LOCAL_BIN), ...(fx.files ?? {}) };
+    for (const [name, content] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
       fs.writeFileSync(path.join(dir, name), content);
     }
@@ -173,6 +184,8 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
       STUB_YARN_VERSION: fx.yarnVersion ?? '4.5.0',
       STUB_CHARTER_VERSION: fx.charterVersion ?? 'charter v2.1.0',
       STUB_FAIL_ON: fx.failOn ?? '',
+      STUB_VERSION_FAIL: fx.versionFails ? '1' : '0',
+      STUB_TIDY_NOTE: fx.tidyNote ?? '',
       STUB_UNRESOLVED: fx.unresolved ? '1' : '0',
     };
     delete env.CHARTER_HOOK_SCOPED_DOCTOR;
@@ -253,7 +266,7 @@ describe.skipIf(!shAvailable)('pre-commit hook resolves Charter through the pack
       ['no lockfile', LOCAL_BIN],
       ['charter.cmd only (Windows install)', { 'node_modules/.bin/charter.cmd': '@echo off\r\n' }],
     ])('npm with a local install (%s): npm exec @stackbilt/cli, never the bare name charter', (_label, files) => {
-      const run = runHook({ files });
+      const run = runHook({ files, localBin: 'node_modules/.bin/charter' in files });
       expect(run.status).toBe(0);
       expect(run.calls).toEqual(expectedCalls(NPM));
     });
@@ -322,20 +335,58 @@ elif [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
       const run = runHook({ files, unresolved: true });
       expect(run.status).toBe(1);
       expect(withoutYarnVersion(run.calls)).toEqual([`${logged(command)} [--version]`]);
-      expect(run.stderr).toContain(`[pre-commit] Charter could not be run with: ${command}`);
+      expect(run.stderr).toContain(`[pre-commit] Charter could not be found (tried: ${command}).`);
       expect(run.stderr.split('Add @stackbilt/cli as a devDependency').length - 1).toBe(1);
       expect(run.stdout).not.toContain('Checking staged vendor files');
       expect(run.stdout).toContain('[pre-commit] ADF verification FAILED.');
-      expect(run.stdout).toContain('Charter was not run: it could not be found');
+      expect(run.stdout).toContain('  Charter was not run (see the note above).');
+      expect(run.stdout).not.toContain('Run:');
     });
 
     it('a 1.x CLI: one upgrade warning naming 2.x; the hook still runs it', () => {
       const run = runHook({ files: { 'pnpm-lock.yaml': '' }, charterVersion: 'charter v1.9.3' });
       expect(run.status).toBe(0);
-      expect(run.stderr).toContain(`[pre-commit] Warning: ${HOOK_CLI_COMMANDS.pnpm} --version reports charter v1.9.3; this hook needs @stackbilt/cli 2.x`);
-      expect(run.stderr).toContain('Install or upgrade the devDependency: @stackbilt/cli@^2.');
+      expect(run.stderr).toContain(`[pre-commit] Warning: ${HOOK_CLI_COMMANDS.pnpm} --version reports charter v1.9.3; this hook needs 2.x`);
+      expect(run.stderr).toContain('Upgrade @stackbilt/cli to 2.x (as a devDependency, or your global install).');
       expect(run.stderr.split('Warning:').length - 1).toBe(1);
       expect(run.calls).toEqual(expectedCalls(PNPM));
+    });
+
+    it('an installed CLI whose --version fails: "installed but failed to run" with its error, no devDependency hint', () => {
+      const run = runHook({ files: { 'pnpm-lock.yaml': '' }, versionFails: true });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("[pre-commit] Charter is installed but failed to run: Error: Cannot find module 'commander'");
+      expect(run.stdout + run.stderr).not.toContain('devDependency');
+      expect(run.calls).toEqual([`${PNPM} [--version]`]);
+      expect(run.stdout).toContain(`  Run: ${HOOK_CLI_COMMANDS.pnpm} doctor --adf-only --ci --staged --format text`);
+      expect(run.stdout).toContain('  Charter was not run: it failed to start (see the note above).');
+    });
+
+    it('a charter whose --version is not charter v<digit>: warns it is not @stackbilt/cli and runs nothing else', () => {
+      const run = runHook({ files: LOCAL_BIN, charterVersion: 'Usage: charter <contract>' });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(`[pre-commit] Warning: the charter this hook found (${HOOK_CLI_COMMANDS.npm}) is not @stackbilt/cli: its --version printed: Usage: charter <contract>`);
+      expect(run.calls).toEqual([`${NPM} [--version]`]);
+      expect(run.stdout).not.toContain('Run:');
+    });
+
+    it.each([['charter v10.0.0'], ['charter v2.1.0'], ['charter v3.0.0-beta.1']])('%s is not flagged as 1.x or foreign', (version) => {
+      const run = runHook({ files: LOCAL_BIN, charterVersion: version });
+      expect(run.status).toBe(0);
+      expect(run.stderr).toBe('');
+      expect(run.calls).toEqual(expectedCalls(NPM));
+    });
+
+    it.each([['charter v0.9.0'], ['charter v1.0.0']])('%s is flagged as 1.x', (version) => {
+      const run = runHook({ files: LOCAL_BIN, charterVersion: version });
+      expect(run.stderr).toContain(`--version reports ${version}; this hook needs 2.x`);
+    });
+
+    it('tidy that leaves a staged file alone (say, unmanaged) shows its note and does not claim the files are clean', () => {
+      const note = '  ⚠ CLAUDE.md is not managed by Charter; tidy leaves it as is.';
+      const run = runHook({ files: LOCAL_BIN, tidyNote: note });
+      expect(run.stdout).toContain(`[pre-commit] adf tidy notes:\n${note}`);
+      expect(run.stdout).not.toContain('Vendor config files are clean');
     });
 
     it('a failed tidy dry run does not claim the vendor files are clean', () => {
@@ -352,17 +403,51 @@ elif [ -f "pnpm-lock.yaml" ] && command -v pnpm >/dev/null 2>&1; then
 
   describe('npm without a local install, and missing binaries', () => {
     it.skipIf(!isolatedOk)('no local install, no global charter: no Charter call at all, the hint once, the gate fails', () => {
-      const run = runHook({ stubs: ['npm', 'npx'], isolatePath: true });
+      const run = runHook({ stubs: ['npm', 'npx'], isolatePath: true, localBin: false });
       expect(run.status).toBe(1);
       expect(run.calls).toEqual([]);
-      expect(run.stderr).toContain(`[pre-commit] Charter could not be run with: ${HOOK_CLI_COMMANDS.npm}`);
+      expect(run.stderr).toContain(`[pre-commit] Charter could not be found (tried: ${HOOK_CLI_COMMANDS.npm}).`);
+      expect(run.stdout).not.toContain('Run:');
       expect(run.stderr.split('Add @stackbilt/cli as a devDependency').length - 1).toBe(1);
     });
 
     it.skipIf(!isolatedOk)('no local install, a global charter on PATH: runs it directly, never npm exec', () => {
-      const run = runHook({ stubs: ['npm', 'charter'], isolatePath: true });
+      const run = runHook({ stubs: ['npm', 'charter'], isolatePath: true, localBin: false });
       expect(run.status).toBe(0);
       expect(run.calls).toEqual(expectedCalls(GLOBAL));
+    });
+
+    it.skipIf(!isolatedOk)('Yarn (not PnP) without a local install: a global charter on PATH, run directly', () => {
+      const run = runHook({ files: { 'yarn.lock': '' }, stubs: ['yarn', 'npm', 'charter'], isolatePath: true, localBin: false });
+      expect(run.status).toBe(0);
+      expect(run.calls).toEqual(expectedCalls(GLOBAL));
+    });
+
+    it.skipIf(!isolatedOk)('Yarn (not PnP) with neither a local nor a global install: no Charter call, the hint once', () => {
+      const run = runHook({ files: { 'yarn.lock': '' }, stubs: ['yarn', 'npm'], isolatePath: true, localBin: false });
+      expect(run.status).toBe(1);
+      expect(run.calls).toEqual([]);
+      expect(run.stderr).toContain(`[pre-commit] Charter could not be found (tried: ${HOOK_CLI_COMMANDS.yarn}).`);
+      expect(run.stderr.split('Add @stackbilt/cli as a devDependency').length - 1).toBe(1);
+    });
+
+    it.skipIf(!isolatedOk)('Yarn PnP: always yarn charter, even with a global charter and no node_modules', () => {
+      const run = runHook({ files: { '.pnp.cjs': '' }, stubs: ['yarn', 'npm', 'charter'], isolatePath: true, localBin: false });
+      expect(run.status).toBe(0);
+      expect(withoutYarnVersion(run.calls)).toEqual(expectedCalls(YARN));
+    });
+
+    it.skipIf(!isolatedOk)('pnpm with only a global charter: pnpm exec charter (it searches PATH too)', () => {
+      const run = runHook({ files: { 'pnpm-lock.yaml': '' }, stubs: ['pnpm', 'npm', 'charter'], isolatePath: true, localBin: false });
+      expect(run.status).toBe(0);
+      expect(run.calls).toEqual(expectedCalls(PNPM));
+    });
+
+    it.skipIf(!isolatedOk)('pnpm with neither a local nor a global install: no Charter call, the hint once', () => {
+      const run = runHook({ files: { 'pnpm-lock.yaml': '' }, stubs: ['pnpm', 'npm'], isolatePath: true, localBin: false });
+      expect(run.status).toBe(1);
+      expect(run.calls).toEqual([]);
+      expect(run.stderr).toContain(`[pre-commit] Charter could not be found (tried: ${HOOK_CLI_COMMANDS.pnpm}).`);
     });
 
     it.skipIf(!isolatedOk)('Yarn PnP without yarn: warns (with the corepack fix) and falls back to npm', () => {
