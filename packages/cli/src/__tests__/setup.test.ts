@@ -2,7 +2,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { detectStack, getGithubWorkflow, loadPackageContexts, syncPackageManifest } from '../commands/setup';
+import { detectStack, getGithubWorkflow, loadPackageContexts, syncPackageManifest, workflowCharterCommand } from '../commands/setup';
+import { checkGateEnforcement } from '../commands/doctor-gate-enforcement';
 import { StackPresetSchema, VALID_PRESETS } from '../commands/setup.contract';
 
 const originalCwd = process.cwd();
@@ -117,9 +118,33 @@ describe('syncPackageManifest', () => {
   it('github workflow template enforces ADF routing checks', () => {
     const workflow = getGithubWorkflow('pnpm');
     expect(workflow).toContain('ADF Wiring & Pointer Integrity');
-    expect(workflow).toContain('npx charter doctor --adf-only --ci --format text');
+    expect(workflow).toContain('pnpm exec charter doctor --adf-only --ci --format text');
     expect(workflow).toContain('ADF Evidence');
-    expect(workflow).toContain('npx charter adf evidence --auto-measure --ci --format text');
+    expect(workflow).toContain('pnpm exec charter adf evidence --auto-measure --ci --format text');
+  });
+
+  it('github workflow runs Charter through the package manager, never a bare npx charter (#380)', () => {
+    expect(workflowCharterCommand('pnpm')).toBe('pnpm exec charter');
+    expect(workflowCharterCommand('npm')).toBe('npm exec --no --package=@stackbilt/cli -- charter');
+    for (const pm of ['npm', 'pnpm'] as const) {
+      const workflow = getGithubWorkflow(pm);
+      expect(workflow).not.toContain('npx');
+      const runs = workflow.split('\n').filter(l => /^\s+run: /.test(l) && /\bcharter\b/.test(l)).map(l => l.trim());
+      expect(runs).toHaveLength(6);
+      for (const run of runs) expect(run.startsWith(`run: ${workflowCharterCommand(pm)} `)).toBe(true);
+    }
+  });
+
+  it('doctor recognizes the generated workflow as the CI validate gate for npm and pnpm (#380)', () => {
+    for (const pm of ['npm', 'pnpm'] as const) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-setup-gate-'));
+      tempDirs.push(dir);
+      fs.mkdirSync(path.join(dir, '.github', 'workflows'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.github', 'workflows', 'charter-governance.yml'), getGithubWorkflow(pm));
+      process.chdir(dir);
+      expect(checkGateEnforcement()).toMatchObject({ status: 'PASS' });
+      process.chdir(originalCwd);
+    }
   });
 
   it('github workflow template refreshes the score badge on push', () => {
@@ -127,7 +152,7 @@ describe('syncPackageManifest', () => {
     expect(workflow).toContain('push:');
     expect(workflow).toContain('contents: write');
     expect(workflow).toContain('Refresh Score Badge');
-    expect(workflow).toContain('npx charter score --badge --write');
+    expect(workflow).toContain('pnpm exec charter score --badge --write');
     expect(workflow).toContain('Commit Score Badge');
     expect(workflow).toContain('git status --porcelain -- .charter/badge.json');
     expect(workflow).toContain('Governed-By: charter-score-badge');

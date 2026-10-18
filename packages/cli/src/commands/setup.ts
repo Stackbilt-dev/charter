@@ -18,7 +18,20 @@ import packageJson from '../../package.json';
 
 const CLI_VERSION = packageJson.version;
 
+/**
+ * How the generated workflow runs Charter (#380): through the repo's package
+ * manager, from the @stackbilt/cli the install step put in node_modules. A bare
+ * `npx charter` names the unrelated `charter` registry package, which npx
+ * fetches when the CLI is not installed. Neither form fetches anything: with no
+ * local @stackbilt/cli the step fails. The npm form keeps `charter validate` in
+ * the step, which doctor's CI-gate check looks for.
+ */
+export function workflowCharterCommand(packageManager: 'npm' | 'pnpm'): string {
+  return packageManager === 'pnpm' ? 'pnpm exec charter' : 'npm exec --no --package=@stackbilt/cli -- charter';
+}
+
 export function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
+  const cli = workflowCharterCommand(packageManager);
   const installStep = packageManager === 'pnpm'
     ? `      - uses: pnpm/action-setup@v4
         with:
@@ -69,25 +82,25 @@ jobs:
 ${installStep}
 
       - name: Validate Commits
-        run: npx charter validate --ci --format text
+        run: ${cli} validate --ci --format text
 
       - name: Drift Scan
-        run: npx charter drift --ci --format text
+        run: ${cli} drift --ci --format text
 
       - name: ADF Wiring & Pointer Integrity
-        run: npx charter doctor --adf-only --ci --format text
+        run: ${cli} doctor --adf-only --ci --format text
         if: hashFiles('.ai/manifest.adf') != ''
 
       - name: ADF Evidence
-        run: npx charter adf evidence --auto-measure --ci --format text
+        run: ${cli} adf evidence --auto-measure --ci --format text
         if: hashFiles('.ai/manifest.adf') != ''
 
       - name: Audit Report
-        run: npx charter audit --format json > /tmp/audit.json
+        run: ${cli} audit --format json > /tmp/audit.json
         if: always()
 
       - name: Refresh Score Badge
-        run: npx charter score --badge --write
+        run: ${cli} score --badge --write
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
       - name: Commit Score Badge
