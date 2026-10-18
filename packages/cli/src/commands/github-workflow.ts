@@ -104,7 +104,16 @@ interface Kept {
   changes?: string;
   /** What the current template grants (static text). */
   templatePermissions: string;
+  /** For an older Charter template: the package-manager switch an upgrade also makes. */
+  packageManagerChange?: PackageManagerChange;
 }
+
+function packageManagerChangeFor(from: 'npm' | 'pnpm', to: 'npm' | 'pnpm'): PackageManagerChange | undefined {
+  if (from === to) return undefined;
+  return { from, to, detail: to === 'pnpm' ? 'adds pnpm/action-setup@v4' : 'removes pnpm/action-setup@v4' };
+}
+
+const describeSwitch = (c: PackageManagerChange): string => `package manager ${c.from} → ${c.to} (${c.detail})`;
 
 export type WorkflowOutcome =
   | { action: 'created' }
@@ -170,19 +179,21 @@ export function applyGovernanceWorkflow(
   const known = knownCharterWorkflow(current, options.known);
   if (known?.safe) {
     fs.writeFileSync(absolute, content);
-    if (known.packageManager === options.packageManager) return { action: 'updated' };
-    const detail = options.packageManager === 'pnpm' ? 'adds pnpm/action-setup@v4' : 'removes pnpm/action-setup@v4';
-    return { action: 'updated', packageManagerChange: { from: known.packageManager, to: options.packageManager, detail } };
+    const change = packageManagerChangeFor(known.packageManager, options.packageManager);
+    return change ? { action: 'updated', packageManagerChange: change } : { action: 'updated' };
   }
 
+  // An older template's upgrade can also switch package manager; say so (#374).
+  const switchPm = known ? packageManagerChangeFor(known.packageManager, options.packageManager) : undefined;
+  const changes = known ? `${known.refreshChanges}${switchPm ? `; ${describeSwitch(switchPm)}` : ''}` : '';
   const kept: Kept = known
-    ? { reason: 'would-widen-permissions', changes: known.refreshChanges, templatePermissions: TEMPLATE_PERMISSIONS }
+    ? { reason: 'would-widen-permissions', changes: known.refreshChanges, templatePermissions: TEMPLATE_PERMISSIONS, ...(switchPm ? { packageManagerChange: switchPm } : {}) }
     : { reason: 'hand-edited', templatePermissions: TEMPLATE_PERMISSIONS };
   const backupLabel = `${dirLabel(options.configDir)}.backup/`;
 
   if (!options.force) {
     const why = known
-      ? `it is an older Charter template, and refreshing it to the current one changes what CI may do: ${known.refreshChanges}. ` +
+      ? `it is an older Charter template, and refreshing it to the current one changes what CI may do: ${changes}. ` +
         `It was not overwritten. ${forceHint(options.command, backupLabel, 'upgrades it')}`
       : 'it differs from every workflow Charter generated (edited by hand?), so it was not overwritten. ' +
         `${capitalize(TEMPLATE_PERMISSIONS)}; review it before using --force. ` +
@@ -206,6 +217,6 @@ export function applyGovernanceWorkflow(
   let warning: string | undefined;
   tryEnsureBackupGitignore(options.configDir, w => { warning = w; });
   fs.writeFileSync(absolute, content);
-  const note = known ? `changes: ${known.refreshChanges}` : TEMPLATE_PERMISSIONS;
+  const note = known ? `changes: ${changes}` : TEMPLATE_PERMISSIONS;
   return { action: 'replaced', ...kept, backup, note, ...(warning ? { warning } : {}) };
 }

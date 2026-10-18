@@ -207,6 +207,11 @@ describe('#374 known workflow versions', () => {
       // The static description is true of every historical template.
       expect(h.text).toContain('permissions:\n  contents: read\n');
       expect(h.text).not.toContain('git push');
+      // ...and its triggers are pull_request only: no push, no workflow_dispatch.
+      const on = /\non:\n((?: {2}.*\n|\n)*?)\S/.exec(h.text)?.[1] ?? '';
+      expect(on).toContain('pull_request:');
+      expect(on).not.toMatch(/^ {2}push:/m);
+      expect(on).not.toContain('workflow_dispatch');
     }
   });
 
@@ -471,7 +476,7 @@ describe('#374 setup --ci github: the workflow', () => {
       if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');
       expect(await setupCommand(YES, SETUP)).toBe(0);
       expect(read(WF)).toBe(h.text);
-      expect(out).toContain(`  CI policy gate: kept (refreshing it would widen CI permissions) (${P(WF)})`);
+      expect(out).toContain(`  CI policy gate: kept (older Charter template; upgrading it changes CI permissions, see warning) (${P(WF)})`);
       const warning = out.find(l => l.startsWith(`  Warning: Kept ${WF}: it is an older Charter template`));
       expect(warning).toContain(`changes what CI may do: ${PRE_BADGE}. It was not overwritten.`);
       expect(warning).toContain("'charter setup --ci github --force' upgrades it");
@@ -546,6 +551,71 @@ describe('#374 setup --ci github: the workflow', () => {
     ]));
     expect(result.workflow).toMatchObject({ notReplaced: true, updated: false });
     expect(result.workflow.kept).toBeUndefined();
+  });
+});
+
+describe('#374 an upgrade that also switches package manager', () => {
+  const SWITCH = 'package manager npm → pnpm (adds pnpm/action-setup@v4)';
+
+  it('the kept warning and JSON name the switch', async () => {
+    write(WF, PINNED_HISTORICAL);
+    write('pnpm-lock.yaml', '');
+    expect(await bootstrapCommand({ ...JSON_OPTS, yes: true }, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
+    const step = setupStep();
+    expect(step.details.workflow).toMatchObject({
+      action: 'kept', reason: 'would-widen-permissions', packageManagerChange: { from: 'npm', to: 'pnpm', detail: 'adds pnpm/action-setup@v4' },
+    });
+    expect(step.warnings.some((w: string) => w.includes(`changes what CI may do: ${PRE_BADGE}; ${SWITCH}. It was not overwritten.`))).toBe(true);
+  });
+
+  it('bootstrap --force: the Replaced line names the switch', async () => {
+    write(WF, PINNED_HISTORICAL);
+    write('pnpm-lock.yaml', '');
+    expect(await bootstrapCommand(TEXT, ['--force', '--ci', 'github', ...BOOT])).toBe(0);
+    expect(read(WF)).toBe(getGithubWorkflow('pnpm'));
+    const files = backups('github-workflows-charter-governance.yml.');
+    expect(out).toContain(`  Replaced ${WF} (backup: .charter/.backup/${files[0]}; changes: ${PRE_BADGE}; ${SWITCH})`);
+  });
+
+  it('setup --force JSON records packageManagerChange', async () => {
+    write(WF, PINNED_HISTORICAL);
+    write('pnpm-lock.yaml', '');
+    expect(await setupCommand(JSON_OPTS, [...SETUP, '--force'])).toBe(0);
+    const result = JSON.parse(out.join('\n'));
+    expect(result.workflow).toMatchObject({ updated: true, packageManagerChange: { from: 'npm', to: 'pnpm' } });
+  });
+});
+
+describe('#374 bootstrap summary and failure banner', () => {
+  it('a failed backup: the banner names the cause and the fix', async () => {
+    write(WF, HAND_EDITED);
+    write('.charter/.backup', 'a file where the backup directory should be\n');
+    expect(await bootstrapCommand(TEXT, ['--force', '--ci', 'github', ...BOOT])).toBe(1);
+    expect(out).toContain(`   • setup: .charter/.backup not writable: ${WF} not replaced`);
+    expect(out).toContain('   1. Make .charter/.backup a writable directory (fix its permissions, or move aside a file of that name), then re-run charter bootstrap --force');
+  });
+
+  it('a failed doctor step that exits 0 keeps "Bootstrap complete."', async () => {
+    // A kept, empty blessed stack makes doctor's "Patterns loaded" check WARN.
+    write('.charter/patterns/blessed-stack.json', '{ "patterns": [] }\n');
+    const code = await bootstrapCommand(YES, ['--yes', '--preset', 'worker', '--skip-install']);
+    const doctorFailed = out.some(l => /^ {3}• doctor/.test(l));
+    expect(doctorFailed).toBe(true);
+    expect(code).toBe(0);
+    expect(out.some(l => l.startsWith('Bootstrap complete.'))).toBe(true);
+    expect(out.some(l => l.startsWith('Bootstrap finished with failures.'))).toBe(false);
+  });
+});
+
+describe('#374 .mcp.json: adding the entry under --force with a failed backup', () => {
+  it('stays a warning with exit 0 and leaves the file untouched', async () => {
+    const original = '{ "mcpServers": { "github": { "command": "npx" } } }\n';
+    write('.mcp.json', original);
+    write('.charter/.backup', 'a file where the backup directory should be\n');
+    expect(await bootstrapCommand(TEXT, ['--force', ...BOOT])).toBe(0);
+    expect(read('.mcp.json')).toBe(original);
+    expect(out.some(l => l.includes('mcpServers.charter was not added'))).toBe(true);
+    expect(out.some(l => l.startsWith('  Not replaced .mcp.json'))).toBe(false);
   });
 });
 

@@ -124,7 +124,7 @@ export interface SetupResult {
     kept?: boolean;
     /** --force did not replace it because the backup failed; setup exits 1 (#374). */
     notReplaced?: boolean;
-    /** Why it was kept or replaced: hand-edited, or an older template whose refresh would widen CI permissions (#374). */
+    /** Why it was kept or replaced: hand-edited, or an older Charter template whose upgrade changes CI permissions, as its static description says (#374). */
     reason?: WorkflowKeepReason;
     /** For an older Charter template: what refreshing it changes (static text, #374). */
     changes?: string;
@@ -390,7 +390,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
       ...('reason' in workflow ? { reason: workflow.reason } : {}),
       ...('changes' in workflow && workflow.changes ? { changes: workflow.changes } : {}),
       ...('templatePermissions' in workflow ? { templatePermissions: workflow.templatePermissions } : {}),
-      ...(workflow.action === 'updated' && workflow.packageManagerChange ? { packageManagerChange: workflow.packageManagerChange } : {}),
+      ...('packageManagerChange' in workflow && workflow.packageManagerChange ? { packageManagerChange: workflow.packageManagerChange } : {}),
       ...(workflow.action === 'replaced' ? { backup: workflow.backup } : {}),
       ...('warning' in workflow && workflow.warning ? { warning: workflow.warning } : {}),
     };
@@ -448,7 +448,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
             ? 'not replaced (backup failed)'
             : result.workflow.kept
               ? result.workflow.reason === 'would-widen-permissions'
-                ? 'kept (refreshing it would widen CI permissions)'
+                ? 'kept (older Charter template; upgrading it changes CI permissions, see warning)'
                 : 'kept (not the Charter template)'
               : 'already present';
     console.log(`  CI policy gate: ${workflowState} (${result.workflow.path})`);
@@ -1052,7 +1052,7 @@ function hashFileIfExists(targetPath: string): string | null {
   return createHash('sha256').update(content).digest('hex');
 }
 
-/** What applyGovernanceWorkflow will do: a hand-edited or widening file is updated only under --force (#374). */
+/** What applyGovernanceWorkflow will do: only the current template (either package manager) is refreshed without --force; an older Charter template or a hand-edited file only under --force (#374). */
 function planManagedFile(targetPath: string, content: string, force: boolean): { action: 'create' | 'update' | 'noop' } {
   const absolute = path.resolve(targetPath);
   const exists = fs.existsSync(absolute);

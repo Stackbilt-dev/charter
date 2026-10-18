@@ -578,14 +578,25 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
     });
   }
 
+  // --reset-adf --yes that could not replace any file it had to (every backup failed) exits 1 (#354).
+  const resetNone = scaffoldMode === 'reset'
+    && ((adfResult.step.details.notReset as unknown[] | undefined)?.length ?? 0) > 0
+    && ((adfResult.step.details.replaced as unknown[] | undefined)?.length ?? 0) === 0;
+  // --force that could not replace the workflow or mcpServers.charter because the
+  // backup failed exits 1, as an all-failed --reset-adf and `charter init --force` do (#374).
+  const setupNotReplaced = (setupResult.step.details.notReplaced as Array<{ file: string }> | undefined) ?? [];
+  const exitCode = resetNone || setupNotReplaced.length > 0 ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+  const backupDirLabel = `${dirLabel(options.configPath)}.backup`;
+
   if (options.format === 'json') {
     (result as unknown as Record<string, unknown>).governanceGaps = gaps;
     console.log(JSON.stringify(result, null, 2));
   } else {
-    // A failed step (e.g. a file --force could not replace, #374) is not "complete":
-    // the partial/failure banner below names it.
+    // A run that exits 1 (a file --force could not replace, #374) is not "complete".
+    // A failed step that still exits 0 (e.g. doctor WARN checks) keeps the old line;
+    // the partial/failure banner below names it either way.
     const plural = `${warnings} warning${warnings === 1 ? '' : 's'}`;
-    console.log(result.status === 'success' ? `Bootstrap complete. ${plural}.` : `Bootstrap finished with failures. ${plural}.`);
+    console.log(exitCode === EXIT_CODE.SUCCESS ? `Bootstrap complete. ${plural}.` : `Bootstrap finished with failures. ${plural}.`);
 
     if (gaps.length > 0) {
       console.log('');
@@ -612,7 +623,11 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
         const errDetail = rawErr ? ` (${rawErr})` : '';
         const hintLine = s.warnings.find(w => w.startsWith('Hint:'));
         const hint = hintLine ? ` — ${hintLine}` : '';
-        console.log(`   • ${s.name}${errDetail}${hint}`);
+        // #374: a setup step failed by a backup names the files it could not replace.
+        const backupDetail = s.name === 'setup' && setupNotReplaced.length > 0
+          ? `: ${backupDirLabel} not writable: ${setupNotReplaced.map(n => n.file).join(', ')} not replaced`
+          : '';
+        console.log(`   • ${s.name}${backupDetail}${errDetail}${hint}`);
       }
       console.log('');
       console.log('Next steps to complete setup:');
@@ -630,20 +645,16 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
         if (inGitRepo) {
           console.log(`   ${n++}. charter hook install --pre-commit`);
         }
+      } else if (setupNotReplaced.length > 0) {
+        console.log(`   ${n++}. Make ${backupDirLabel} a writable directory (fix its permissions, or move aside a file of that name), then re-run charter bootstrap --force`);
+        console.log(`   ${n++}. charter doctor`);
       } else {
         console.log(`   ${n++}. charter doctor`);
       }
     }
   }
 
-  // --reset-adf --yes that could not replace any file it had to (every backup failed) exits 1 (#354).
-  const resetNone = scaffoldMode === 'reset'
-    && ((adfResult.step.details.notReset as unknown[] | undefined)?.length ?? 0) > 0
-    && ((adfResult.step.details.replaced as unknown[] | undefined)?.length ?? 0) === 0;
-  // --force that could not replace the workflow or mcpServers.charter because the
-  // backup failed exits 1, as an all-failed --reset-adf and `charter init --force` do (#374).
-  const workflowNotReplaced = ((setupResult.step.details.notReplaced as unknown[] | undefined)?.length ?? 0) > 0;
-  return resetNone || workflowNotReplaced ? EXIT_CODE.POLICY_VIOLATION : EXIT_CODE.SUCCESS;
+  return exitCode;
 }
 
 // ============================================================================
@@ -813,7 +824,7 @@ function runSetupPhase(
         ...('changes' in workflow && workflow.changes ? { changes: workflow.changes } : {}),
         ...('templatePermissions' in workflow ? { templatePermissions: workflow.templatePermissions } : {}),
         ...(workflow.action === 'replaced' ? { backup: workflow.backup } : {}),
-        ...(workflow.action === 'updated' && workflow.packageManagerChange ? { packageManagerChange: workflow.packageManagerChange } : {}),
+        ...('packageManagerChange' in workflow && workflow.packageManagerChange ? { packageManagerChange: workflow.packageManagerChange } : {}),
       };
     }
 
