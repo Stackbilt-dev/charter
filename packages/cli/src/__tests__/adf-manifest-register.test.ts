@@ -56,13 +56,13 @@ describe('tokenizeTriggerText', () => {
 
 describe('inferTriggers', () => {
   it('weights the heading keyword above plain heading tokens', () => {
-    const items = [item('Deployment workflow'), item('Release workflow')].map(i => {
+    const items = [item('Deployment checklist'), item('Rollback checklist')].map(i => {
       i.classification.targetModule = 'infra.adf';
       return i;
     });
     const result = inferTriggers('infra.adf', items);
-    // deployment: keyword (2); workflow: 1 + 1; release: 1 — ties break by first appearance.
-    expect(result.triggers).toEqual(['deployment', 'workflow', 'release']);
+    // deployment: keyword (2); checklist: 1 + 1; rollback: 1 — ties break by first appearance.
+    expect(result.triggers).toEqual(['deployment', 'checklist', 'rollback']);
     expect(result.triggerSources).toEqual(['heading-keyword', 'heading-token', 'heading-token']);
   });
 
@@ -78,8 +78,50 @@ describe('inferTriggers', () => {
 
   it('drops tokens that already trigger another ON_DEMAND module', () => {
     const manifest = { onDemand: [{ path: 'frontend.adf', triggers: ['React', 'CSS'], loadPolicy: 'ON_DEMAND' as const }] };
-    const result = inferTriggers('infra.adf', [routedTo('infra.adf', 'Deployment of React apps')], manifest);
-    expect(result.triggers).toEqual(['deployment', 'apps']);
+    const result = inferTriggers('infra.adf', [routedTo('infra.adf', 'Deployment of React services')], manifest);
+    expect(result.triggers).toEqual(['deployment', 'services']);
+  });
+
+  // Headings as they appear in real CLAUDE.md / AGENTS.md files (#349).
+  it.each([
+    ['Build & Test Commands', ['build', 'test']],
+    ['Development Workflow', ['ops']],
+    ['Release Process (v2.1)', ['ops']],
+    ['Step 1: Install Dependencies', ['install', 'dependencies']],
+    ['Images and Components', ['ops']],
+    ['Apps via Turborepo', ['turborepo']],
+    ['Database Migrations', ['database', 'migrations']],
+    ['Code Style Guidelines', ['style']],
+    ['Testing with Vitest', ['testing', 'vitest']],
+    ['Deploying to Cloudflare Workers (2024)', ['deploying', 'cloudflare', 'workers']],
+    ['Things to Avoid', ['ops']],
+    ['Common Commands', ['ops']],
+    ['API Routes & Auth', ['api', 'routes', 'auth']],
+    ['Key Files and Project Structure', ['ops']],
+    ['Node 20 / pnpm 9 Setup', ['node', 'pnpm']],
+    ['Getting Started: Docker Compose', ['docker', 'compose']],
+  ])('heading %j yields %j', (heading, expected) => {
+    expect(inferTriggers('ops.adf', [routedTo('ops.adf', heading)]).triggers).toEqual(expected);
+  });
+
+  it('drops all-digit and version-number tokens', () => {
+    const result = inferTriggers('ops.adf', [routedTo('ops.adf', '2024 roadmap: 1.2 to v3 via kubernetes 1-2')]);
+    expect(result.triggers).toEqual(['roadmap', 'kubernetes']);
+  });
+
+  it("keeps a generic word that is the module's own stem", () => {
+    const items = [routedTo('release.adf', 'Release Process'), routedTo('release.adf', 'Changelog')];
+    expect(inferTriggers('release.adf', items).triggers).toEqual(['release', 'changelog']);
+    expect(inferTriggers('release-workflow.adf', [routedTo('release-workflow.adf', 'Release workflow')]).triggers)
+      .toEqual(['release', 'workflow']);
+    expect(inferTriggers('ops.adf', items.map(i => ({ ...i, classification: { ...i.classification, targetModule: 'ops.adf' } }))).triggers)
+      .toEqual(['changelog']);
+  });
+
+  it('matches its own module and items case-insensitively', () => {
+    const manifest = { onDemand: [{ path: 'infra.adf', triggers: ['docker'], loadPolicy: 'ON_DEMAND' as const }] };
+    const result = inferTriggers('Infra.adf', [routedTo('infra.adf', 'Docker images')], manifest);
+    expect(result.triggers).toEqual(['docker']);
   });
 
   it('caps at MAX_TRIGGERS', () => {
@@ -268,6 +310,30 @@ describe('registerManifestModules', () => {
     const result = registerManifestModules(manifestPath, [plan('infra.adf'), plan('infra.adf', 'Docker')], { onWarning });
     expect(result.registrations).toHaveLength(1);
     expect(parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.filter(m => m.path === 'infra.adf')).toHaveLength(1);
+  });
+
+  it('matches an existing entry case-insensitively and reports its spelling (#349)', () => {
+    fs.writeFileSync(manifestPath, MANIFEST);
+    const before = fs.readFileSync(manifestPath, 'utf-8');
+    const result = registerManifestModules(manifestPath, [plan('Frontend.adf', 'Storybook'), plan('CORE.adf')], { onWarning });
+    expect(result.written).toBe(false);
+    expect(result.registrations.map(r => [r.module, r.status, r.loadPolicy, r.triggers])).toEqual([
+      ['Frontend.adf', 'already-registered', 'ON_DEMAND', ['React', 'CSS', 'UI']],
+      ['CORE.adf', 'already-registered', 'DEFAULT_LOAD', []],
+    ]);
+    expect(result.registrations[0].reason).toContain('already registered as frontend.adf under ON_DEMAND');
+    expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
+  });
+
+  it('adds one entry for two spellings of one module in a single call', () => {
+    fs.writeFileSync(manifestPath, MANIFEST);
+    const result = registerManifestModules(manifestPath, [plan('Infra.adf'), plan('infra.adf', 'Docker')], { onWarning });
+    expect(result.registrations.map(r => [r.module, r.status])).toEqual([['Infra.adf', 'added']]);
+    const paths = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.map(m => m.path);
+    expect(paths).toEqual(['frontend.adf', 'Infra.adf']);
+    const again = registerManifestModules(manifestPath, [plan('infra.adf', 'Docker')], { onWarning });
+    expect(again.registrations[0].status).toBe('already-registered');
+    expect(again.written).toBe(false);
   });
 
   it('registerModules gives orphans the stem trigger', () => {

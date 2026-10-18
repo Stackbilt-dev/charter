@@ -197,6 +197,25 @@ STATE:
     expect(manifest).toContain('persona.adf');
   });
 
+  it('does not report a module registered under another letter case as orphaned (#349)', async () => {
+    fs.mkdirSync('.ai', { recursive: true });
+    fs.writeFileSync(path.join('.ai', 'Infra.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Infra rules\n');
+    fs.writeFileSync(
+      path.join('.ai', 'manifest.adf'),
+      'ADF: 0.1\n\n\u{1F4E6} DEFAULT_LOAD:\n  - core.adf\n  - state.adf\n\n\u{1F4C2} ON_DEMAND:\n  - infra.adf (Triggers on: docker)\n',
+    );
+
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(logs.find(l => l.includes('unregistered .adf module'))?.includes('Infra.adf') ?? false).toBe(false);
+    const manifest = fs.readFileSync(path.join('.ai', 'manifest.adf'), 'utf-8');
+    expect(manifest.match(/infra\.adf/gi)).toHaveLength(1);
+  });
+
   it('seeds security-sensitive bootstrap files and warns when security tests are absent', async () => {
     const exitCode = await bootstrapCommand(
       { ...baseOptions, yes: true },
