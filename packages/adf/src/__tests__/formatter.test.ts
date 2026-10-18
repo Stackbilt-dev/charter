@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { formatAdf } from '../formatter';
 import { parseAdf } from '../parser';
 import type { AdfDocument } from '../types';
+import { STANDARD_DECORATIONS, canonicalDecoration } from '../types';
 
 describe('formatAdf', () => {
   it('emits version line', () => {
@@ -218,5 +219,40 @@ describe('formatAdf', () => {
     const doc2 = parseAdf(formatted);
     const formatted2 = formatAdf(doc2);
     expect(formatted2).toBe(formatted);
+  });
+});
+
+describe('formatAdf decorations round-trip (#351)', () => {
+  const entries = Object.entries(STANDARD_DECORATIONS);
+
+  it.each(entries)('%s: the standard decoration survives parse -> format byte for byte', (key, deco) => {
+    const text = `ADF: 0.1\n\n${deco} ${key}:\n  - item\n`;
+    expect(formatAdf(parseAdf(text))).toBe(text);
+  });
+
+  it.each(entries)('%s: a header written with or without U+FE0F formats to the standard form', (key, deco) => {
+    const bare = deco.replace(/\u{FE0F}/gu, '');
+    for (const written of [bare, `${bare}\u{FE0F}`]) {
+      const out = formatAdf(parseAdf(`ADF: 0.1\n\n${written} ${key}:\n  - item\n`));
+      expect(out).toBe(`ADF: 0.1\n\n${deco} ${key}:\n  - item\n`);
+    }
+  });
+
+  it('keeps a non-standard decoration as parsed', () => {
+    const text = 'ADF: 0.1\n\n\u{1F512} CONSTRAINTS:\n  - item\n\n\u{2699} NOTES:\n  - item\n';
+    expect(formatAdf(parseAdf(text))).toBe(text);
+  });
+
+  it("does not borrow another key's standard decoration", () => {
+    const text = 'ADF: 0.1\n\n\u{26A0} NOTES:\n  - item\n';
+    expect(formatAdf(parseAdf(text))).toBe(text);
+  });
+
+  it('canonicalDecoration only rewrites the standard decoration modulo U+FE0F', () => {
+    expect(canonicalDecoration('CONSTRAINTS', '\u{26A0}')).toBe('\u{26A0}\u{FE0F}');
+    expect(canonicalDecoration('CONSTRAINTS', '\u{1F512}')).toBe('\u{1F512}');
+    expect(canonicalDecoration('VENDORS', '\u{1F3F7}\u{FE0F}')).toBe('\u{1F3F7}');
+    expect(canonicalDecoration('UNKNOWN', '\u{26A0}')).toBe('\u{26A0}');
+    expect(canonicalDecoration('constructor', 'x')).toBe('x');
   });
 });

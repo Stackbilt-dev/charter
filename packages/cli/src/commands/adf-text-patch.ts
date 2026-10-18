@@ -15,7 +15,7 @@
  * without one (or when no anchor section is present) it is appended.
  */
 
-import { applyPatches, parseAdf } from '@stackbilt/adf';
+import { applyPatches, canonicalDecoration, parseAdf } from '@stackbilt/adf';
 import type { AdfContent, PatchOperation } from '@stackbilt/adf';
 import { sectionHeaders } from './adf-manifest-register';
 
@@ -122,11 +122,9 @@ function applyOne(text: string, op: TextPatchOperation): string | null {
   if (op.op === 'ADD_SECTION') {
     const add = bodyLines(op.content, '  ');
     if (!add) return null;
-    // The parser drops U+FE0F after a decoration, so the AST holds a bare text-style
-    // symbol such as U+26A0; write it back with the selector, as the scaffolds do (#371).
-    const deco = op.decoration && !/\p{Emoji_Presentation}/u.test(op.decoration) && !op.decoration.endsWith('\uFE0F')
-      ? `${op.decoration}\uFE0F`
-      : op.decoration;
+    // The parser drops U+FE0F after a decoration, so the AST may hold a bare U+26A0
+    // for CONSTRAINTS; write the header exactly as `adf fmt` would (#371, #351).
+    const deco = op.decoration ? canonicalDecoration(op.key, op.decoration) : op.decoration;
     const head = `${deco ? `${deco} ` : ''}${op.key}${op.weight ? ` [${op.weight}]` : ''}:`;
     const anchor = 'anchor' in op ? resolveAnchor(parseAdf(text).sections.map(s => s.key), op.anchor) : null;
     const loc = anchor ? locate(lines, anchor.key) : null;
