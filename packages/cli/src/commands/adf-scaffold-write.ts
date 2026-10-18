@@ -21,6 +21,7 @@ import type { CLIOptions } from '../index';
 import { CLIError } from '../index';
 import { registerManifestModules } from './adf-manifest-register';
 import { readVendorRecord, recordVendorModes } from './adf-vendor';
+import { dropRecordEntries, POPULATE_RECORD_FILE } from './adf-populate-record';
 import {
   appendMissingSections,
   backupFile,
@@ -186,6 +187,23 @@ export function writeAdfScaffolds(opts: ScaffoldWriteOptions): ScaffoldWriteResu
       backupPath: `${prefix}.backup/${backupName}`,
       lost: computeLoss(existing, scaffold.content, scaffold.name === manifestName),
     });
+  }
+
+  // A module the reset leaves at its template (replaced, created, or already the
+  // template) starts over (#371): drop populate's record of the stack constraints
+  // it added to or offered for it, so they are filled in again. The record is
+  // backed up first, like the modules; the run's warnings say so. This never
+  // throws: a record that cannot be dropped from only adds a warning.
+  const atTemplate = new Set(['replaced', 'created', 'unchanged']);
+  const resetModules = mode === 'reset'
+    ? scaffolds.map(s => s.name).filter(n => n !== manifestName && atTemplate.has(outcomes.get(n)?.kind ?? ''))
+    : [];
+  if (resetModules.length > 0) {
+    const note = dropRecordEntries(aiDir, resetModules, backupDir, timestamp, prefix);
+    if (note) {
+      warnings.push(note);
+      if (note.startsWith('Dropped')) files.push(`${prefix}${POPULATE_RECORD_FILE}`);
+    }
   }
 
   // Template modules with no manifest entry are registered with the template's
