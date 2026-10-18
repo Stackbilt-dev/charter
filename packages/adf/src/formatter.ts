@@ -7,7 +7,7 @@
  */
 
 import type { AdfDocument, AdfSection, AdfContent } from './types';
-import { STANDARD_DECORATIONS, CANONICAL_KEY_ORDER } from './types';
+import { STANDARD_DECORATIONS, CANONICAL_KEY_ORDER, canonicalDecoration } from './types';
 
 export function formatAdf(doc: AdfDocument): string {
   const lines: string[] = [];
@@ -19,7 +19,9 @@ export function formatAdf(doc: AdfDocument): string {
   for (let i = 0; i < sorted.length; i++) {
     lines.push('');
     const section = sorted[i];
-    const decoration = section.decoration ?? STANDARD_DECORATIONS[section.key] ?? null;
+    const decoration = section.decoration
+      ? canonicalDecoration(section.key, section.decoration)
+      : section.decoration ?? STANDARD_DECORATIONS[section.key] ?? null;
     const header = formatHeader(section.key, decoration, section.content, section.weight);
     lines.push(header);
 

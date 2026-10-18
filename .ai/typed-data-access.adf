@@ -17,7 +17,7 @@ ADF: 0.1
   - billing_critical  — writable only by the owning service plus its designated payment-webhook handler; never leaves the owning service boundary even via RPC (e.g., subscription, invoice)
   - secrets           — never leaves the owning service boundary under any circumstance (e.g., api_key)
 
-⚠ CONSTRAINTS [load-bearing]:
+⚠️ CONSTRAINTS [load-bearing]:
   - New code referencing a business concept MUST check the canonical registry first; terms not in the registry or its aliases MUST be added before the code lands
   - Non-owning services reading or writing `cross_service_rpc` concepts MUST use the declared accessor — raw storage access to another service's table is a violation
   - `pii_scoped` access requires an audit-log entry at the call site — no silent reads

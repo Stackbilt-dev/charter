@@ -20,7 +20,7 @@ ADF: 0.1
   - --auto-route should explain its reasoning (which signals fired, confidence level)
   - --dry-run must preview the full routing decision before writing
 
-⚠ CONSTRAINTS [load-bearing]:
+⚠️ CONSTRAINTS [load-bearing]:
   - Deterministic heuristics first — do not require LLM inference for classification
   - Every new command must support --dry-run --format json
   - Classifier decisions must be explainable: which patterns matched, why this section, why this weight
