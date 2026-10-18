@@ -246,10 +246,11 @@ describe('#369 .mcp.json mcpServers.charter', () => {
     expect(out).toContain(`  Updated .mcp.json (backup: .charter/.backup/${backups[0]})`);
   });
 
-  it('--force does not replace it when the backup fails, and warns', async () => {
+  it('--force does not replace it when the backup fails, warns, and exits 1 (#374)', async () => {
     write('.mcp.json', MCP);
     write('.charter/.backup', 'a file where the backup directory should be\n');
-    expect(await bootstrapCommand(TEXT, ['--force', ...BOOT])).toBe(0);
+    expect(await bootstrapCommand(TEXT, ['--force', ...BOOT])).toBe(1);
+    expect(out).toContain('  Not replaced .mcp.json (backup failed; see warning)');
     expect(read('.mcp.json')).toBe(MCP);
     expect(out.some(l => l.includes('could not back up .mcp.json to .charter/.backup/') && l.includes('was not replaced'))).toBe(true);
   });
