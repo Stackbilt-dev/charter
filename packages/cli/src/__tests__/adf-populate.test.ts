@@ -275,6 +275,8 @@ const readCore = (): string => fs.readFileSync(CORE, 'utf-8');
 const count = (text: string, needle: string): number => text.split(needle).length - 1;
 /** core.adf from the CONSTRAINTS header on (CONTEXT, above it, may legitimately be filled). */
 const fromConstraints = (text: string): string => text.slice(text.indexOf('\u26A0\uFE0F CONSTRAINTS'));
+/** core.adf from the GUIDE header on. */
+const fromGuide = (text: string): string => text.slice(text.indexOf('GUIDE [advisory]:'));
 
 describe('adf populate — CONSTRAINTS edits are respected (#371)', () => {
   it('adds the stack constraint once to a template-only CONSTRAINTS, and a second run is a no-op', async () => {
@@ -572,38 +574,111 @@ describe('adf populate — the populate record, .ai/.populate.json (#371)', () =
     expect(readRecord()).toBe(record);
   });
 
-  it('an unreadable record is left as is and reported; nothing is recorded', async () => {
+  const INVALID: Array<[string, string]> = [
+    ['not JSON', '{ not json'],
+    ['version 2', JSON.stringify({ version: 2, constraints: { 'core.adf': { added: [], offered: [] } } })],
+    ['an array "constraints"', JSON.stringify({ version: 1, constraints: [] })],
+    ['a string "added"', JSON.stringify({ version: 1, constraints: { 'core.adf': { added: 'x', offered: [] } } })],
+    ['a non-string item', JSON.stringify({ version: 1, constraints: { 'core.adf': { added: [1], offered: [] } } })],
+    ['an entry that is not an object', JSON.stringify({ version: 1, constraints: { 'core.adf': [] } })],
+  ];
+  for (const [label, text] of INVALID) {
+    it(`an invalid record (${label}) blocks every stack constraint: core.adf CONSTRAINTS byte-identical, record untouched, warned once`, async () => {
+      workerRepo();
+      await adfCommand(OPTIONS, ['init']);
+      // CONSTRAINTS deleted entirely and CF_RULE missing: a valid empty record would recreate it.
+      const core = readCore();
+      const start = core.indexOf('\u26A0\uFE0F CONSTRAINTS');
+      fs.writeFileSync(CORE, core.slice(0, start) + core.slice(core.indexOf('\n\n', start) + 2));
+      const before = readCore();
+      fs.writeFileSync(RECORD, text);
+      const rows = await populateRows();
+      const recordRows = rows.filter(r => r.file === RECORD);
+      expect(recordRows).toHaveLength(1);
+      expect(recordRows[0].status).toBe('refused');
+      expect(recordRows[0].reason).toMatch(/^could not be read \(.+\), so populate added no stack constraints this run; fix or delete it$/);
+      expect(readRecord()).toBe(text);
+      // CONTEXT is still filled; nothing else in core.adf changes.
+      const coreRow = rows.find(r => r.file === CORE)!;
+      expect(coreRow.changes).toEqual(['Filled CONTEXT']);
+      expect(fromGuide(readCore())).toBe(fromGuide(before));
+      expect(readCore()).not.toContain('\u26A0\uFE0F CONSTRAINTS');
+    });
+  }
+
+  it('a record with a UTF-8 BOM is read normally', async () => {
     workerRepo();
     await adfCommand(OPTIONS, ['init']);
-    fs.writeFileSync(RECORD, '{ not json');
+    await populateJson();
+    fs.writeFileSync(CORE, readCore().replace(`  - ${CF_RULE}\n`, ''));
+    const edited = readCore();
+    fs.writeFileSync(RECORD, String.fromCharCode(0xfeff) + readRecord());
     const rows = await populateRows();
-    const recordRow = rows.find(r => r.file === RECORD);
-    expect(recordRow?.status).toBe('refused');
-    expect(readRecord()).toBe('{ not json');
+    expect(rows.find(r => r.file === RECORD)).toBeUndefined();
+    expect(readCore()).toBe(edited);
+  });
+
+  it('keys are bare module names: ".ai/core.adf" means core.adf, and nothing is duplicated', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(RECORD, JSON.stringify({ version: 1, constraints: { '.ai/core.adf': { added: [CF_RULE], offered: [] } } }));
+    const edited = readCore();
+    const row = await populateJson();
+    expect(fromConstraints(readCore())).toBe(fromConstraints(edited));
+    expect(readCore()).not.toContain(CF_RULE);
+    expect(row.reason).toBeUndefined();
+    // Not rewritten: nothing was added or offered.
+    expect(readRecord()).toBe(JSON.stringify({ version: 1, constraints: { '.ai/core.adf': { added: [CF_RULE], offered: [] } } }));
+  });
+
+  it('a "__proto__" key is kept as an ordinary key when the record is rewritten', async () => {
+    workerRepo(true);
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(RECORD, '{"version":1,"constraints":{"__proto__":{"added":["p"],"offered":[]},"core.adf":{"added":["' + CF_RULE + '"],"offered":[]}}}');
+    await populateJson(); // adds ESM_FULL to the template section, so the record is rewritten
+    const parsed = JSON.parse(readRecord());
+    expect(Object.keys(parsed.constraints)).toEqual(['__proto__', 'core.adf']);
+    expect(Object.getOwnPropertyDescriptor(parsed.constraints, '__proto__')?.value).toEqual({ added: ['p'], offered: [] });
+    expect(parsed.constraints['core.adf'].added).toEqual([CF_RULE, ESM_FULL].sort());
   });
 });
 
 describe('adf populate — where a created CONSTRAINTS goes (#371)', () => {
   const body = `\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - ${CF_RULE}\n`;
 
-  it('after CONTEXT when there is one', async () => {
+  it('the scaffold with CONSTRAINTS deleted: it comes back where the scaffold has it (after GUIDE, before METRICS)', async () => {
     workerRepo();
     await adfCommand(OPTIONS, ['init']);
-    fs.writeFileSync(CORE, 'ADF: 0.1\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n\n\u{1F4CB} CONTEXT:\n  - mine\n\nGUIDE:\n  - g\n');
+    const scaffold = readCore();
+    const start = scaffold.indexOf('\u26A0\uFE0F CONSTRAINTS');
+    const end = scaffold.indexOf('\n\n', start) + 2;
+    fs.writeFileSync(CORE, scaffold.slice(0, start) + scaffold.slice(end));
     await populateJson();
-    expect(readCore()).toBe(`ADF: 0.1\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n\n\u{1F4CB} CONTEXT:\n  - mine\n\n${body}\nGUIDE:\n  - g\n`);
+    const after = readCore();
+    const order = ['CONTEXT:', 'GUIDE [advisory]:', 'CONSTRAINTS [load-bearing]:', 'METRICS:'].map(h => after.indexOf(h));
+    expect(order.every((at, i) => at > (order[i - 1] ?? -1))).toBe(true);
+    expect(after).toContain(`custom\n\n${body}\n\u{1F4CA} METRICS:`);
   });
 
-  it('with no CONTEXT, populate appends one and CONSTRAINTS follows it, keeping CRLF', async () => {
+  it('after CONTEXT when CONTEXT comes after GUIDE', async () => {
     workerRepo();
     await adfCommand(OPTIONS, ['init']);
-    fs.writeFileSync(CORE, 'ADF: 0.1\r\n\r\nNOTES:\r\n  - n\r\n\r\n\u{1F4CA} METRICS:\r\n  entry_loc: 1 / 2 [lines]\r\n');
+    fs.writeFileSync(CORE, 'ADF: 0.1\n\nGUIDE:\n  - g\n\n\u{1F4CB} CONTEXT:\n  - mine\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n');
+    await populateJson();
+    expect(readCore()).toBe(`ADF: 0.1\n\nGUIDE:\n  - g\n\n\u{1F4CB} CONTEXT:\n  - mine\n\n${body}\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n`);
+  });
+
+  it('with no CONTEXT, populate appends one and CONSTRAINTS follows that new CONTEXT, keeping CRLF', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(CORE, 'ADF: 0.1\r\n\r\nGUIDE:\r\n  - g\r\n\r\n\u{1F4CA} METRICS:\r\n  entry_loc: 1 / 2 [lines]\r\n');
     const row = await populateJson();
-    // CONTEXT is added too (appended, as before); CONSTRAINTS goes after it.
-    expect(row.status).toBe('populated');
+    expect(row.changes).toEqual(['Filled CONTEXT', 'Filled CONSTRAINTS']);
     const after = readCore();
     expect(after).not.toMatch(/[^\r]\n/);
-    expect(after.indexOf('CONSTRAINTS')).toBeGreaterThan(after.indexOf('CONTEXT'));
+    const sections = [...after.matchAll(/^(?:\S+ )?([A-Z]+)(?: \[[a-z-]+\])?:/gm)].map(m => m[1]);
+    expect(sections).toEqual(['ADF', 'GUIDE', 'METRICS', 'CONTEXT', 'CONSTRAINTS']);
+    expect(after).toMatch(/CONTEXT:\r\n(?: {2}- .*\r\n)+\r\n\u26A0\uFE0F CONSTRAINTS \[load-bearing\]:\r\n {2}- No Node/);
   });
 
   it('at the end of a CONTEXT that is the last section without a trailing newline', async () => {
@@ -624,5 +699,64 @@ describe('adf populate — where a created CONSTRAINTS goes (#371)', () => {
       status: 'applied',
       next: 'ADF: 0.1\n\nNOTES:\n  - n\n\n\u26A0\uFE0F CONSTRAINTS [load-bearing]:\n  - x\n\n\u{1F4CA} METRICS:\n  entry_loc: 1 / 2 [lines]\n',
     });
+  });
+});
+
+describe('adf populate — round 3 review fixes (#371)', () => {
+  const RECORD = path.join('.ai', '.populate.json');
+
+  it("a skipped core.adf row never suggests --force", async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    const core = readCore();
+    const start = core.indexOf('CONSTRAINTS [load-bearing]:\n');
+    const from = core.lastIndexOf('\n\n', start) + 2;
+    fs.writeFileSync(CORE, core.slice(0, from) + core.slice(core.indexOf('\n\n', start) + 2));
+    const lines: string[] = [];
+    vi.mocked(console.log).mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(' ')); });
+    await adfCommand(OPTIONS, ['populate']);
+    const line = lines.find(l => l.includes(CORE))!;
+    expect(line).toContain('[skip]');
+    expect(line).toContain('CONTEXT already customized; no stack constraints to add');
+    expect(lines.join('\n')).not.toMatch(/core\.adf.*--force/);
+  });
+
+  it('the record row has status "recorded", not "populated"', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    const rows = await populateRows();
+    expect(rows.find(r => r.file === RECORD)?.status).toBe('recorded');
+  });
+
+  it('adf init --reset-adf drops core.adf from the record (backed up), so populate fills the rule in again', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    await populateJson();
+    fs.writeFileSync(CORE, readCore().replace(`  - ${CF_RULE}\n`, ''));
+    const recordBefore = fs.readFileSync(RECORD, 'utf-8');
+    const lines: string[] = [];
+    vi.mocked(console.log).mockImplementation((...a: unknown[]) => { lines.push(a.map(String).join(' ')); });
+    expect(await adfCommand({ ...OPTIONS, yes: true }, ['init', '--reset-adf', '--yes'])).toBe(0);
+    const out = lines.join('\n');
+    expect(out).toMatch(/Dropped core\.adf from \.ai\/\.populate\.json \(backup: \.ai\/\.backup\/\.populate\.json\.[^)]+\), so populate treats the reset module as new\./);
+    const backup = fs.readdirSync(path.join('.ai', '.backup')).find(f => f.startsWith('.populate.json.'))!;
+    expect(fs.readFileSync(path.join('.ai', '.backup', backup), 'utf-8')).toBe(recordBefore);
+    expect(JSON.parse(fs.readFileSync(RECORD, 'utf-8')).constraints).toEqual({});
+    vi.mocked(console.log).mockImplementation(() => {});
+    const row = await populateJson();
+    expect(row.changes).toContain(`Added CONSTRAINTS item: ${CF_RULE}`);
+    expect(count(readCore(), CF_RULE)).toBe(1);
+  });
+
+  it('adf init --reset-adf with nothing recorded for a replaced module leaves the record alone', async () => {
+    workerRepo();
+    await adfCommand(OPTIONS, ['init']);
+    fs.writeFileSync(RECORD, JSON.stringify({ version: 1, constraints: { 'other.adf': { added: ['x'], offered: [] } } }));
+    const text = fs.readFileSync(RECORD, 'utf-8');
+    fs.writeFileSync(CORE, readCore().replace(SECRETS_DEFAULT, ''));
+    expect(await adfCommand({ ...OPTIONS, yes: true }, ['init', '--reset-adf', '--yes'])).toBe(0);
+    expect(fs.readFileSync(RECORD, 'utf-8')).toBe(text);
+    expect(fs.readdirSync(path.join('.ai', '.backup')).some(f => f.startsWith('.populate.json.'))).toBe(false);
   });
 });

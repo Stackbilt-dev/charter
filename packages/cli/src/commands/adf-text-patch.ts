@@ -10,15 +10,16 @@
  * Supported: ADD_BULLET, REPLACE_SECTION (list or map content), ADD_SECTION
  * (list content). Like the patcher, each targets the FIRST section with its key.
  * An ADD_SECTION may carry an `anchor` (TextPatchOperation): the section is then
- * placed after/before the first anchor section present, and the guard expects it
- * at that same position; without one (or when no anchor is present) it is appended.
+ * placed after whichever `after` section present comes last (else before the
+ * first `before` one present), and the guard expects it at that same position;
+ * without one (or when no anchor section is present) it is appended.
  */
 
 import { applyPatches, parseAdf } from '@stackbilt/adf';
 import type { AdfContent, PatchOperation } from '@stackbilt/adf';
 import { sectionHeaders } from './adf-manifest-register';
 
-/** Where an added section goes: after the first `after` key present, else before the first `before` key present, else at the end. */
+/** Where an added section goes: after whichever `after` key present comes last in the file, else before the first `before` key present, else at the end. */
 export interface SectionAnchor { after?: readonly string[]; before?: readonly string[] }
 
 export type TextPatchOperation = PatchOperation | (Extract<PatchOperation, { op: 'ADD_SECTION' }> & { anchor?: SectionAnchor });
@@ -78,7 +79,9 @@ function splice(lines: string[], from: number, to: number, add: string[], crlf: 
 
 /** The resolved anchor against the keys present: `{ key, side }`, or null for "append". */
 function resolveAnchor(keys: readonly string[], anchor: SectionAnchor | undefined): { key: string; side: 'after' | 'before' } | null {
-  const after = anchor?.after?.find(k => keys.includes(k));
+  // `after`: whichever present candidate comes last in the file.
+  const present = (anchor?.after ?? []).filter(k => keys.includes(k));
+  const after = present.sort((a, b) => keys.indexOf(a) - keys.indexOf(b)).pop();
   if (after) return { key: after, side: 'after' };
   const before = anchor?.before?.find(k => keys.includes(k));
   return before ? { key: before, side: 'before' } : null;

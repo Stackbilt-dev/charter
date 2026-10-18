@@ -15,6 +15,16 @@ import * as path from 'node:path';
 import { parseAdf } from '@stackbilt/adf';
 import type { AdfSection, PatchOperation } from '@stackbilt/adf';
 import { applyOpsAsText, type TextPatchOperation } from './adf-text-patch';
+import {
+  POPULATE_RECORD_FILE,
+  cloneRecord,
+  normalizeValue,
+  readPopulateRecord,
+  recordKey,
+  serializePopulateRecord,
+  type RecordEntry,
+  type RecordRead,
+} from './adf-populate-record';
 import { BACKEND_SCAFFOLD, CORE_SCAFFOLD, FRONTEND_SCAFFOLD, STATE_SCAFFOLD } from './adf';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
@@ -26,6 +36,8 @@ import {
   type PackageContext,
   type DetectionResult,
 } from './setup';
+
+export { normalizeValue, POPULATE_RECORD_FILE };
 
 // ============================================================================
 // Untouched scaffold detection
@@ -108,8 +120,12 @@ export type PopulateMode = 'scaffold-only' | 'force';
 export interface PopulateResult {
   file: string;
   ops: number;
-  /** 'skipped': nothing to do. 'refused': edits were due but could not be applied safely (see reason). */
-  status: 'populated' | 'skipped' | 'refused' | 'missing';
+  /**
+   * 'skipped': nothing to do. 'refused': edits were due but could not be applied
+   * safely (see reason). 'recorded': the row for .populate.json itself, written
+   * (or, under --dry-run, due) this run; it is not an ADF module.
+   */
+  status: 'populated' | 'skipped' | 'refused' | 'missing' | 'recorded';
   /**
    * Why a file with pending operations was left as is, or (on any status) why
    * part of it was: e.g. stack constraints not added to an edited CONSTRAINTS (#371).
@@ -128,76 +144,15 @@ export interface ConstraintsNotAdded {
   constraints: string[];
 }
 
-// ============================================================================
-// Populate record (.ai/.populate.json, #371)
-// ============================================================================
-
-/**
- * What populate has added to, or offered for, each file's CONSTRAINTS. Without
- * it, a section holding the template plus the one bullet populate added looks,
- * once the user deletes that bullet, exactly like a fresh scaffold. Committed
- * with the rest of `.ai/`, so the memory travels with the repo.
- */
-export interface PopulateRecord {
-  version: 1;
-  constraints: Record<string, { added: string[]; offered: string[] }>;
-}
-
-export const POPULATE_RECORD_FILE = '.populate.json';
-
-type RecordRead = { status: 'absent' | 'ok'; record: PopulateRecord } | { status: 'invalid'; record: PopulateRecord; detail: string };
-
-function emptyRecord(): PopulateRecord {
-  return { version: 1, constraints: {} };
-}
-
-function readPopulateRecord(file: string): RecordRead {
-  if (!fs.existsSync(file)) return { status: 'absent', record: emptyRecord() };
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<PopulateRecord>;
-    if (raw?.version !== 1 || typeof raw.constraints !== 'object' || raw.constraints === null) {
-      return { status: 'invalid', record: emptyRecord(), detail: 'not a version 1 record' };
-    }
-    const constraints: PopulateRecord['constraints'] = {};
-    for (const [key, entry] of Object.entries(raw.constraints)) {
-      const list = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map(normalizeValue) : [];
-      constraints[key] = { added: list(entry?.added), offered: list(entry?.offered) };
-    }
-    return { status: 'ok', record: { version: 1, constraints } };
-  } catch (err) {
-    return { status: 'invalid', record: emptyRecord(), detail: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/** Deterministic: keys and lists sorted, lists de-duplicated, two-space indent, trailing newline. */
-export function serializePopulateRecord(record: PopulateRecord): string {
-  const sorted = (xs: string[]): string[] => [...new Set(xs)].sort();
-  const constraints: PopulateRecord['constraints'] = {};
-  for (const key of Object.keys(record.constraints).sort()) {
-    const e = record.constraints[key];
-    constraints[key] = { added: sorted(e.added), offered: sorted(e.offered) };
-  }
-  return JSON.stringify({ version: 1, constraints }, null, 2) + '\n';
-}
-
 /** Constraint bookkeeping for one file, filled by buildCoreOps and committed once its edit is applied. */
 interface ConstraintLedger {
   /** The file's entry in the record, or undefined when the record has none for it. */
-  recorded?: { added: string[]; offered: string[] };
+  recorded?: RecordEntry;
+  /** Set while the record is invalid: no stack constraints are added for any file (#371). */
+  blocked?: string;
   add: string[];
   offer: string[];
   notAdded?: ConstraintsNotAdded;
-}
-
-/**
- * Generated values (package.json description, README summary, ...) become ADF
- * list items or map values, which the parser reads as one trimmed line. Strip
- * control characters and collapse whitespace and newlines to single spaces, so
- * every value round-trips and the re-parse guard can accept it (#354).
- */
-export function normalizeValue(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeOps(ops: TextPatchOperation[]): TextPatchOperation[] {
@@ -251,7 +206,14 @@ export async function adfPopulateCommand(
   const ledgers = new Map<string, ConstraintLedger>();
   const ledgerFor = (file: string): ConstraintLedger => {
     const key = path.basename(file);
-    if (!ledgers.has(key)) ledgers.set(key, { recorded: record.constraints[key], add: [], offer: [] });
+    if (!ledgers.has(key)) {
+      ledgers.set(key, {
+        recorded: record.constraints.get(recordKey(key)),
+        ...(recordRead.status === 'invalid' ? { blocked: recordRead.detail } : {}),
+        add: [],
+        offer: [],
+      });
+    }
     return ledgers.get(key)!;
   };
 
@@ -340,12 +302,17 @@ export async function adfPopulateCommand(
     console.log('');
     for (const r of results) {
       if (r.status === 'missing') continue;
-      const icon = r.status === 'populated' ? '[ok]' : r.status === 'refused' ? '[refused]' : '[skip]';
-      const detail = r.status === 'populated' && r.ops === 0
+      const icon = r.status === 'populated' || r.status === 'recorded' ? '[ok]' : r.status === 'refused' ? '[refused]' : '[skip]';
+      // core.adf's skip never suggests --force (#371): there it would also re-add
+      // constraints the user deleted. The other modules' only content is CONTEXT/STATE.
+      const skipped = path.basename(r.file) === 'core.adf'
+        ? 'CONTEXT already customized; no stack constraints to add'
+        : 'already customized — use --force to overwrite';
+      const detail = r.status === 'recorded'
         ? (r.changes ?? []).join('; ')
         : r.status === 'populated'
         ? `${r.ops} op${r.ops === 1 ? '' : 's'} applied${r.reason ? `; ${r.reason}` : ''}`
-        : r.reason ?? 'already customized — use --force to overwrite';
+        : r.reason ?? skipped;
       console.log(`    ${icon} ${r.file}  (${detail})`);
     }
     if (dryRun) {
@@ -363,25 +330,29 @@ function updatePopulateRecord(
   ledgers: Map<string, ConstraintLedger>,
   dryRun: boolean,
 ): PopulateResult | null {
-  const pending = [...ledgers].filter(([, l]) => l.add.length > 0 || l.offer.length > 0);
-  if (pending.length === 0) return null;
   if (read.status === 'invalid') {
+    // Reported on every run while it lasts (once per run); never rewritten. The
+    // wording has no "left as is": bootstrap appends that itself.
     return {
       file, ops: 0, status: 'refused',
-      reason: `could not be read (${read.detail}); left as is, so this run's stack constraints are not recorded`,
+      reason: `could not be read (${read.detail}), so populate added no stack constraints this run; fix or delete it`,
     };
   }
-  const next: PopulateRecord = JSON.parse(JSON.stringify(read.record));
+  const pending = [...ledgers].filter(([, l]) => l.add.length > 0 || l.offer.length > 0);
+  if (pending.length === 0) return null;
+  const next = cloneRecord(read.record);
   for (const [key, l] of pending) {
-    const entry = (next.constraints[key] ??= { added: [], offered: [] });
+    const k = recordKey(key);
+    const entry = next.constraints.get(k) ?? { added: [], offered: [] };
     entry.added.push(...l.add.map(normalizeValue));
     entry.offered.push(...l.offer.map(normalizeValue));
+    next.constraints.set(k, entry);
   }
   const text = serializePopulateRecord(next);
   if (read.status === 'ok' && fs.readFileSync(file, 'utf-8') === text) return null;
   if (!dryRun) fs.writeFileSync(file, text);
   const label = file.split(path.sep).join('/');
-  return { file, ops: 0, status: 'populated', changes: [`${read.status === 'absent' ? 'Created' : 'Updated'} ${label}`] };
+  return { file, ops: 0, status: 'recorded', changes: [`${read.status === 'absent' ? 'Created' : 'Updated'} ${label}`] };
 }
 
 // ============================================================================
@@ -434,6 +405,9 @@ function buildCoreOps(
   // bullets plus any of the bullets populate itself added earlier. A constraint
   // populate has added or offered before is never added again, even after it was
   // deleted. Under --force, any constraint not present is appended, as before.
+  // An unreadable record could hide constraints the user deleted: add none (#371).
+  if (ledger.blocked !== undefined) return ops.length > 0 ? ops : null;
+
   const constraintsSection = doc.sections.find(s => s.key === 'CONSTRAINTS');
   const existingItems = constraintsSection?.content.type === 'list' ? constraintsSection.content.items : [];
   const recorded = ledger.recorded;
@@ -499,8 +473,10 @@ function buildCoreOps(
         decoration: '\u26A0', // as parsed; the text edit writes it as the scaffold's U+26A0 U+FE0F
         weight: 'load-bearing',
         content: { type: 'list', items: wanted },
-        // Where the scaffold has it: after CONTEXT, else after GUIDE, else before METRICS.
-        anchor: { after: ['CONTEXT', 'GUIDE'], before: ['METRICS'] },
+        // Right after the later of GUIDE and CONTEXT, as in the scaffold (CONTEXT,
+        // GUIDE, CONSTRAINTS). CONTEXT always exists by now: a missing one is added
+        // by the op above, at the end of the file, and CONSTRAINTS follows it.
+        anchor: { after: ['GUIDE', 'CONTEXT'] },
       });
       ledger.add.push(...wanted);
     }

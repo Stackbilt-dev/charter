@@ -305,3 +305,50 @@ describe('populate cleans generated values (built CLI, second review)', () => {
     });
   }
 });
+
+describe('#371 round 3: the populate record under bootstrap (built CLI)', () => {
+  const BOOT = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
+  const populateStep = (stdout: string) => JSON.parse(stdout).steps.find((s: { name: string }) => s.name === 'populate');
+
+  it('bootstrap --reset-adf --yes on a Worker repo gets the rule again (record entry dropped, backed up)', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', ...BOOT], 'ignore').status).toBe(0);
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, ''));
+    const recordBefore = read(dir, '.ai/.populate.json');
+    const r = run(dir, ['--reset-adf', '--yes', ...BOOT], 'ignore');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/Dropped core\.adf from \.ai\/\.populate\.json \(backup: \.ai\/\.backup\/\.populate\.json\.\S+\)/);
+    expect(r.stdout).toContain(`  Added CONSTRAINTS item in .ai/core.adf: ${CF_RULE}`);
+    expect(read(dir, '.ai/core.adf').split(CF_RULE).length - 1).toBe(1);
+    const backup = fs.readdirSync(path.join(dir, '.ai', '.backup')).find(f => f.startsWith('.populate.json.'))!;
+    expect(read(dir, `.ai/.backup/${backup}`)).toBe(recordBefore);
+    expect(JSON.parse(read(dir, '.ai/.populate.json')).constraints).toEqual({ 'core.adf': { added: [CF_RULE], offered: [] } });
+  });
+
+  it('details.populated counts ADF modules only, not the record', () => {
+    const dir = workerRepo();
+    const r = run(dir, ['--yes', '--format', 'json', ...BOOT], 'ignore');
+    const step = populateStep(r.stdout);
+    expect(step.details.changes).toContainEqual({ file: '.ai/.populate.json', change: 'Created .ai/.populate.json' });
+    const modules = ['core.adf', 'state.adf', 'backend.adf', 'frontend.adf'].filter(f => fs.existsSync(path.join(dir, '.ai', f)));
+    expect(step.details.populated).toBe(modules.length);
+  });
+
+  it('an invalid record: core.adf CONSTRAINTS unchanged, one warning without a doubled "left as is"', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', ...BOOT], 'ignore').status).toBe(0);
+    const edited = read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, '');
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
+    fs.writeFileSync(path.join(dir, '.ai', '.populate.json'), '{"version":2,"constraints":{}}');
+    const r = run(dir, ['--format', 'json', ...BOOT], 'ignore');
+    expect(r.status).toBe(0);
+    expect(read(dir, '.ai/core.adf')).toBe(edited);
+    expect(read(dir, '.ai/.populate.json')).toBe('{"version":2,"constraints":{}}');
+    const step = populateStep(r.stdout);
+    const recordWarnings = (step.warnings as string[]).filter(w => w.includes('.populate.json'));
+    expect(recordWarnings).toEqual([
+      '.ai/.populate.json could not be read (version is 2, not 1), so populate added no stack constraints this run; fix or delete it; left as is.',
+    ]);
+    expect(step.details.refused).toEqual([{ file: '.ai/.populate.json', reason: 'could not be read (version is 2, not 1), so populate added no stack constraints this run; fix or delete it' }]);
+  });
+});
