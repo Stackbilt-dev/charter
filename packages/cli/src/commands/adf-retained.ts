@@ -31,7 +31,7 @@ import * as path from 'node:path';
 import { readRetainedSections } from './adf-tidy';
 import { inferVendorMode, linesRestoreWouldDrop } from './adf-vendor';
 import type { VendorFile } from './adf-vendor';
-import { divergentRetainedHeadings } from './adf-compile';
+import { divergentRetainedHeadings, isTemplateRetainedSection } from './adf-compile';
 
 export const RETAINED_START = '<!-- charter:retained:start -->';
 export const RETAINED_END = '<!-- charter:retained:end -->';
@@ -422,8 +422,12 @@ export function composeCompiled(fresh: string, existing: string | null, file: st
       body = joinSections(found.carry.map(take));
       source = 'legacy';
     } else if (mode === 'pointer') {
+      // Each section is judged on its own: an untouched template placeholder is
+      // not carried even when the user added a second section of that name (#364).
       const divergent = new Set(divergentRetainedHeadings(normalized, file).filter(h => h !== '## Module Index'));
-      body = joinSections(sectionsOf(lines, fullCode).filter(s => divergent.has(s.heading)).map(take));
+      body = joinSections(sectionsOf(lines, fullCode)
+        .filter(s => divergent.has(s.heading) && !isTemplateRetainedSection(file, s.heading, lines.slice(s.start + 1, s.end)))
+        .map(take));
       source = 'pointer';
     } else {
       body = joinSections(sectionsOf(lines, fullCode).filter(s => isRetained(s.heading) && s.heading !== '## Module Index').map(take));
