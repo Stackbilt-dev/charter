@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
@@ -44,10 +44,18 @@ const failures = [];
 // that is `pnpm.cmd`, which Node can only start through a shell.
 function pnpmCommand(args) {
   const execPath = process.env.npm_execpath;
-  if (execPath && /pnpm/i.test(execPath) && /\.[cm]?js$/i.test(execPath)) {
+  // Match the file name only: npm's npm-cli.js can sit under a pnpm-managed
+  // Node install, and npm pack would leave workspace: specifiers in place.
+  if (execPath && /^pnpm\.[cm]?js$/i.test(basename(execPath))) {
     return { command: process.execPath, args: [execPath, ...args], shell: false };
   }
   if (process.platform === "win32") {
+    // cmd.exe expands %VAR% even inside double quotes, so refuse rather than
+    // pack into (and fail to clean up) a different directory.
+    const unsafe = args.find((arg) => arg.includes("%"));
+    if (unsafe) {
+      throw new Error(`Cannot pass ${unsafe} to pnpm through cmd.exe; run via \`pnpm run publish:check\` instead.`);
+    }
     // Pass one pre-quoted command line: Node deprecates args arrays with shell.
     return { command: ["pnpm", ...args].map(quoteForCmd).join(" "), args: [], shell: true };
   }
@@ -93,9 +101,11 @@ function runPnpm(args, options) {
 // remote host).
 function readTarball(tarball) {
   const data = gunzipSync(readFileSync(tarball));
-  const entries = new Map();
+  const files = new Map();
+  const names = [];
   let offset = 0;
   let pendingPath = null;
+  let sawEnd = false;
 
   const field = (block, start, length) => {
     const raw = block.subarray(start, start + length);
@@ -105,7 +115,10 @@ function readTarball(tarball) {
 
   while (offset + 512 <= data.length) {
     const header = data.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) break;
+    if (header.every((byte) => byte === 0)) {
+      sawEnd = true;
+      break;
+    }
 
     const size = parseInt(field(header, 124, 12).trim() || "0", 8);
     if (!Number.isFinite(size) || offset + 512 + size > data.length) {
@@ -124,23 +137,32 @@ function readTarball(tarball) {
       pendingPath = body.toString("utf8").replace(/\0+$/, "");
       continue;
     }
-    if (type === "g") continue;
+    if (type === "g" || type === "K") continue;
 
     const name = field(header, 0, 100);
-    const prefix = field(header, 257, 5) === "ustar" ? field(header, 345, 155) : "";
+    // POSIX ustar ("ustar\0" + "00") only; old GNU headers keep times at 345.
+    const isUstar = header.subarray(257, 265).toString("latin1") === "ustar\u000000";
+    const prefix = isUstar ? field(header, 345, 155) : "";
     const path = pendingPath ?? (prefix ? `${prefix}/${name}` : name);
     pendingPath = null;
 
+    // Every entry (links and directories too) is checked against the
+    // forbidden-path patterns; only regular files keep their contents.
+    names.push(path);
     if (type === "0" || type === "7") {
-      entries.set(path, body);
+      files.set(path, body);
     }
   }
 
-  return entries;
+  if (!sawEnd) {
+    throw new Error(`Truncated tarball (no end-of-archive marker): ${tarball}.`);
+  }
+
+  return { files, names };
 }
 
-function packedPackageJson(entries, tarball) {
-  const manifest = entries.get("package/package.json");
+function packedPackageJson(archive, tarball) {
+  const manifest = archive.files.get("package/package.json");
   if (!manifest) {
     throw new Error(`${tarball} has no package/package.json.`);
   }
@@ -193,10 +215,10 @@ try {
     const beforePack = tarballsIn(tempDir);
     const output = runPnpm(["pack", "--json", "--pack-destination", tempDir], { cwd });
     const filename = packedFilename(packageDir, output, beforePack);
-    const entries = readTarball(filename);
-    const packedManifest = packedPackageJson(entries, filename);
+    const archive = readTarball(filename);
+    const packedManifest = packedPackageJson(archive, filename);
     const workspaceEntries = workspaceDependencyEntries(packedManifest);
-    const forbiddenFiles = [...entries.keys()].filter((file) =>
+    const forbiddenFiles = archive.names.filter((file) =>
       forbiddenTarballPathPatterns.some((pattern) => pattern.test(file)),
     );
 
