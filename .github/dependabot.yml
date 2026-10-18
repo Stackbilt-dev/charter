@@ -11,6 +11,24 @@ updates:
     commit-message:
       prefix: "chore(deps):"
 
+  # Pinned SBOM generator used by the Supply Chain workflow (#368). Includes
+  # the undici override; revisit it once cdxgen ships a fixed undici itself.
+  - package-ecosystem: "npm"
+    directory: "/.github/sbom"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci):"
+    groups:
+      sbom-tooling:
+        patterns:
+          - "*"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
