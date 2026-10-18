@@ -1,0 +1,37 @@
+[
+  {
+    "commit": "e214ad0",
+    "packageManager": "npm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n\n      - name: Install Charter CLI\n        run: npm install -g @charter/cli\n\n      - name: Validate Commits\n        run: charter validate --ci --format text\n\n      - name: Drift Scan\n        run: charter drift --ci --format text\n\n      - name: Audit Report\n        run: charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  },
+  {
+    "commit": "490cd80",
+    "packageManager": "npm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n\n      - name: Install Charter CLI\n        run: npm install -g @stackbilt/cli\n\n      - name: Validate Commits\n        run: charter validate --ci --format text\n\n      - name: Drift Scan\n        run: charter drift --ci --format text\n\n      - name: Audit Report\n        run: charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  },
+  {
+    "commit": "04b1442",
+    "packageManager": "npm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n\n      - name: Install Charter CLI\n        run: npm install -g @stackbilt/cli@0.1.13\n\n      - name: Validate Commits\n        run: charter validate --ci --format text\n\n      - name: Drift Scan\n        run: charter drift --ci --format text\n\n      - name: Audit Report\n        run: charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  },
+  {
+    "commit": "7ed4679",
+    "packageManager": "npm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n\n      - name: Install dependencies\n        run: |\n          if [ -f package-lock.json ]; then\n            npm ci\n          else\n            npm install\n          fi\n\n      - name: Validate Commits\n        run: npx charter validate --ci --format text\n\n      - name: Drift Scan\n        run: npx charter drift --ci --format text\n\n      - name: Audit Report\n        run: npx charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  },
+  {
+    "commit": "9773577",
+    "packageManager": "pnpm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: pnpm/action-setup@v4\n        with:\n          version: 9\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n          cache: 'pnpm'\n\n      - name: Install dependencies\n        run: pnpm install --frozen-lockfile\n\n      - name: Validate Commits\n        run: npx charter validate --ci --format text\n\n      - name: Drift Scan\n        run: npx charter drift --ci --format text\n\n      - name: Audit Report\n        run: npx charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  },
+  {
+    "commit": "0fdea60",
+    "packageManager": "npm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n\n      - name: Install dependencies\n        run: |\n          if [ -f package-lock.json ]; then\n            npm ci\n          else\n            npm install\n          fi\n\n      - name: Validate Commits\n        run: npx charter validate --ci --format text\n\n      - name: Drift Scan\n        run: npx charter drift --ci --format text\n\n      - name: ADF Wiring & Pointer Integrity\n        run: npx charter doctor --adf-only --ci --format text\n        if: hashFiles('.ai/manifest.adf') != ''\n\n      - name: ADF Evidence\n        run: npx charter adf evidence --auto-measure --ci --format text\n        if: hashFiles('.ai/manifest.adf') != ''\n\n      - name: Audit Report\n        run: npx charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  },
+  {
+    "commit": "0fdea60",
+    "packageManager": "pnpm",
+    "text": "name: Governance Check\n\non:\n  pull_request:\n    branches: [main, master]\n\npermissions:\n  contents: read\n  pull-requests: write\n\njobs:\n  governance:\n    name: Charter\n    runs-on: ubuntu-latest\n\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n\n      - uses: pnpm/action-setup@v4\n        with:\n          version: 9\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n          cache: 'pnpm'\n\n      - name: Install dependencies\n        run: pnpm install --frozen-lockfile\n\n      - name: Validate Commits\n        run: npx charter validate --ci --format text\n\n      - name: Drift Scan\n        run: npx charter drift --ci --format text\n\n      - name: ADF Wiring & Pointer Integrity\n        run: npx charter doctor --adf-only --ci --format text\n        if: hashFiles('.ai/manifest.adf') != ''\n\n      - name: ADF Evidence\n        run: npx charter adf evidence --auto-measure --ci --format text\n        if: hashFiles('.ai/manifest.adf') != ''\n\n      - name: Audit Report\n        run: npx charter audit --format json > /tmp/audit.json\n        if: always()\n"
+  }
+]
