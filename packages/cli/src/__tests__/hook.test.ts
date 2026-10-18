@@ -6,12 +6,16 @@ import * as path from 'node:path';
 import {
   HOOK_SCOPED_DOCTOR_ENV,
   HOOK_SCOPED_DOCTOR_FILE,
+  HOOK_CLI,
+  HOOK_CLI_PROBE_BLOCK,
+  HOOK_CLI_RESOLVE_BLOCK,
   HOOK_TIDY_BLOCK_TEMPLATE,
   hookCommand,
   PRE_COMMIT_GATE_SCOPE_MARKER,
   PRE_COMMIT_VERIFY_SCOPE_MARKER,
   PRE_COMMIT_HOOK_CONTENT,
   PRE_COMMIT_HOOK_MARKER,
+  PRE_COMMIT_PM_CLI_MARKER,
   PRE_COMMIT_SCOPE_MARKER,
   printClaudeHookConfig,
   renderHookTidyBlock,
@@ -230,10 +234,10 @@ describe('hookCommand', () => {
     it('INV-P4-4: the generated and repo blocks are the template, differing only in {CLI}', async () => {
       const generated = tidyBlock(await generatedHook());
       const repo = tidyBlock(repoHook());
-      expect(generated).toBe(renderHookTidyBlock('npx charter'));
+      expect(generated).toBe(renderHookTidyBlock(HOOK_CLI));
       expect(repo).toBe(renderHookTidyBlock(REPO_CLI));
-      expect(generated.split('npx charter').join('{CLI}')).toBe(repo.split(REPO_CLI).join('{CLI}'));
-      expect(generated.split('npx charter').join('{CLI}')).toBe(HOOK_TIDY_BLOCK_TEMPLATE);
+      expect(generated.split(HOOK_CLI).join('{CLI}')).toBe(repo.split(REPO_CLI).join('{CLI}'));
+      expect(generated.split(HOOK_CLI).join('{CLI}')).toBe(HOOK_TIDY_BLOCK_TEMPLATE);
     });
 
     it('pins the scope marker, the compiled fast path, --print-paths and staged-only re-staging', async () => {
@@ -302,7 +306,13 @@ if [ -f ".ai/manifest.adf" ]; then
   fi
 fi
 `;
-    const HOOK_360 = PRE_COMMIT_HOOK_CONTENT.slice(0, PRE_COMMIT_HOOK_CONTENT.indexOf('# ADF evidence gate')) + GATE_360;
+    // A pre-#366 hook: no CLI resolution block, every call a bare `npx charter`.
+    const toPre366 = (hook: string): string => hook
+      .replace(`${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI_PROBE_BLOCK}\n`, '')
+      .split(HOOK_CLI).join('npx charter')
+      .split('$CHARTER_RUN').join('npx charter');
+    const HOOK_360 = toPre366(PRE_COMMIT_HOOK_CONTENT.slice(0, PRE_COMMIT_HOOK_CONTENT.indexOf('# ADF evidence gate'))) + GATE_360;
+    const HOOK_365 = toPre366(PRE_COMMIT_HOOK_CONTENT);
 
     async function doctorChecks(): Promise<Array<{ name: string; status: string; details: string }>> {
       const logs: string[] = [];
@@ -376,11 +386,52 @@ fi
       expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
     });
 
+    it('#366: HOOK_365 is the current hook minus CLI resolution', () => {
+      expect(HOOK_365).toContain(PRE_COMMIT_VERIFY_SCOPE_MARKER);
+      expect(HOOK_365).not.toContain(PRE_COMMIT_PM_CLI_MARKER);
+      expect(HOOK_365).not.toContain(HOOK_CLI);
+      expect(HOOK_365).toContain('  npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {');
+      expect(HOOK_365).toContain('PLAN=$(npx charter adf tidy --dry-run --print-paths $SOURCES 2>&1)');
+    });
+
+    it.each([
+      ['.pnp.cjs', '.pnp.cjs', ''],
+      ['.pnp.js', '.pnp.js', ''],
+      ['.yarnrc.yml nodeLinker: pnp', '.yarnrc.yml', 'yarnPath: .yarn/releases/yarn-4.5.0.cjs\nnodeLinker: pnp\n'],
+      ['.yarnrc.yml nodeLinker: "pnp"', '.yarnrc.yml', 'nodeLinker: "pnp" # PnP\n'],
+    ])('#366: INFO for a pre-#366 hook in a Yarn PnP repo (%s), gone after reinstall', async (_label, file, content) => {
+      writeHook(path.join(tempDir, '.git', 'hooks'), HOOK_365);
+      fs.writeFileSync(path.join(tempDir, file), content);
+      const rows = (await doctorChecks()).filter(c => c.name === 'pre-commit hook');
+      expect(rows).toEqual([{
+        name: 'pre-commit hook',
+        status: 'INFO',
+        details: "The Charter pre-commit hook at .git/hooks/pre-commit runs Charter with npx charter, which cannot find a Charter installed under Yarn Plug'n'Play, as this repo uses, so its gate fails unless Charter is also installed globally. Re-run: charter hook install --pre-commit (the new hook runs yarn charter)",
+      }]);
+
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      expect(await hookCommand(baseOptions, ['install', '--pre-commit'])).toBe(0);
+      vi.restoreAllMocks();
+      expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
+    });
+
+    it.each([
+      ['no lockfile', null, ''],
+      ['yarn.lock (node_modules linker)', 'yarn.lock', ''],
+      ['.yarnrc.yml nodeLinker: node-modules', '.yarnrc.yml', 'nodeLinker: node-modules\n'],
+      ['.yarnrc.yml nodeLinker: pnpm', '.yarnrc.yml', 'nodeLinker: pnpm\n'],
+      ['pnpm-lock.yaml', 'pnpm-lock.yaml', "lockfileVersion: '9.0'\n"],
+    ])('#366: no row for a pre-#366 hook outside Yarn PnP (%s): npx charter still finds node_modules/.bin there', async (_label, file, content) => {
+      writeHook(path.join(tempDir, '.git', 'hooks'), HOOK_365);
+      if (file !== null) fs.writeFileSync(path.join(tempDir, file), content);
+      expect((await doctorChecks()).some(c => c.name === 'pre-commit hook')).toBe(false);
+    });
+
     it('#357: the generated gate always runs the scoped doctor, then verify:adf (with the token) or evidence', () => {
       const gate = PRE_COMMIT_HOOK_CONTENT.slice(PRE_COMMIT_HOOK_CONTENT.indexOf('\n# ADF evidence gate'));
       expect(gate).toContain(PRE_COMMIT_GATE_SCOPE_MARKER);
       expect(gate).toContain(PRE_COMMIT_VERIFY_SCOPE_MARKER);
-      const doctorAt = gate.indexOf('  npx charter doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {');
+      const doctorAt = gate.indexOf('  charter_cli doctor --adf-only --ci --staged --tidy-skipped "$TIDY_SKIPPED" --format text || {');
       const branchAt = gate.indexOf(`if [ -f "package.json" ] && grep -q '"verify:adf"' package.json; then`);
       // The scoped doctor runs before, and outside, the verify:adf branch.
       expect(doctorAt).toBeGreaterThan(-1);
@@ -394,10 +445,13 @@ fi
       expect(gate).toContain('[pre-commit] Could not write the scope token in the git dir');
       expect(gate).toContain(`      ${HOOK_SCOPED_DOCTOR_ENV}="$SCOPE_TOKEN"\n      export ${HOOK_SCOPED_DOCTOR_ENV}\n`);
       expect(gate).toContain(`trap 'rm -f "$SCOPE_FILE"' EXIT`);
-      expect(gate).toContain('    npx charter adf evidence --auto-measure --ci || {');
+      expect(gate).toContain('    charter_cli adf evidence --auto-measure --ci || {');
       expect(gate).not.toContain('Blocked because');
       expect(gate).not.toContain('totalExtracted');
-      expect(gate.match(/npx charter/g)?.length).toBe(5); // two calls, three echoed hints
+      // #366: no bare npx charter; two calls through charter_cli, three echoed hints naming $CHARTER_RUN.
+      expect(gate).not.toContain('npx charter');
+      expect(gate.match(/^\s*charter_cli /gm)?.length).toBe(2);
+      expect(gate.match(/Run: \$CHARTER_RUN /g)?.length).toBe(3);
     });
 
     it('re-running hook install --pre-commit replaces the old hook without --force, and the row goes away', async () => {
