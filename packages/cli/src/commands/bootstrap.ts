@@ -1362,6 +1362,8 @@ async function runPopulatePhase(
           skipped: results.filter(r => r.status === 'skipped').length,
           refused: results.filter(r => r.status === 'refused').map(r => ({ file: label(r.file), reason: r.reason ?? '' })),
           changes: results.flatMap(r => (r.changes ?? []).map(change => ({ file: label(r.file), change }))),
+          // #371: stack constraints detected but not added (reported once, then recorded as offered).
+          notAdded: results.flatMap(r => (r.notAdded ? [{ file: label(r.file), ...r.notAdded }] : [])),
         },
         warnings,
       },

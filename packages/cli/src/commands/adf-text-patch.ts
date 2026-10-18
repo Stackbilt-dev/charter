@@ -9,11 +9,20 @@
  *
  * Supported: ADD_BULLET, REPLACE_SECTION (list or map content), ADD_SECTION
  * (list content). Like the patcher, each targets the FIRST section with its key.
+ * An ADD_SECTION may carry an `anchor` (TextPatchOperation): the section is then
+ * placed after whichever `after` section present comes last (else before the
+ * first `before` one present), and the guard expects it at that same position;
+ * without one (or when no anchor section is present) it is appended.
  */
 
 import { applyPatches, parseAdf } from '@stackbilt/adf';
 import type { AdfContent, PatchOperation } from '@stackbilt/adf';
 import { sectionHeaders } from './adf-manifest-register';
+
+/** Where an added section goes: after whichever `after` key present comes last in the file, else before the first `before` key present, else at the end. */
+export interface SectionAnchor { after?: readonly string[]; before?: readonly string[] }
+
+export type TextPatchOperation = PatchOperation | (Extract<PatchOperation, { op: 'ADD_SECTION' }> & { anchor?: SectionAnchor });
 
 export type TextPatchResult =
   | { status: 'applied'; next: string }
@@ -68,7 +77,17 @@ function splice(lines: string[], from: number, to: number, add: string[], crlf: 
   lines.splice(from, to - from + 1, ...out);
 }
 
-function applyOne(text: string, op: PatchOperation): string | null {
+/** The resolved anchor against the keys present: `{ key, side }`, or null for "append". */
+function resolveAnchor(keys: readonly string[], anchor: SectionAnchor | undefined): { key: string; side: 'after' | 'before' } | null {
+  // `after`: whichever present candidate comes last in the file.
+  const present = (anchor?.after ?? []).filter(k => keys.includes(k));
+  const after = present.sort((a, b) => keys.indexOf(a) - keys.indexOf(b)).pop();
+  if (after) return { key: after, side: 'after' };
+  const before = anchor?.before?.find(k => keys.includes(k));
+  return before ? { key: before, side: 'before' } : null;
+}
+
+function applyOne(text: string, op: TextPatchOperation): string | null {
   const dominant = dominantCr(text);
   const eol = dominant ? '\r\n' : '\n';
   const lines = text.split('\n');
@@ -103,7 +122,23 @@ function applyOne(text: string, op: PatchOperation): string | null {
   if (op.op === 'ADD_SECTION') {
     const add = bodyLines(op.content, '  ');
     if (!add) return null;
-    const head = `${op.decoration ? `${op.decoration} ` : ''}${op.key}${op.weight ? ` [${op.weight}]` : ''}:`;
+    // The parser drops U+FE0F after a decoration, so the AST holds a bare text-style
+    // symbol such as U+26A0; write it back with the selector, as the scaffolds do (#371).
+    const deco = op.decoration && !/\p{Emoji_Presentation}/u.test(op.decoration) && !op.decoration.endsWith('\uFE0F')
+      ? `${op.decoration}\uFE0F`
+      : op.decoration;
+    const head = `${deco ? `${deco} ` : ''}${op.key}${op.weight ? ` [${op.weight}]` : ''}:`;
+    const anchor = 'anchor' in op ? resolveAnchor(parseAdf(text).sections.map(s => s.key), op.anchor) : null;
+    const loc = anchor ? locate(lines, anchor.key) : null;
+    if (anchor && loc && anchor.side === 'after') {
+      // After the anchor's last body line, separated by one blank line.
+      splice(lines, loc.last + 1, loc.last, ['', head, ...add], endingOf(lines, loc.last, dominant));
+      return lines.join('\n');
+    }
+    if (anchor && loc) {
+      splice(lines, loc.header, loc.header - 1, [head, ...add, ''], endingOf(lines, loc.header, dominant));
+      return lines.join('\n');
+    }
     const block = [head, ...add].join(eol);
     if (text.length === 0) return block + eol;
     return text.endsWith('\n') ? `${text}${eol}${block}${eol}` : `${text}${eol}${eol}${block}`;
@@ -112,10 +147,22 @@ function applyOne(text: string, op: PatchOperation): string | null {
   return null;
 }
 
-export function applyOpsAsText(text: string, ops: readonly PatchOperation[]): TextPatchResult {
+export function applyOpsAsText(text: string, ops: readonly TextPatchOperation[]): TextPatchResult {
   let expected;
   try {
-    expected = applyPatches(parseAdf(text), [...ops]);
+    // One op at a time, so an anchored ADD_SECTION is placed against the document
+    // as the earlier ops left it, exactly as the text edit below resolves it.
+    expected = parseAdf(text);
+    for (const op of ops) {
+      const keys = expected.sections.map(s => s.key);
+      expected = applyPatches(expected, [op]);
+      const anchor = op.op === 'ADD_SECTION' && 'anchor' in op ? resolveAnchor(keys, op.anchor) : null;
+      if (anchor) {
+        const added = expected.sections.pop()!;
+        const at = expected.sections.findIndex(s => s.key === anchor.key);
+        expected.sections.splice(anchor.side === 'after' ? at + 1 : at, 0, added);
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { status: 'refused', reason: 'unparseable', detail: `the file or the edit could not be parsed (${msg})` };

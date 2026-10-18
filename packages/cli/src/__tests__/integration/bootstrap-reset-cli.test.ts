@@ -126,10 +126,11 @@ function workerRepo(): string {
   return dir;
 }
 
+const CF_RULE = 'No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)';
 const read = (dir: string, rel: string): string => fs.readFileSync(path.join(dir, rel), 'utf-8');
 
 describe('populate never reformats or overwrites user content (built CLI)', () => {
-  it('CRLF, non-canonical order, no scaffold text, CF constraint missing: --force --yes changes only the inserted bullet', () => {
+  it('CRLF, non-canonical order, no scaffold text, CF constraint missing: --force --yes changes nothing and says why (#371)', () => {
     const dir = workerRepo();
     expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
     const core = [
@@ -147,19 +148,98 @@ describe('populate never reformats or overwrites user content (built CLI)', () =
       '  - mine',
     ].join('\r\n') + '\r\n';
     fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
+    // A repo from before the populate record (#371): no .ai/.populate.json.
+    fs.rmSync(path.join(dir, '.ai', '.populate.json'));
     const r = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
     expect(r.status).toBe(0);
-    const after = read(dir, '.ai/core.adf');
-    const inserted = '    - No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)\r\n';
-    // The only change is populate's (pre-existing, #371) constraint re-add, inserted in place.
-    expect(after).toBe(core.replace('    - Never commit secrets\r\n', `    - Never commit secrets\r\n${inserted}`));
+    // CONSTRAINTS differs from the template (defaults deleted/reworded), so the
+    // stack constraint is not added (#371): the file is byte-identical.
+    expect(read(dir, '.ai/core.adf')).toBe(core);
     expect(r.stdout).toContain('  Unchanged by merge: .ai/core.adf');
-    expect(r.stdout).toContain('  Added CONSTRAINTS item in .ai/core.adf: No Node.js-specific APIs in Worker handlers; use CF-native APIs (fetch, KV, D1, R2)');
-    // A second run has nothing left to do.
+    expect(r.stdout).not.toContain('Added CONSTRAINTS item');
+    expect(r.stdout).toContain(`CONSTRAINTS has been edited, so populate did not add the stack constraint: ${CF_RULE}. Add it by hand if you want it`);
+    expect(r.stdout).not.toMatch(/populate --force/);
+    expect(r.stdout).toContain('  Created .ai/.populate.json');
+    // Warned once: the constraint is now recorded as offered, so a second run is quiet.
+    const record = read(dir, '.ai/.populate.json');
     const again = run(dir, ['--force', '--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
-    expect(read(dir, '.ai/core.adf')).toBe(after);
+    expect(read(dir, '.ai/core.adf')).toBe(core);
     expect(again.stdout).toContain('  No scaffold content to replace');
+    expect(again.stdout).not.toContain('CONSTRAINTS has been edited');
+    expect(read(dir, '.ai/.populate.json')).toBe(record);
   });
+
+  it('#371: bootstrap --format json reports a not-added constraint as a structured field, once', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+    const core = read(dir, '.ai/core.adf').replace('  - Never commit secrets or credentials\n', '');
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), core);
+    // The stack gains plain-JS ESM after the section was edited.
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...JSON.parse(WORKER_PKG), type: 'module' }));
+    const step = (): { details: { notAdded: unknown[] }; warnings: string[] } => {
+      const r = run(dir, ['--format', 'json', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+      expect(r.status).toBe(0);
+      return JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'populate');
+    };
+    const first = step();
+    expect(first.details.notAdded).toEqual([{
+      file: '.ai/core.adf', section: 'CONSTRAINTS', why: 'edited',
+      constraints: ['Use .js extensions for all ESM imports (never .ts in import paths)'],
+    }]);
+    expect(first.warnings.join('\n')).toContain('CONSTRAINTS has been edited');
+    const second = step();
+    expect(second.details.notAdded).toEqual([]);
+    expect(second.warnings).toEqual([]);
+    expect(read(dir, '.ai/core.adf')).toBe(core);
+  });
+
+  for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
+    it(`#371: a deleted default and a deleted populate bullet stay deleted across bootstrap ${flags.join(' ') || '(no flags)'} re-runs`, () => {
+      const dir = workerRepo();
+      // type: module with no tsconfig/typescript: populate also wants the ESM rule.
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ ...JSON.parse(WORKER_PKG), type: 'module' }));
+      const boot = [...flags, '--preset', 'worker', '--skip-install', '--skip-doctor'];
+      const fresh = run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+      expect(fresh.status).toBe(0);
+      expect(fresh.stdout).toContain('  Created .ai/.populate.json');
+      const first = read(dir, '.ai/core.adf');
+      const record = read(dir, '.ai/.populate.json');
+      expect(first.split(CF_RULE).length - 1).toBe(1);
+      expect(first).toContain('Use .js extensions for all ESM imports');
+      // A second bootstrap over its own result is idempotent, record included.
+      expect(run(dir, boot, 'ignore').status).toBe(0);
+      expect(read(dir, '.ai/core.adf')).toBe(first);
+      expect(read(dir, '.ai/.populate.json')).toBe(record);
+
+      const edited = first.replace('  - Never commit secrets or credentials\n', '').replace(`  - ${CF_RULE}\n`, '');
+      fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
+      for (let i = 0; i < 2; i++) {
+        const r = run(dir, [...boot, '--format', 'json'], 'ignore');
+        expect(r.status).toBe(0);
+        expect(read(dir, '.ai/core.adf')).toBe(edited);
+        expect(read(dir, '.ai/.populate.json')).toBe(record);
+        // CF_RULE is recorded as added: nothing new, so nothing to warn about.
+        const populate = JSON.parse(r.stdout).steps.find((s: { name: string }) => s.name === 'populate');
+        expect(populate.details.notAdded).toEqual([]);
+        expect(populate.warnings).toEqual([]);
+      }
+    });
+  }
+
+  for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
+    it(`#371: plain Worker (one constraint): deleting it sticks across bootstrap ${flags.join(' ') || '(no flags)'} re-runs`, () => {
+      const dir = workerRepo();
+      expect(run(dir, ['--yes', '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore').status).toBe(0);
+      const edited = read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, '');
+      fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
+      for (let i = 0; i < 2; i++) {
+        const r = run(dir, [...flags, '--preset', 'worker', '--skip-install', '--skip-doctor'], 'ignore');
+        expect(r.status).toBe(0);
+        expect(r.stdout).not.toContain('Added CONSTRAINTS item');
+        expect(read(dir, '.ai/core.adf')).toBe(edited);
+      }
+    });
+  }
 
   for (const flags of [[], ['--yes'], ['--force', '--yes']]) {
     it(`a partially edited CONTEXT and STATE survive bootstrap ${flags.join(' ') || '(no flags)'}`, () => {
@@ -224,4 +304,51 @@ describe('populate cleans generated values (built CLI, second review)', () => {
       expect(populate.warnings).toEqual([]);
     });
   }
+});
+
+describe('#371 round 3: the populate record under bootstrap (built CLI)', () => {
+  const BOOT = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
+  const populateStep = (stdout: string) => JSON.parse(stdout).steps.find((s: { name: string }) => s.name === 'populate');
+
+  it('bootstrap --reset-adf --yes on a Worker repo gets the rule again (record entry dropped, backed up)', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', ...BOOT], 'ignore').status).toBe(0);
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, ''));
+    const recordBefore = read(dir, '.ai/.populate.json');
+    const r = run(dir, ['--reset-adf', '--yes', ...BOOT], 'ignore');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/Dropped core\.adf from \.ai\/\.populate\.json \(backup: \.ai\/\.backup\/\.populate\.json\.\S+\)/);
+    expect(r.stdout).toContain(`  Added CONSTRAINTS item in .ai/core.adf: ${CF_RULE}`);
+    expect(read(dir, '.ai/core.adf').split(CF_RULE).length - 1).toBe(1);
+    const backup = fs.readdirSync(path.join(dir, '.ai', '.backup')).find(f => f.startsWith('.populate.json.'))!;
+    expect(read(dir, `.ai/.backup/${backup}`)).toBe(recordBefore);
+    expect(JSON.parse(read(dir, '.ai/.populate.json')).constraints).toEqual({ 'core.adf': { added: [CF_RULE], offered: [] } });
+  });
+
+  it('details.populated counts ADF modules only, not the record', () => {
+    const dir = workerRepo();
+    const r = run(dir, ['--yes', '--format', 'json', ...BOOT], 'ignore');
+    const step = populateStep(r.stdout);
+    expect(step.details.changes).toContainEqual({ file: '.ai/.populate.json', change: 'Created .ai/.populate.json' });
+    const modules = ['core.adf', 'state.adf', 'backend.adf', 'frontend.adf'].filter(f => fs.existsSync(path.join(dir, '.ai', f)));
+    expect(step.details.populated).toBe(modules.length);
+  });
+
+  it('an invalid record: core.adf CONSTRAINTS unchanged, one warning without a doubled "left as is"', () => {
+    const dir = workerRepo();
+    expect(run(dir, ['--yes', ...BOOT], 'ignore').status).toBe(0);
+    const edited = read(dir, '.ai/core.adf').replace(`  - ${CF_RULE}\n`, '');
+    fs.writeFileSync(path.join(dir, '.ai', 'core.adf'), edited);
+    fs.writeFileSync(path.join(dir, '.ai', '.populate.json'), '{"version":2,"constraints":{}}');
+    const r = run(dir, ['--format', 'json', ...BOOT], 'ignore');
+    expect(r.status).toBe(0);
+    expect(read(dir, '.ai/core.adf')).toBe(edited);
+    expect(read(dir, '.ai/.populate.json')).toBe('{"version":2,"constraints":{}}');
+    const step = populateStep(r.stdout);
+    const recordWarnings = (step.warnings as string[]).filter(w => w.includes('.populate.json'));
+    expect(recordWarnings).toEqual([
+      '.ai/.populate.json could not be read (version is 2, not 1), so populate added no stack constraints this run; fix or delete it; left as is.',
+    ]);
+    expect(step.details.refused).toEqual([{ file: '.ai/.populate.json', reason: 'could not be read (version is 2, not 1), so populate added no stack constraints this run; fix or delete it' }]);
+  });
 });
