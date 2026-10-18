@@ -14,7 +14,7 @@ ADF: 0.1
   - This is a **public infrastructure package** governed by the Stackbilt OSS Infrastructure Package Update Policy.
   - Full policy: `stackbilt_llc/policies/oss-infrastructure-update-policy.md`
 
-⚠ CONSTRAINTS [load-bearing]:
+⚠️ CONSTRAINTS [load-bearing]:
   - TypeScript strict mode, ES2022 target, CommonJS output
   - 2-space indent, semicolons, single quotes, kebab-case filenames
   - Pure functions in library packages; side effects only in CLI command handlers

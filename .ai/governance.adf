@@ -8,7 +8,7 @@ ADF: 0.1
   - Trailer parsing extracts Governed-By, Resolves-Request from commit messages
   - Risk assessment scores HIGH/MEDIUM/LOW based on file path patterns
 
-⚠ CONSTRAINTS [load-bearing]:
+⚠️ CONSTRAINTS [load-bearing]:
   - validate, drift, audit commands must support --ci and --format json
   - --ci mode: exit 1 on policy violation, exit 0 on pass
   - validate exposes policyOffenders and riskOffenders in evidence
