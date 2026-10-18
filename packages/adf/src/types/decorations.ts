@@ -17,8 +17,8 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
   STATE: '\u{1F9E0}',
   BUDGET: '\u{1F4B0}',
   SYNC: '\u{1F504}',
-  // Bare U+1F3F7 (no U+FE0F), as shipped by #318; either form round-trips via
-  // canonicalDecoration below.
+  // Bare U+1F3F7 (no U+FE0F), as shipped by #318: a hand-written U+1F3F7 U+FE0F
+  // header is formatted to this bare form (see canonicalDecoration below).
   VENDORS: '\u{1F3F7}',
   CADENCE: '\u{1F4CA}',
   GUIDE: '\u{1F4D6}',
@@ -31,8 +31,8 @@ export const STANDARD_DECORATIONS: Record<string, string> = {
  * given (#351).
  */
 export function canonicalDecoration(key: string, decoration: string): string {
-  const standard = STANDARD_DECORATIONS[key];
-  const bare = (d: string): string => d.replace(/️/g, '');
+  const standard = Object.prototype.hasOwnProperty.call(STANDARD_DECORATIONS, key) ? STANDARD_DECORATIONS[key] : undefined;
+  const bare = (d: string): string => d.replace(/\u{FE0F}/gu, '');
   return standard !== undefined && bare(standard) === bare(decoration) ? standard : decoration;
 }
 

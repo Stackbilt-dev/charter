@@ -231,8 +231,8 @@ describe('formatAdf decorations round-trip (#351)', () => {
   });
 
   it.each(entries)('%s: a header written with or without U+FE0F formats to the standard form', (key, deco) => {
-    const bare = deco.replace(/️/g, '');
-    for (const written of [bare, `${bare}️`]) {
+    const bare = deco.replace(/\u{FE0F}/gu, '');
+    for (const written of [bare, `${bare}\u{FE0F}`]) {
       const out = formatAdf(parseAdf(`ADF: 0.1\n\n${written} ${key}:\n  - item\n`));
       expect(out).toBe(`ADF: 0.1\n\n${deco} ${key}:\n  - item\n`);
     }
@@ -253,5 +253,6 @@ describe('formatAdf decorations round-trip (#351)', () => {
     expect(canonicalDecoration('CONSTRAINTS', '\u{1F512}')).toBe('\u{1F512}');
     expect(canonicalDecoration('VENDORS', '\u{1F3F7}\u{FE0F}')).toBe('\u{1F3F7}');
     expect(canonicalDecoration('UNKNOWN', '\u{26A0}')).toBe('\u{26A0}');
+    expect(canonicalDecoration('constructor', 'x')).toBe('x');
   });
 });
