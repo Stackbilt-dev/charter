@@ -10,6 +10,7 @@ import {
   dedupePlannedRegistrations,
   formatRegisterDetail,
   inferTriggers,
+  isCaseInsensitiveDir,
   planModuleRegistration,
   registerManifestModules,
   registerModules,
@@ -18,6 +19,7 @@ import {
 } from '../commands/adf-manifest-register';
 import type { ModuleRegistration } from '../commands/adf-manifest-register';
 import { NAMED_MODULE_DEFAULT_TRIGGERS } from '../commands/adf-named-scaffolds';
+import { findMissingDefaultLoad } from '../commands/adf-wiring';
 
 // #239: the shared manifest writer and the ON_DEMAND trigger inference.
 
@@ -107,6 +109,8 @@ describe('inferTriggers', () => {
   it('drops all-digit and version-number tokens', () => {
     const result = inferTriggers('ops.adf', [routedTo('ops.adf', '2024 roadmap: 1.2 to v3 via kubernetes 1-2')]);
     expect(result.triggers).toEqual(['roadmap', 'kubernetes']);
+    const versions = inferTriggers('ops.adf', [routedTo('ops.adf', 'Node.js v20.x, 1.x, v2.0-beta, v2.1.0-rc.1, ES2022')]);
+    expect(versions.triggers).toEqual(['node.js', 'es2022']);
   });
 
   it("keeps a generic word that is the module's own stem", () => {
@@ -116,12 +120,6 @@ describe('inferTriggers', () => {
       .toEqual(['release', 'workflow']);
     expect(inferTriggers('ops.adf', items.map(i => ({ ...i, classification: { ...i.classification, targetModule: 'ops.adf' } }))).triggers)
       .toEqual(['changelog']);
-  });
-
-  it('matches its own module and items case-insensitively', () => {
-    const manifest = { onDemand: [{ path: 'infra.adf', triggers: ['docker'], loadPolicy: 'ON_DEMAND' as const }] };
-    const result = inferTriggers('Infra.adf', [routedTo('infra.adf', 'Docker images')], manifest);
-    expect(result.triggers).toEqual(['docker']);
   });
 
   it('caps at MAX_TRIGGERS', () => {
@@ -312,28 +310,69 @@ describe('registerManifestModules', () => {
     expect(parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.filter(m => m.path === 'infra.adf')).toHaveLength(1);
   });
 
-  it('matches an existing entry case-insensitively and reports its spelling (#349)', () => {
-    fs.writeFileSync(manifestPath, MANIFEST);
-    const before = fs.readFileSync(manifestPath, 'utf-8');
-    const result = registerManifestModules(manifestPath, [plan('Frontend.adf', 'Storybook'), plan('CORE.adf')], { onWarning });
-    expect(result.written).toBe(false);
-    expect(result.registrations.map(r => [r.module, r.status, r.loadPolicy, r.triggers])).toEqual([
-      ['Frontend.adf', 'already-registered', 'ON_DEMAND', ['React', 'CSS', 'UI']],
-      ['CORE.adf', 'already-registered', 'DEFAULT_LOAD', []],
-    ]);
-    expect(result.registrations[0].reason).toContain('already registered as frontend.adf under ON_DEMAND');
-    expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
-  });
+  describe('module path case (#349)', () => {
+    const ci = { onWarning, caseInsensitive: true };
+    const cs = { onWarning, caseInsensitive: false };
 
-  it('adds one entry for two spellings of one module in a single call', () => {
-    fs.writeFileSync(manifestPath, MANIFEST);
-    const result = registerManifestModules(manifestPath, [plan('Infra.adf'), plan('infra.adf', 'Docker')], { onWarning });
-    expect(result.registrations.map(r => [r.module, r.status])).toEqual([['Infra.adf', 'added']]);
-    const paths = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.map(m => m.path);
-    expect(paths).toEqual(['frontend.adf', 'Infra.adf']);
-    const again = registerManifestModules(manifestPath, [plan('infra.adf', 'Docker')], { onWarning });
-    expect(again.registrations[0].status).toBe('already-registered');
-    expect(again.written).toBe(false);
+    it('on a case-insensitive filesystem, matches an existing entry and reports its spelling', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const before = fs.readFileSync(manifestPath, 'utf-8');
+      const result = registerManifestModules(manifestPath, [plan('Frontend.adf', 'Storybook')], ci);
+      expect(result.written).toBe(false);
+      expect(result.registrations.map(r => [r.module, r.status, r.loadPolicy, r.triggers])).toEqual([
+        ['Frontend.adf', 'already-registered', 'ON_DEMAND', ['React', 'CSS', 'UI']],
+      ]);
+      expect(result.registrations[0].reason).toContain('already registered as frontend.adf under ON_DEMAND');
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
+    });
+
+    it('on a case-insensitive filesystem, adds one entry for two spellings in a single call', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const result = registerManifestModules(manifestPath, [plan('Infra.adf'), plan('infra.adf', 'Docker')], ci);
+      expect(result.registrations.map(r => [r.module, r.status])).toEqual([['Infra.adf', 'added']]);
+      const paths = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.map(m => m.path);
+      expect(paths).toEqual(['frontend.adf', 'Infra.adf']);
+      const again = registerManifestModules(manifestPath, [plan('infra.adf', 'Docker')], ci);
+      expect(again.registrations[0].status).toBe('already-registered');
+      expect(again.written).toBe(false);
+    });
+
+    it('on a case-sensitive filesystem, registers the other spelling as its own module', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const result = registerManifestModules(manifestPath, [plan('Frontend.adf', 'Storybook')], cs);
+      expect(result.registrations.map(r => [r.module, r.status])).toEqual([['Frontend.adf', 'added']]);
+      const paths = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.map(m => m.path);
+      expect(paths).toEqual(['frontend.adf', 'Frontend.adf']);
+    });
+
+    it('always adds a required DEFAULT_LOAD module under its exact name, as doctor checks it', () => {
+      for (const opts of [ci, cs]) {
+        fs.writeFileSync(manifestPath, MANIFEST.replace('  - core.adf\n', '  - Core.adf\n'));
+        const result = registerManifestModules(manifestPath, [plan('core.adf')], opts);
+        expect(result.registrations.map(r => [r.module, r.status])).toEqual([['core.adf', 'added']]);
+        const manifest = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8')));
+        expect(findMissingDefaultLoad(manifest)).toEqual([]);
+      }
+    });
+
+    it('registerModules plans two spellings once, from the items of both, on a case-insensitive filesystem', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const items = [routedTo('Ops.adf', 'Terraform'), routedTo('ops.adf', 'Kubernetes')];
+      const result = registerModules(manifestPath, ['Ops.adf', 'ops.adf'], items, ci);
+      expect(result.registrations.map(r => [r.module, r.status, r.triggers])).toEqual([['Ops.adf', 'added', ['terraform', 'kubernetes']]]);
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const separate = registerModules(manifestPath, ['Ops.adf', 'ops.adf'], items, cs);
+      expect(separate.registrations.map(r => [r.module, r.status, r.triggers])).toEqual([
+        ['Ops.adf', 'added', ['terraform']],
+        ['ops.adf', 'added', ['kubernetes']],
+      ]);
+    });
+
+    it('isCaseInsensitiveDir agrees with the filesystem', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      expect(isCaseInsensitiveDir(tempDir)).toBe(fs.existsSync(path.join(tempDir, 'MANIFEST.ADF')));
+      expect(isCaseInsensitiveDir(path.join(tempDir, 'missing'))).toBe(false);
+    });
   });
 
   it('registerModules gives orphans the stem trigger', () => {

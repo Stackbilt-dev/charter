@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapCommand, completePhase } from '../commands/bootstrap';
+import { isCaseInsensitiveDir } from '../commands/adf-manifest-register';
 import { doctorCommand } from '../commands/doctor';
 import { driftCommand } from '../commands/drift';
 import type { CLIOptions } from '../index';
@@ -197,7 +198,7 @@ STATE:
     expect(manifest).toContain('persona.adf');
   });
 
-  it('does not report a module registered under another letter case as orphaned (#349)', async () => {
+  it('treats a module registered under another letter case as the filesystem does (#349)', async () => {
     fs.mkdirSync('.ai', { recursive: true });
     fs.writeFileSync(path.join('.ai', 'Infra.adf'), 'ADF: 0.1\n\nCONTEXT:\n  - Infra rules\n');
     fs.writeFileSync(
@@ -211,9 +212,11 @@ STATE:
     );
 
     expect(exitCode).toBe(0);
-    expect(logs.find(l => l.includes('unregistered .adf module'))?.includes('Infra.adf') ?? false).toBe(false);
+    // One file on a case-insensitive filesystem; two distinct modules on a case-sensitive one.
+    const sameFile = isCaseInsensitiveDir('.ai');
+    expect(logs.find(l => l.includes('unregistered .adf module'))?.includes('Infra.adf') ?? false).toBe(!sameFile);
     const manifest = fs.readFileSync(path.join('.ai', 'manifest.adf'), 'utf-8');
-    expect(manifest.match(/infra\.adf/gi)).toHaveLength(1);
+    expect(manifest.match(/infra\.adf/gi)).toHaveLength(sameFile ? 1 : 2);
   });
 
   it('seeds security-sensitive bootstrap files and warns when security tests are absent', async () => {

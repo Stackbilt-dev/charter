@@ -36,9 +36,10 @@ export const ALLOWED_SHORT_TOKENS: readonly string[] = ['ui', 'ci', 'cd', 'db', 
 
 /**
  * Words common in CLAUDE.md / AGENTS.md headings that carry no routing signal
- * (#349): document structure, process and directive words, and filler. A
- * trigger matches any task text containing it, so these would load the module
- * for almost every request. Domain words (deployment, testing, database, auth,
+ * (#349): document structure, process and directive words, and filler. The
+ * router matches a trigger against each word of the task (exactly, or as a
+ * long enough prefix stem: see isKeywordMatch in @stackbilt/adf), so these would
+ * load the module for almost every request. Domain words (deployment, testing, database, auth,
  * docker, api, ...) are deliberately absent. A word that is also the module's
  * own file stem is still used (see inferTriggers).
  */
@@ -119,6 +120,8 @@ export interface RegisterManifestModulesResult {
 export interface RegisterOptions {
   dryRun?: boolean;
   onWarning?: (message: string) => void;
+  /** Compare module paths case-insensitively. Default: isCaseInsensitiveDir(the manifest's directory). */
+  caseInsensitive?: boolean;
 }
 
 type ParsedManifest = ReturnType<typeof parseManifest>;
@@ -143,25 +146,40 @@ export function tokenizeTriggerText(text: string): string[] {
 
 /**
  * A heading token worth keeping as a trigger. Stopwords, numbers and version
- * numbers (`2`, `2024`, `1.2`, `v2.1`) and short tokens outside
+ * numbers (`2`, `2024`, `1.2`, `v2.1`, `v20.x`, `v2.0-beta`) and short tokens outside
  * ALLOWED_SHORT_TOKENS never are; generic heading words are, only when they
  * are part of the module's own stem (`release` for release.adf).
  */
 function isUsableToken(token: string, stemTokens: ReadonlySet<string>): boolean {
-  if (STOPWORDS.has(token) || /^v?[0-9]+(?:[._-][0-9]+)*$/.test(token)) return false;
+  if (STOPWORDS.has(token) || /^v?[0-9]+(?:[._-](?:[0-9]+|x))*(?:-[a-z]+(?:[._]?[0-9]+)?)?$/.test(token)) return false;
   if (GENERIC.has(token) && !stemTokens.has(token)) return false;
   return token.length >= MIN_TOKEN_LEN || ALLOWED_SHORT.has(token);
 }
 
 /**
- * The key two module paths are compared by: the normalized path, lowercased.
- * Folded on every platform, not only on case-insensitive filesystems: `Infra.adf`
- * and `infra.adf` are one file on Windows and macOS, and a repo holding both
- * cannot be checked out there, so treating them as one module keeps the manifest
- * the same wherever it is written (#349).
+ * The key two module paths are compared by when deciding whether they name
+ * one file: the normalized path, lowercased when `caseInsensitive` (#349).
+ * Only fold where the filesystem does: on Linux `Infra.adf` and `infra.adf`
+ * are two files and the loader opens the exact name.
  */
-export function moduleKey(modulePath: string): string {
-  return normalizeModulePath(modulePath).toLowerCase();
+export function moduleKey(modulePath: string, caseInsensitive: boolean): string {
+  const normalized = normalizeModulePath(modulePath);
+  return caseInsensitive ? normalized.toLowerCase() : normalized;
+}
+
+/**
+ * True when `dir` is on a case-insensitive filesystem (Windows and macOS by
+ * default): `name`, an existing entry of `dir`, is also found with its case
+ * swapped and no entry is literally spelled that way.
+ */
+export function isCaseInsensitiveDir(dir: string, name = 'manifest.adf'): boolean {
+  const swapped = [...name].map(c => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase())).join('');
+  if (swapped === name) return false;
+  try {
+    return fs.existsSync(path.join(dir, name)) && fs.existsSync(path.join(dir, swapped)) && !fs.readdirSync(dir).includes(swapped);
+  } catch {
+    return false;
+  }
 }
 
 /** The stem fallback trigger: the module's file stem, lowercased and tokenized. */
@@ -186,10 +204,9 @@ export function inferTriggers(
   manifest?: Pick<ParsedManifest, 'onDemand'>,
 ): { triggers: string[]; triggerSources: TriggerInferenceSource[] } {
   const target = normalizeModulePath(module);
-  const targetKey = moduleKey(target);
   const taken = new Set<string>();
   for (const mod of manifest?.onDemand ?? []) {
-    if (moduleKey(mod.path) === targetKey) continue;
+    if (normalizeModulePath(mod.path) === target) continue;
     for (const t of mod.triggers) taken.add(t.trim().toLowerCase());
   }
 
@@ -208,10 +225,10 @@ export function inferTriggers(
 
   const scores = new Map<string, { score: number; source: TriggerInferenceSource; order: number }>();
   for (const item of items) {
-    if (moduleKey(item.classification.targetModule) !== targetKey) continue;
+    if (normalizeModulePath(item.classification.targetModule) !== target) continue;
     const perItem = new Map<string, TriggerInferenceSource>();
     const trace = item.classification.routingTrace;
-    if (trace?.headingKeyword && moduleKey(trace.headingModule) === targetKey) {
+    if (trace?.headingKeyword && normalizeModulePath(trace.headingModule) === target) {
       for (const t of tokenizeTriggerText(trace.headingKeyword)) perItem.set(t, 'heading-keyword');
     }
     for (const t of tokenizeTriggerText(item.sourceHeading)) {
@@ -436,7 +453,9 @@ export function registerManifestModules(
 ): RegisterManifestModulesResult {
   const warn = options.onWarning ?? (() => undefined);
   // One registration per module: a repeated module keeps its first entry.
-  const entries = planned.filter((e, i) => planned.findIndex(o => moduleKey(o.module) === moduleKey(e.module)) === i);
+  const fold = options.caseInsensitive ?? isCaseInsensitiveDir(path.dirname(manifestPath));
+  const keyOf = (p: string): string => moduleKey(p, fold);
+  const entries = planned.filter((e, i) => planned.findIndex(o => keyOf(o.module) === keyOf(e.module)) === i);
 
   if (!fs.existsSync(manifestPath)) {
     if (entries.length > 0) {
@@ -461,10 +480,13 @@ export function registerManifestModules(
   }
 
   // DEFAULT_LOAD wins when a module is listed in both sections.
-  // Keyed by moduleKey, so `Infra.adf` finds an existing `infra.adf` entry.
+  // Keyed by moduleKey: on a case-insensitive filesystem `Infra.adf` finds an
+  // existing `infra.adf` entry. A required DEFAULT_LOAD module (core.adf,
+  // state.adf) needs its exact name, which is what doctor checks for.
   const existing = new Map<string, { policy: LoadPolicy; triggers: readonly string[]; path: string }>();
-  for (const mod of manifest.onDemand) existing.set(moduleKey(mod.path), { policy: 'ON_DEMAND', triggers: mod.triggers, path: normalizeModulePath(mod.path) });
-  for (const mod of manifest.defaultLoad) existing.set(moduleKey(mod), { policy: 'DEFAULT_LOAD', triggers: [], path: normalizeModulePath(mod) });
+  for (const mod of manifest.onDemand) existing.set(keyOf(mod.path), { policy: 'ON_DEMAND', triggers: mod.triggers, path: normalizeModulePath(mod.path) });
+  for (const mod of manifest.defaultLoad) existing.set(keyOf(mod), { policy: 'DEFAULT_LOAD', triggers: [], path: normalizeModulePath(mod) });
+  const exact = new Set([...manifest.onDemand.map(m => m.path), ...manifest.defaultLoad].map(normalizeModulePath));
 
   const expected: AdfDocument = JSON.parse(JSON.stringify(doc));
   const registrations: ModuleRegistration[] = [];
@@ -472,8 +494,8 @@ export function registerManifestModules(
   let next = text;
 
   for (const entry of entries) {
-    const found = existing.get(moduleKey(entry.module));
-    if (found) {
+    const found = existing.get(keyOf(entry.module));
+    if (found && (exact.has(entry.module) || entry.loadPolicy !== 'DEFAULT_LOAD')) {
       if (entry.loadPolicy === 'DEFAULT_LOAD' && found.policy === 'ON_DEMAND') {
         warn(`${entry.module} is listed under ON_DEMAND in ${manifestPath}; not moved. Move ${entry.module} from ON_DEMAND to DEFAULT_LOAD in .ai/manifest.adf`);
       }
@@ -503,7 +525,8 @@ export function registerManifestModules(
     } else {
       section.content = { type: 'list', items: [bullet] };
     }
-    existing.set(moduleKey(entry.module), { policy: key, triggers: entry.triggers, path: entry.module });
+    existing.set(keyOf(entry.module), { policy: key, triggers: entry.triggers, path: entry.module });
+    exact.add(entry.module);
     pending.push(registrations.length);
     registrations.push({ ...entry, status: options.dryRun ? 'planned' : 'added' });
   }
@@ -544,12 +567,18 @@ export function registerModules(
   } catch {
     // The writer reports an unparseable manifest as skipped.
   }
-  const planned = modules.map(m => planModuleRegistration(
+  // Where two spellings name one file, plan it once from the items of both.
+  const fold = options.caseInsensitive ?? isCaseInsensitiveDir(path.dirname(manifestPath));
+  const keyOf = (p: string): string => moduleKey(p, fold);
+  const unique = modules.filter((m, i) => modules.findIndex(o => keyOf(o) === keyOf(m)) === i);
+  const planned = unique.map(m => planModuleRegistration(
     m,
-    items.filter(i => i.classification.targetModule === m),
+    items
+      .filter(i => keyOf(i.classification.targetModule) === keyOf(m))
+      .map(i => (i.classification.targetModule === m ? i : { ...i, classification: { ...i.classification, targetModule: m } })),
     manifest,
   ));
-  return registerManifestModules(manifestPath, planned, options);
+  return registerManifestModules(manifestPath, planned, { ...options, caseInsensitive: fold });
 }
 
 // ============================================================================
@@ -599,8 +628,8 @@ export function dedupePlannedRegistrations(
 ): void {
   for (const reg of result.registrations) {
     if (reg.status !== 'planned') continue;
-    if (!plannedSoFar.has(moduleKey(reg.module))) {
-      plannedSoFar.add(moduleKey(reg.module));
+    if (!plannedSoFar.has(reg.module)) {
+      plannedSoFar.add(reg.module);
       continue;
     }
     reg.status = 'already-registered';
