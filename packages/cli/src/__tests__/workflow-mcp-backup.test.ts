@@ -185,6 +185,8 @@ describe('#374 known workflow versions', () => {
       const entry = KNOWN_WORKFLOWS.find(k => k.hash === workflowHash(getGithubWorkflow(pm)));
       expect(entry).toMatchObject({ safe: true, packageManager: pm });
     }
+    const pinned = KNOWN_WORKFLOWS.find(k => k.hash === workflowHash(getGithubWorkflow('pnpm', 'pnpm@10.34.6')));
+    expect(pinned).toMatchObject({ safe: true, packageManager: 'pnpm' });
   });
 
   it('every known hash is unique, a sha256, with a safe flag; every unsafe one has a description', () => {
@@ -200,7 +202,7 @@ describe('#374 known workflow versions', () => {
 
   it('the history fixture and the known list match one to one, and every pre-badge template is unsafe', () => {
     const fixtureHashes = HISTORY.map(h => workflowHash(h.text));
-    const current = [workflowHash(getGithubWorkflow('npm')), workflowHash(getGithubWorkflow('pnpm'))];
+    const current = [workflowHash(getGithubWorkflow('npm')), workflowHash(getGithubWorkflow('pnpm')), workflowHash(getGithubWorkflow('pnpm', 'pnpm@10.34.6'))];
     expect(new Set([...fixtureHashes, ...current])).toEqual(new Set(KNOWN_WORKFLOWS.map(k => k.hash)));
     expect(fixtureHashes.length + current.length).toBe(KNOWN_WORKFLOWS.length);
     for (const h of HISTORY.filter(e => e.safe)) {

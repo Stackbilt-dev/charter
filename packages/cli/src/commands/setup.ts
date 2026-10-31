@@ -30,12 +30,15 @@ export function workflowCharterCommand(packageManager: 'npm' | 'pnpm'): string {
   return packageManager === 'pnpm' ? 'pnpm exec charter' : 'npm exec --no --package=@stackbilt/cli -- charter';
 }
 
-export function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
+export function getGithubWorkflow(packageManager: 'npm' | 'pnpm', declaredPackageManager?: string): string {
   const cli = workflowCharterCommand(packageManager);
+  // Let the action read the complete pin (including a Corepack integrity suffix)
+  // from package.json. Repositories without a valid pin retain the pnpm 9 fallback.
+  const pnpmVersion = typeof declaredPackageManager === 'string'
+    && /^pnpm@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(declaredPackageManager)
+    ? '' : '\n        with:\n          version: 9';
   const installStep = packageManager === 'pnpm'
-    ? `      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+    ? `      - uses: pnpm/action-setup@v4${pnpmVersion}
 
       - uses: actions/setup-node@v4
         with:
@@ -247,6 +250,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const contexts = loadPackageContexts();
   const detection = detectStack(contexts);
   const packageManager = detectPackageManager(contexts);
+  const declaredPackageManager = contexts.find(ctx => ctx.source === 'package.json')?.packageManager;
   const selectedPreset: StackPreset = isValidPreset(presetFlag) ? presetFlag : detection.suggestedPreset;
   const inferenceMode = presetFlag
     ? 'preset-override'
@@ -289,7 +293,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const baselinePlan = planBaselineMutation(baselinePath, explicitForce);
   const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
   const workflowPlan = ciMode === 'github'
-    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager), explicitForce)
+    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager, declaredPackageManager), explicitForce)
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
@@ -381,7 +385,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (ciMode === 'github') {
     // #374: refresh only a safe Charter template; any other workflow is kept,
     // or under --force backed up to .charter/.backup/ and replaced.
-    const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
+    const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager, declaredPackageManager), {
       force,
       configDir: options.configPath,
       command: 'setup',
