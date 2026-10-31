@@ -235,7 +235,7 @@ describe('#369 .mcp.json mcpServers.charter', () => {
     write('.mcp.json', MCP);
     expect(await bootstrapCommand(TEXT, ['--force', ...BOOT])).toBe(0);
     const parsed = JSON.parse(read('.mcp.json'));
-    expect(parsed.mcpServers.charter).toEqual({ command: 'npx', args: ['@stackbilt/cli', 'serve', '--ai-dir', '.ai'] });
+    expect(parsed.mcpServers.charter).toEqual({ command: 'npm', args: ['exec', '--no', '--package=@stackbilt/cli', '--', 'charter', 'serve', '--ai-dir', '.ai'] });
     expect(parsed.mcpServers.github).toEqual({ command: 'npx', args: ['@modelcontextprotocol/server-github'] });
     expect(parsed.other).toEqual({ keep: true });
     const backups = fs.readdirSync('.charter/.backup').filter(f => f.startsWith('mcp.json.'));
@@ -717,7 +717,7 @@ describe('a .backup/.gitignore that cannot be written is a warning', () => {
     expect(setup.status).toBe('pass');
     expect(setup.details.mcpBackup).toMatch(/^\.charter\/\.backup\/mcp\.json\./);
     expect(setup.warnings.some((w: string) => w.includes('Could not write .charter/.backup/.gitignore'))).toBe(true);
-    expect(JSON.parse(read('.mcp.json')).mcpServers.charter.command).toBe('npx');
+    expect(JSON.parse(read('.mcp.json')).mcpServers.charter.command).toBe('npm');
   });
 
   it('init --force still replaces, and warns', async () => {

@@ -257,9 +257,9 @@ STATE:
     const raw = fs.readFileSync('.mcp.json', 'utf-8');
     const parsed = JSON.parse(raw);
     expect(parsed).toHaveProperty('mcpServers.charter');
-    expect(parsed.mcpServers.charter.command).toBe('npx');
+    expect(parsed.mcpServers.charter.command).toBe('npm');
     expect(parsed.mcpServers.charter.args).toEqual([
-      '@stackbilt/cli',
+      'exec', '--no', '--package=@stackbilt/cli', '--', 'charter',
       'serve',
       '--ai-dir',
       '.ai',
