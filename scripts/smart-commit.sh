@@ -2,15 +2,19 @@
 set -euo pipefail
 
 DRY_RUN=0
+MERGE=0
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run)
       DRY_RUN=1
       ;;
+    --merge)
+      MERGE=1
+      ;;
     *)
       echo "Unknown argument: $arg" >&2
-      echo "Usage: scripts/smart-commit.sh [--dry-run]" >&2
+      echo "Usage: scripts/smart-commit.sh [--dry-run] [--merge]" >&2
       exit 2
       ;;
   esac
@@ -23,6 +27,24 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+
+if [[ "$MERGE" -eq 1 ]]; then
+  if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    echo 'Error: --merge requires a merge in progress.' >&2
+    exit 1
+  fi
+  git diff --check
+  git diff --cached --check
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo '[DRY-RUN] Complete pending merge with tracked changes only:'
+    git diff HEAD --name-only
+    exit 0
+  fi
+  # Include resolved tracked files, leaving unrelated untracked work alone.
+  git add -u
+  git commit --no-edit
+  exit 0
+fi
 
 if [[ "$(git diff --name-only --cached | wc -l | tr -d ' ')" != "0" ]]; then
   echo 'Error: staged changes detected.' >&2
