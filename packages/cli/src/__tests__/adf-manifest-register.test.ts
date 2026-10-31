@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { classifyElement, parseAdf, parseManifest } from '@stackbilt/adf';
+import { bundleModules, classifyElement, parseAdf, parseManifest, resolveModules } from '@stackbilt/adf';
 import type { MigrationItem } from '@stackbilt/adf';
 import {
   ALLOWED_SHORT_TOKENS,
@@ -10,6 +10,7 @@ import {
   dedupePlannedRegistrations,
   formatRegisterDetail,
   inferTriggers,
+  isCaseInsensitiveDir,
   planModuleRegistration,
   registerManifestModules,
   registerModules,
@@ -18,6 +19,7 @@ import {
 } from '../commands/adf-manifest-register';
 import type { ModuleRegistration } from '../commands/adf-manifest-register';
 import { NAMED_MODULE_DEFAULT_TRIGGERS } from '../commands/adf-named-scaffolds';
+import { findMissingDefaultLoad } from '../commands/adf-wiring';
 
 // #239: the shared manifest writer and the ON_DEMAND trigger inference.
 
@@ -56,13 +58,13 @@ describe('tokenizeTriggerText', () => {
 
 describe('inferTriggers', () => {
   it('weights the heading keyword above plain heading tokens', () => {
-    const items = [item('Deployment workflow'), item('Release workflow')].map(i => {
+    const items = [item('Deployment checklist'), item('Rollback checklist')].map(i => {
       i.classification.targetModule = 'infra.adf';
       return i;
     });
     const result = inferTriggers('infra.adf', items);
-    // deployment: keyword (2); workflow: 1 + 1; release: 1 — ties break by first appearance.
-    expect(result.triggers).toEqual(['deployment', 'workflow', 'release']);
+    // deployment: keyword (2); checklist: 1 + 1; rollback: 1 — ties break by first appearance.
+    expect(result.triggers).toEqual(['deployment', 'checklist', 'rollback']);
     expect(result.triggerSources).toEqual(['heading-keyword', 'heading-token', 'heading-token']);
   });
 
@@ -78,8 +80,57 @@ describe('inferTriggers', () => {
 
   it('drops tokens that already trigger another ON_DEMAND module', () => {
     const manifest = { onDemand: [{ path: 'frontend.adf', triggers: ['React', 'CSS'], loadPolicy: 'ON_DEMAND' as const }] };
-    const result = inferTriggers('infra.adf', [routedTo('infra.adf', 'Deployment of React apps')], manifest);
-    expect(result.triggers).toEqual(['deployment', 'apps']);
+    const result = inferTriggers('infra.adf', [routedTo('infra.adf', 'Deployment of React services')], manifest);
+    expect(result.triggers).toEqual(['deployment', 'services']);
+  });
+
+  // Headings as they appear in real CLAUDE.md / AGENTS.md files (#349).
+  it.each([
+    ['Build & Test Commands', ['build', 'test']],
+    ['Development Workflow', ['ops']],
+    ['Release Process (v2.1)', ['ops']],
+    ['Step 1: Install Dependencies', ['install', 'dependencies']],
+    ['Images and Components', ['ops']],
+    ['Apps via Turborepo', ['turborepo']],
+    ['Database Migrations', ['database', 'migrations']],
+    ['Code Style Guidelines', ['style']],
+    ['Testing with Vitest', ['testing', 'vitest']],
+    ['Deploying to Cloudflare Workers (2024)', ['deploying', 'cloudflare', 'workers']],
+    ['Things to Avoid', ['ops']],
+    ['Common Commands', ['ops']],
+    ['API Routes & Auth', ['api', 'routes', 'auth']],
+    ['Key Files and Project Structure', ['ops']],
+    ['Node 20 / pnpm 9 Setup', ['node', 'pnpm']],
+    ['Getting Started: Docker Compose', ['docker', 'compose']],
+  ])('heading %j yields %j', (heading, expected) => {
+    expect(inferTriggers('ops.adf', [routedTo('ops.adf', heading)]).triggers).toEqual(expected);
+  });
+
+  it('drops all-digit and version-number tokens', () => {
+    const result = inferTriggers('ops.adf', [routedTo('ops.adf', '2024 roadmap: 1.2 to v3 via kubernetes 1-2')]);
+    expect(result.triggers).toEqual(['roadmap', 'kubernetes']);
+    const versions = inferTriggers('ops.adf', [routedTo('ops.adf', 'Node.js v20.x, 1.x, v2.0-beta, v2.0-beta-2, v2.1.0-rc.1, ES2022')]);
+    expect(versions.triggers).toEqual(['node.js', 'es2022']);
+    // All-digit tokens are dropped whatever they mean: `404` too.
+    expect(inferTriggers('web.adf', [routedTo('web.adf', '404 Pages and Redirects')]).triggers).toEqual(['pages', 'redirects']);
+  });
+
+  it('drops task verbs and generic nouns', () => {
+    expect(inferTriggers('api.adf', [routedTo('api.adf', 'How to Add a New Endpoint')]).triggers).toEqual(['endpoint']);
+    const heading = 'Fix, Create, Remove, Implement, Write, Run, Running, Make: Known Considerations, Instructions, '
+      + 'Requirements, Prerequisites, Examples, Support, Engineering for Kafka';
+    expect(inferTriggers('ops.adf', [routedTo('ops.adf', heading)]).triggers).toEqual(['kafka']);
+    // Still used when it is the module's own stem.
+    expect(inferTriggers('support.adf', [routedTo('support.adf', 'Support Tickets')]).triggers).toEqual(['support', 'tickets']);
+  });
+
+  it("keeps a generic word that is the module's own stem", () => {
+    const items = [routedTo('release.adf', 'Release Process'), routedTo('release.adf', 'Changelog')];
+    expect(inferTriggers('release.adf', items).triggers).toEqual(['release', 'changelog']);
+    expect(inferTriggers('release-workflow.adf', [routedTo('release-workflow.adf', 'Release workflow')]).triggers)
+      .toEqual(['release', 'workflow']);
+    expect(inferTriggers('ops.adf', items.map(i => ({ ...i, classification: { ...i.classification, targetModule: 'ops.adf' } }))).triggers)
+      .toEqual(['changelog']);
   });
 
   it('caps at MAX_TRIGGERS', () => {
@@ -270,6 +321,174 @@ describe('registerManifestModules', () => {
     expect(parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.filter(m => m.path === 'infra.adf')).toHaveLength(1);
   });
 
+  describe('module path case (#349)', () => {
+    const ci = { onWarning, caseInsensitive: true };
+    const cs = { onWarning, caseInsensitive: false };
+
+    it('on a case-insensitive filesystem, matches an existing entry and reports its spelling', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const before = fs.readFileSync(manifestPath, 'utf-8');
+      const result = registerManifestModules(manifestPath, [plan('Frontend.adf', 'Storybook')], ci);
+      expect(result.written).toBe(false);
+      expect(result.registrations.map(r => [r.module, r.status, r.loadPolicy, r.triggers])).toEqual([
+        ['Frontend.adf', 'already-registered', 'ON_DEMAND', ['React', 'CSS', 'UI']],
+      ]);
+      expect(result.registrations[0].reason).toContain('already registered as frontend.adf under ON_DEMAND');
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
+    });
+
+    it('on a case-insensitive filesystem, adds one entry for two spellings in a single call', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const result = registerManifestModules(manifestPath, [plan('Infra.adf'), plan('infra.adf', 'Docker')], ci);
+      expect(result.registrations.map(r => [r.module, r.status])).toEqual([['Infra.adf', 'added']]);
+      const paths = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.map(m => m.path);
+      expect(paths).toEqual(['frontend.adf', 'Infra.adf']);
+      const again = registerManifestModules(manifestPath, [plan('infra.adf', 'Docker')], ci);
+      expect(again.registrations[0].status).toBe('already-registered');
+      expect(again.written).toBe(false);
+    });
+
+    it('on a case-sensitive filesystem, registers the other spelling as its own module', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const result = registerManifestModules(manifestPath, [plan('Frontend.adf', 'Storybook')], cs);
+      expect(result.registrations.map(r => [r.module, r.status])).toEqual([['Frontend.adf', 'added']]);
+      const paths = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).onDemand.map(m => m.path);
+      expect(paths).toEqual(['frontend.adf', 'Frontend.adf']);
+    });
+
+    const MISCASED = MANIFEST.replace('  - core.adf\n', '  - Core.adf\n');
+    const CORE = 'ADF: 0.1\n\n⚠️ CONSTRAINTS:\n  - Never commit secrets\n  - Run tests before pushing\n';
+    const STATE = 'ADF: 0.1\n\n\u{1F4CB} STATE:\n  CURRENT: testing\n';
+
+    it('on a case-insensitive filesystem, respells a miscased required DEFAULT_LOAD entry in place', () => {
+      fs.writeFileSync(manifestPath, MISCASED);
+      fs.writeFileSync(path.join(tempDir, 'core.adf'), CORE);
+      const dry = registerManifestModules(manifestPath, [plan('core.adf')], { ...ci, dryRun: true });
+      expect(dry.written).toBe(false);
+      expect(dry.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf', respelled: 'planned' });
+      expect(dry.registrations[0].reason).toContain('would be respelled to core.adf');
+      expect(formatRegisterDetail(dry.registrations[0])).toBe('core.adf → DEFAULT_LOAD [already registered as Core.adf; would be respelled to core.adf]');
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(MISCASED);
+
+      const result = registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      expect(result.written).toBe(true);
+      expect(result.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf', respelled: 'written' });
+      expect(formatRegisterDetail(result.registrations[0])).toBe('core.adf → DEFAULT_LOAD [already registered as Core.adf; respelled to core.adf]');
+      expect(warnings).toEqual([]);
+      // Only that one token changed.
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(MANIFEST);
+      const again = registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      expect(again.written).toBe(false);
+      expect(again.registrations[0]).toMatchObject({ status: 'already-registered' });
+      expect(again.registrations[0].respelled).toBeUndefined();
+    });
+
+    it('after the respelling, adf bundle loads each core.adf item once', () => {
+      fs.writeFileSync(manifestPath, MISCASED);
+      fs.writeFileSync(path.join(tempDir, 'core.adf'), CORE);
+      fs.writeFileSync(path.join(tempDir, 'state.adf'), STATE);
+      registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      const manifest = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8')));
+      expect(manifest.defaultLoad).toEqual(['core.adf', 'state.adf']);
+      expect(findMissingDefaultLoad(manifest)).toEqual([]);
+      const bundle = bundleModules(tempDir, resolveModules(manifest, []), p => fs.readFileSync(p, 'utf-8'));
+      const constraints = bundle.mergedDocument.sections.find(s => s.key === 'CONSTRAINTS');
+      expect(constraints?.content).toMatchObject({ type: 'list', items: ['Never commit secrets', 'Run tests before pushing'] });
+      if (fs.existsSync(path.join(tempDir, 'Core.adf'))) {
+        // Control, on a real case-insensitive filesystem: two spellings load the file twice.
+        const twice = bundleModules(tempDir, ['Core.adf', 'core.adf'], p => fs.readFileSync(p, 'utf-8'));
+        const items = twice.mergedDocument.sections.find(s => s.key === 'CONSTRAINTS')?.content;
+        expect(items?.type === 'list' ? items.items.length : 0).toBe(4);
+      }
+    });
+
+    it('respells to the name on disk, and leaves an entry that already has it', () => {
+      fs.writeFileSync(manifestPath, MANIFEST.replace('  - core.adf\n', '  - CORE.adf\n'));
+      fs.writeFileSync(path.join(tempDir, 'Core.adf'), CORE);
+      const result = registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      expect(result.registrations[0]).toMatchObject({ module: 'Core.adf', registeredAs: 'CORE.adf', respelled: 'written' });
+      expect(parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8'))).defaultLoad).toEqual(['Core.adf', 'state.adf']);
+      const again = registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      expect(again.written).toBe(false);
+      expect(again.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf' });
+    });
+
+    it('warns instead of adding a duplicate when the respelling fails the guard', () => {
+      // The manifest reader takes Core.adf from the first DEFAULT_LOAD list (the
+      // last one is not a list), which the text patch does not edit.
+      const text = 'ADF: 0.1\n\n\u{1F4E6} DEFAULT_LOAD:\n  - Core.adf\n\n\u{1F4E6} DEFAULT_LOAD: state.adf\n';
+      fs.writeFileSync(manifestPath, text);
+      const result = registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      expect(result.written).toBe(false);
+      expect(result.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', registeredAs: 'Core.adf' });
+      expect(result.registrations[0].respelled).toBeUndefined();
+      expect(warnings).toEqual([
+        `Core.adf and core.adf are the same file here; core.adf was not added again. Rename Core.adf to core.adf under DEFAULT_LOAD in ${manifestPath}`,
+      ]);
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(text);
+    });
+
+    it('on a case-insensitive filesystem, a miscased required module under ON_DEMAND is reported, not added again', () => {
+      const text = MANIFEST.replace('  - core.adf\n', '').replace('(Triggers on: React, CSS, UI)\n', '(Triggers on: React, CSS, UI)\n  - Core.adf (Triggers on: core)\n');
+      fs.writeFileSync(manifestPath, text);
+      const result = registerManifestModules(manifestPath, [plan('core.adf')], ci);
+      expect(result.written).toBe(false);
+      expect(result.registrations[0]).toMatchObject({ module: 'core.adf', status: 'already-registered', loadPolicy: 'ON_DEMAND', registeredAs: 'Core.adf' });
+      expect(warnings).toEqual([
+        `Core.adf is listed under ON_DEMAND in ${manifestPath}; not moved. Move Core.adf from ON_DEMAND to DEFAULT_LOAD as core.adf in .ai/manifest.adf`,
+      ]);
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(text);
+    });
+
+    it('on a case-sensitive filesystem, adds a required DEFAULT_LOAD module under its exact name, as doctor checks it', () => {
+      fs.writeFileSync(manifestPath, MISCASED);
+      const result = registerManifestModules(manifestPath, [plan('core.adf')], cs);
+      expect(result.registrations.map(r => [r.module, r.status])).toEqual([['core.adf', 'added']]);
+      const manifest = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8')));
+      expect(manifest.defaultLoad).toEqual(['Core.adf', 'state.adf', 'core.adf']);
+      expect(findMissingDefaultLoad(manifest)).toEqual([]);
+    });
+
+    it('registerModules plans two spellings once, from the items of both, on a case-insensitive filesystem', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const items = [routedTo('Ops.adf', 'Terraform'), routedTo('ops.adf', 'Kubernetes')];
+      const result = registerModules(manifestPath, ['Ops.adf', 'ops.adf'], items, ci);
+      expect(result.registrations.map(r => [r.module, r.status, r.triggers])).toEqual([['Ops.adf', 'added', ['terraform', 'kubernetes']]]);
+      fs.writeFileSync(manifestPath, MANIFEST);
+      const separate = registerModules(manifestPath, ['Ops.adf', 'ops.adf'], items, cs);
+      expect(separate.registrations.map(r => [r.module, r.status, r.triggers])).toEqual([
+        ['Ops.adf', 'added', ['terraform']],
+        ['ops.adf', 'added', ['kubernetes']],
+      ]);
+    });
+
+    it('isCaseInsensitiveDir agrees with the filesystem', () => {
+      fs.writeFileSync(manifestPath, MANIFEST);
+      expect(isCaseInsensitiveDir(tempDir)).toBe(fs.existsSync(path.join(tempDir, 'MANIFEST.ADF')));
+      expect(isCaseInsensitiveDir(path.join(tempDir, 'missing'))).toBe(false);
+    });
+
+    it('isCaseInsensitiveDir detects a manifest spelled MANIFEST.ADF', () => {
+      const upper = path.join(tempDir, 'MANIFEST.ADF');
+      fs.writeFileSync(upper, MANIFEST);
+      const insensitive = fs.existsSync(manifestPath);
+      expect(isCaseInsensitiveDir(tempDir)).toBe(insensitive);
+      if (!insensitive) {
+        // Case-sensitive: two files, two spellings.
+        fs.writeFileSync(manifestPath, MANIFEST);
+        expect(isCaseInsensitiveDir(tempDir)).toBe(false);
+      }
+    });
+
+    it('a MANIFEST.ADF on a case-insensitive filesystem still folds module paths', () => {
+      fs.writeFileSync(path.join(tempDir, 'MANIFEST.ADF'), MANIFEST);
+      if (!fs.existsSync(manifestPath)) return; // case-sensitive: covered by the override tests above
+      const upperPath = path.join(tempDir, 'MANIFEST.ADF');
+      const result = registerManifestModules(upperPath, [plan('Frontend.adf', 'Storybook')], { onWarning });
+      expect(result.registrations[0]).toMatchObject({ status: 'already-registered', registeredAs: 'frontend.adf' });
+    });
+  });
+
   it('registerModules gives orphans the stem trigger', () => {
     fs.writeFileSync(manifestPath, MANIFEST);
     const result = registerModules(manifestPath, ['Ops.adf', 'state.adf'], [], { onWarning });
@@ -406,6 +625,8 @@ describe('REGISTER output helpers', () => {
     expect(formatRegisterDetail(reg({}))).toBe('infra.adf → ON_DEMAND: deploy, ci');
     expect(formatRegisterDetail(reg({ status: 'planned' }))).toBe('infra.adf → ON_DEMAND: deploy, ci [planned]');
     expect(formatRegisterDetail(reg({ status: 'already-registered' }))).toBe('infra.adf → ON_DEMAND: deploy, ci [already registered]');
+    expect(formatRegisterDetail(reg({ status: 'already-registered', registeredAs: 'Infra.adf' })))
+      .toBe('infra.adf → ON_DEMAND: deploy, ci [already registered as Infra.adf]');
     expect(formatRegisterDetail(reg({ status: 'skipped', skipReason: 'manifest-missing' }))).toBe('infra.adf → ON_DEMAND: deploy, ci [skipped: manifest-missing]');
     expect(formatRegisterDetail(reg({ module: 'core.adf', loadPolicy: 'DEFAULT_LOAD', triggers: [], triggerSources: [] }))).toBe('core.adf → DEFAULT_LOAD');
   });

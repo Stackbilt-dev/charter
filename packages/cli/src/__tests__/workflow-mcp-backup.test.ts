@@ -16,7 +16,7 @@ vi.mock('../git-helpers', async (importOriginal) => {
 });
 
 import { bootstrapCommand } from '../commands/bootstrap';
-import { getGithubWorkflow, setupCommand } from '../commands/setup';
+import { getGithubWorkflow, setupCommand, workflowCharterCommand } from '../commands/setup';
 import { applyGovernanceWorkflow, KNOWN_WORKFLOWS, normalizeWorkflow, TEMPLATE_PERMISSIONS, workflowHash } from '../commands/github-workflow';
 
 const TEXT: CLIOptions = { configPath: '.charter', format: 'text', ciMode: false, yes: false };
@@ -161,10 +161,12 @@ describe('#374 .mcp.json: CRLF', () => {
 });
 
 // Every historical template (not the current ones), as setup.ts generated it.
-const HISTORY: Array<{ commit: string; packageManager: 'npm' | 'pnpm'; text: string }> = JSON.parse(
+// `safe: true` marks one with the current permissions and triggers (#380).
+const HISTORY: Array<{ commit: string; packageManager: 'npm' | 'pnpm'; safe?: boolean; text: string }> = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'fixtures', 'charter-governance-history.json'), 'utf-8'),
 );
 const PRE_BADGE = 'contents: read → write; adds push and workflow_dispatch triggers; adds a step that commits and pushes to the repo';
+const PM_CLI = 'runs Charter as pnpm exec charter (pnpm) or npm exec --no --package=@stackbilt/cli -- charter (npm) instead of npx charter';
 const TEMPLATE_LINE = 'the current Charter template grants contents: write and pull-requests: write, runs on push, pull_request and workflow_dispatch, and has a step that commits and pushes to the repo';
 
 // Hand edits that a YAML diff could misread; none may be described as a change.
@@ -191,16 +193,29 @@ describe('#374 known workflow versions', () => {
     for (const k of KNOWN_WORKFLOWS) {
       expect(k.hash).toMatch(/^[0-9a-f]{64}$/);
       expect(typeof k.safe).toBe('boolean');
-      expect(k.origin).toMatch(/^[0-9a-f]{7}[ ,]/);
+      expect(k.origin).toMatch(/^(?:[0-9a-f]{7}|#\d+)[ ,]/);
       if (!k.safe) expect(k.refreshChanges.trim().length).toBeGreaterThan(0);
     }
   });
 
-  it('the history fixture and the known list match one to one, and every historical template is unsafe', () => {
+  it('the history fixture and the known list match one to one, and every pre-badge template is unsafe', () => {
     const fixtureHashes = HISTORY.map(h => workflowHash(h.text));
     const current = [workflowHash(getGithubWorkflow('npm')), workflowHash(getGithubWorkflow('pnpm'))];
     expect(new Set([...fixtureHashes, ...current])).toEqual(new Set(KNOWN_WORKFLOWS.map(k => k.hash)));
-    for (const h of HISTORY) {
+    expect(fixtureHashes.length + current.length).toBe(KNOWN_WORKFLOWS.length);
+    for (const h of HISTORY.filter(e => e.safe)) {
+      // A safe historical template grants exactly what the current one does (#380).
+      const k = KNOWN_WORKFLOWS.find(e => e.hash === workflowHash(h.text));
+      expect(k).toMatchObject({ safe: true, packageManager: h.packageManager, refreshChanges: PM_CLI });
+      expect(k?.origin.startsWith(h.commit)).toBe(true);
+      const head = (t: string): string => t.slice(0, t.indexOf('\njobs:'));
+      expect(head(h.text)).toBe(head(getGithubWorkflow(h.packageManager)));
+      expect(h.text).toContain('git push');
+      expect(h.text).toContain('npx charter validate');
+      // ...and the refresh changes only how Charter is run.
+      expect(h.text.replace(/npx charter /g, '{{CLI}} ')).toBe(getGithubWorkflow(h.packageManager).split(`${workflowCharterCommand(h.packageManager)} `).join('{{CLI}} '));
+    }
+    for (const h of HISTORY.filter(e => !e.safe)) {
       const k = KNOWN_WORKFLOWS.find(e => e.hash === workflowHash(h.text));
       expect(k).toMatchObject({ safe: false, packageManager: h.packageManager, refreshChanges: PRE_BADGE });
       expect(k?.origin.startsWith(h.commit)).toBe(true);
@@ -302,7 +317,19 @@ describe('#374 bootstrap --ci github: the workflow', () => {
     expect(fs.existsSync('.charter/.backup')).toBe(false);
   });
 
-  for (const h of HISTORY) {
+  for (const h of HISTORY.filter(e => e.safe)) {
+    it(`refreshes the ${h.commit} ${h.packageManager} template under --yes, silently (same permissions, #380)`, async () => {
+      write(WF, h.text);
+      if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');
+      expect(await bootstrapCommand(YES, ['--yes', '--ci', 'github', ...BOOT])).toBe(0);
+      expect(read(WF)).toBe(getGithubWorkflow(h.packageManager));
+      expect(out).toContain(`  Updated ${P(WF)}`);
+      expect(out.some(l => l.includes('Warning: Kept'))).toBe(false);
+      expect(fs.existsSync('.charter/.backup')).toBe(false);
+    });
+  }
+
+  for (const h of HISTORY.filter(e => !e.safe)) {
     it(`keeps the ${h.commit} ${h.packageManager} template under --yes with the static message`, async () => {
       write(WF, h.text);
       if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');
@@ -470,7 +497,18 @@ describe('#374 setup --ci github: the workflow', () => {
     expect(warning).toContain('To replace only the workflow, delete it and re-run');
   });
 
-  for (const h of HISTORY) {
+  for (const h of HISTORY.filter(e => e.safe)) {
+    it(`setup refreshes the ${h.commit} ${h.packageManager} template without --force (#380)`, async () => {
+      write(WF, h.text);
+      if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');
+      expect(await setupCommand(YES, SETUP)).toBe(0);
+      expect(read(WF)).toBe(getGithubWorkflow(h.packageManager));
+      expect(out.some(l => l.includes('Warning: Kept'))).toBe(false);
+      expect(fs.existsSync('.charter/.backup')).toBe(false);
+    });
+  }
+
+  for (const h of HISTORY.filter(e => !e.safe)) {
     it(`keeps the ${h.commit} ${h.packageManager} template with the static message`, async () => {
       write(WF, h.text);
       if (h.packageManager === 'pnpm') write('pnpm-lock.yaml', '');

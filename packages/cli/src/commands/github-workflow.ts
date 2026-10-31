@@ -4,7 +4,8 @@
  *
  * `bootstrap --ci github` and `setup --ci github` overwrite the workflow
  * without `--force` only when it is a known Charter template marked `safe`
- * (the current npm or pnpm form). An older Charter template is kept, with a
+ * (the current npm or pnpm form, or an earlier one with the same permissions
+ * and triggers). An older Charter template is kept, with a
  * warning that states what refreshing it changes; a workflow that matches no
  * Charter template is kept, with a warning that states what the current
  * template grants. No claim is made about what a hand edit changed: the YAML
@@ -22,19 +23,26 @@ export const TEMPLATE_PERMISSIONS =
   'the current Charter template grants contents: write and pull-requests: write, runs on push, pull_request and workflow_dispatch, ' +
   'and has a step that commits and pushes to the repo';
 
+/** What refreshing a 003ec8d template to the current one changes. Permissions and triggers are the same, so it is safe. */
+const PM_CLI_CHANGES = 'runs Charter as pnpm exec charter (pnpm) or npm exec --no --package=@stackbilt/cli -- charter (npm) instead of npx charter';
+
 /** What refreshing any pre-badge template (contents: read, pull_request only) to the current one changes. */
 const PRE_BADGE_CHANGES = 'contents: read → write; adds push and workflow_dispatch triggers; adds a step that commits and pushes to the repo';
 
 export interface KnownWorkflow {
   /** sha256 of the template after `normalizeWorkflow`. */
   hash: string;
-  /** The first commit in setup.ts's history that generated it, and what set it apart. */
+  /** The first commit in setup.ts's history that generated it (or, before it merges, its issue), and what set it apart. */
   origin: string;
   /** The package manager its install steps are for. */
   packageManager: 'npm' | 'pnpm';
   /** Whether refreshing it to the current template changes nothing CI may do. */
   safe: boolean;
-  /** For an entry that is not safe: what refreshing it changes, shown as is in the warning. */
+  /**
+   * What refreshing it to the current template changes. For an entry that is
+   * not safe it is shown as is in the warning; for a safe one it only documents
+   * the change (a safe refresh is silent).
+   */
   refreshChanges: string;
 }
 
@@ -43,11 +51,15 @@ export interface KnownWorkflow {
  * history of `getGithubWorkflow` / `GITHUB_WORKFLOW` in setup.ts (each
  * template's npm and pnpm form). When the template changes, add the new
  * hashes (a test fails until the current ones are listed), mark the old ones
- * unsafe if the new template grants more, and describe the change by hand.
+ * unsafe if the new template grants more, describe the change by hand, and add
+ * the old templates to the history fixture.
  */
 export const KNOWN_WORKFLOWS: readonly KnownWorkflow[] = [
-  { hash: '59b8380e5926f47656fb4870effe234090528bd9b1f0705d5e283e009e0ff225', origin: '003ec8d, current (score-badge steps)', packageManager: 'npm', safe: true, refreshChanges: '' },
-  { hash: '1ff96c6454952dbc630b6cc079cd1fd7840f6b18673098bec030595968a302cd', origin: '003ec8d, current (score-badge steps)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
+  { hash: '66c71b0e133ffc5d555b941302346211d5b62ea43c8f1b0dc95e16d05f7cdf67', origin: '#380, current (Charter run through the package manager)', packageManager: 'npm', safe: true, refreshChanges: '' },
+  { hash: 'afd0be1c5f55dc3628a0012f65e8cf51a3f672030c9af017470ceeb654374fcb', origin: '#380, current (Charter run through the package manager)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
+  // Same permissions and triggers as the current template: refreshed silently.
+  { hash: '59b8380e5926f47656fb4870effe234090528bd9b1f0705d5e283e009e0ff225', origin: '003ec8d (score-badge steps, npx charter)', packageManager: 'npm', safe: true, refreshChanges: PM_CLI_CHANGES },
+  { hash: '1ff96c6454952dbc630b6cc079cd1fd7840f6b18673098bec030595968a302cd', origin: '003ec8d (score-badge steps, npx charter)', packageManager: 'pnpm', safe: true, refreshChanges: PM_CLI_CHANGES },
   // Everything below ran on pull_request only, with contents: read.
   { hash: '38f58106b0dd4c9a0363d971bfd10c23f1a5067c1998224abd5ed9a70337f98f', origin: '0fdea60 (ADF wiring and evidence steps)', packageManager: 'npm', safe: false, refreshChanges: PRE_BADGE_CHANGES },
   { hash: '87c27e54791175c4a3937490b9f7f03f841269b6d01b1fe303352ab0ebb5748f', origin: '0fdea60 (ADF wiring and evidence steps)', packageManager: 'pnpm', safe: false, refreshChanges: PRE_BADGE_CHANGES },

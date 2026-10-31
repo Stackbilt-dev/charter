@@ -256,52 +256,66 @@ function pointerTemplatesFor(filename: string): string[] {
   return byFilename[filename] ?? [];
 }
 
+/** A retained section's identity: its heading and its body, line ends trimmed. */
+function sectionKey(heading: string, bodyLines: readonly string[]): string {
+  return `${heading}\n${bodyLines.map(l => l.trimEnd()).join('\n').trim()}`;
+}
+
 /**
- * Split a retained-sections block (from readRetainedSections) into heading → body.
- * Charter-managed sentinel blocks are stripped first, so a populated
- * `## Module Index` compares equal to the empty one in the template.
+ * The retained sections of `content` (from readRetainedSections), in order.
+ * A heading that occurs twice gives two entries (#364). Charter-managed
+ * sentinel blocks are stripped first, so a populated `## Module Index`
+ * compares equal to the empty one in the template.
  */
-function retainedSectionMap(content: string): Map<string, string> {
-  const block = readRetainedSections(stripCharterSentinels(content));
-  const sections = new Map<string, string>();
+function retainedSectionKeys(content: string): Array<{ heading: string; key: string }> {
+  const block = readRetainedSections(stripCharterSentinels(content.replace(/\r\n/g, '\n')));
+  const sections: Array<{ heading: string; key: string }> = [];
   let heading: string | null = null;
   let body: string[] = [];
+  const flush = (): void => {
+    if (heading) sections.push({ heading, key: sectionKey(heading, body) });
+  };
 
   for (const line of block.split('\n')) {
     if (line.trim().startsWith('## ')) {
-      if (heading) sections.set(heading, body.join('\n').trim());
+      flush();
       heading = line.trim();
       body = [];
       continue;
     }
     if (heading) body.push(line);
   }
-  if (heading) sections.set(heading, body.join('\n').trim());
+  flush();
 
   return sections;
+}
+
+/**
+ * True when a retained section (heading plus body lines) is, line ends aside,
+ * one a pointer template for this file carries untouched, such as the
+ * `## Environment` placeholder with its HTML comment. It is template text, not
+ * the user's, so it is never carried into a retained block (#364).
+ */
+export function isTemplateRetainedSection(filename: string, heading: string, bodyLines: readonly string[]): boolean {
+  const key = sectionKey(heading, bodyLines);
+  return pointerTemplatesFor(filename).some(t => retainedSectionKeys(t).some(s => s.key === key));
 }
 
 /**
  * Headings whose retained content differs from every pointer template for this
  * file — i.e. notes a user wrote into the `## Environment` slot the templates
  * invite them to use, or an operational `## ... Protocol` block that `adf tidy`
- * deliberately keeps in the vendor file (#198).
+ * deliberately keeps in the vendor file (#198). Each section is judged on its
+ * own: a heading listed twice is divergent when either copy is (#364).
  *
  * No `.ai/` module holds these sections, so converting a pointer to compiled
  * output carries them into its retained block (adf-retained.ts, #303).
  */
 export function divergentRetainedHeadings(existing: string, filename: string): string[] {
-  const templates = pointerTemplatesFor(filename);
-  const pristine = new Set<string>();
-  for (const template of templates) {
-    for (const [heading, body] of retainedSectionMap(template)) {
-      pristine.add(`${heading}\n${body}`);
-    }
-  }
-
+  const pristine = new Set(pointerTemplatesFor(filename).flatMap(t => retainedSectionKeys(t).map(s => s.key)));
   const divergent: string[] = [];
-  for (const [heading, body] of retainedSectionMap(existing)) {
-    if (!pristine.has(`${heading}\n${body}`)) divergent.push(heading);
+  for (const { heading, key } of retainedSectionKeys(existing)) {
+    if (!pristine.has(key) && !divergent.includes(heading)) divergent.push(heading);
   }
   return divergent;
 }

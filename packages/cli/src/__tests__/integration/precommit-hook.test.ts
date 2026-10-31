@@ -2,7 +2,7 @@
  * Integration tests: the real pre-commit hook in real git repos (#320).
  *
  * Each repo installs the hook `charter hook install --pre-commit` generates
- * (PRE_COMMIT_HOOK_CONTENT), with `npx charter` replaced by the built CLI behind
+ * (PRE_COMMIT_HOOK_CONTENT), with its charter_cli function (#366) redefined to run the built CLI behind
  * a logging shim, so these tests exercise the shipped text and can prove which
  * CLI calls the hook made. Paths are passed to the shell double-quoted with
  * forward slashes: Node accepts C:/... on Windows and Git's sh leaves them alone.
@@ -19,7 +19,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
+import { HOOK_CLI, HOOK_CLI_RESOLVE_BLOCK, HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
 import { BLOAT_SCOPE_MSG } from '../../commands/doctor';
 
 // ============================================================================
@@ -129,7 +129,8 @@ function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
   fs.writeFileSync(path.join(binDir, 'pnpm.cmd'), `@echo pnpm %*>> "${pnpmLog}"\r\n@exit /b 97\r\n`);
   fs.writeFileSync(shim, [
     `const args = process.argv.slice(2);`,
-    `require('fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');`,
+    // The hook's one --version probe (#366) is not logged, so the call lists stay about tidy and the gate.
+    `if (args[0] !== '--version') require('fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');`,
     `if (process.env.HOOK_TEST_FAIL_TIDY === '1' && args[0] === 'adf' && args[1] === 'tidy') process.exit(3);`,
     // Test hooks for paths tidy reports: a ghost path in both runs, or an extra write in the real run only.
     `if (args[0] === 'adf' && args[1] === 'tidy' && args.includes('--print-paths')) process.on('exit', () => {`,
@@ -179,7 +180,11 @@ function writeHookFixtureRepo(label: string, opts: FixtureOpts = {}): Repo {
   // The generated hook, as `charter hook install --pre-commit` writes it.
   const hookDir = path.join(tmp, '.githooks');
   fs.mkdirSync(hookDir, { recursive: true });
-  const full = PRE_COMMIT_HOOK_CONTENT.split('npx charter').join(`node "${posix(shim)}"`);
+  // #366: charter_cli is redefined right after the generated one, ahead of the
+  // --version probe, so package-manager detection still runs (verify:adf uses it)
+  // and every Charter call, the probe included, reaches the shim.
+  const full = PRE_COMMIT_HOOK_CONTENT.replace(HOOK_CLI_RESOLVE_BLOCK, `${HOOK_CLI_RESOLVE_BLOCK}${HOOK_CLI}() { node "${posix(shim)}" "$@"; }\nCHARTER_STATE=ok\n`);
+  expect(full).not.toBe(PRE_COMMIT_HOOK_CONTENT);
   const hook = opts.tidyOnly ? full.slice(0, full.indexOf('# ADF evidence gate')) : full;
   expect(hook).toContain('# Charter pre-commit vendor tidy: scoped to staged files');
   fs.writeFileSync(path.join(hookDir, 'pre-commit'), hook);

@@ -53,7 +53,7 @@ import type { CompileTarget } from '@stackbilt/adf';
 import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
 import { inferVendorMode, recordedModeOf, recordWrittenVendorModes, resolveVendorMode } from './adf-vendor';
 import type { VendorFile } from './adf-vendor';
-import { registerModules } from './adf-manifest-register';
+import { isCaseInsensitiveDir, moduleKey, registerModules } from './adf-manifest-register';
 import { backupFile, describeMerge, dirLabel, formatLossLines, tryEnsureBackupGitignore } from './adf-scaffold-merge';
 import type { ScaffoldMode, ScaffoldOutcome } from './adf-scaffold-merge';
 import { confirmReset, finalizeLoss, promptYesNo, resetDeclinedMessage, resetRefusalMessage, writeAdfScaffolds } from './adf-scaffold-write';
@@ -1134,11 +1134,14 @@ function runAdfInitPhase(
         const allAdfFiles = fs.readdirSync(aiDir).filter(f => f.endsWith('.adf') && f !== 'manifest.adf');
         const doc = parseAdf(manifestContent);
         const manifest = parseManifest(doc);
+        // Compared as the manifest writer compares them (#349): on a case-insensitive
+        // filesystem an `infra.adf` entry registers `Infra.adf`.
+        const fold = isCaseInsensitiveDir(aiDir);
         const registeredModules = new Set<string>([
           ...manifest.defaultLoad,
           ...manifest.onDemand.map(m => m.path),
-        ]);
-        const orphans = allAdfFiles.filter(f => !registeredModules.has(f));
+        ].map(m => moduleKey(m, fold)));
+        const orphans = allAdfFiles.filter(f => !registeredModules.has(moduleKey(f, fold)));
         if (orphans.length > 0) {
           detectedOrphans.push(...orphans);
           warnings.push(`Found ${orphans.length} unregistered .adf module(s): ${orphans.join(', ')}`);

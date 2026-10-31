@@ -9,7 +9,7 @@ The full list of changes is in the [CHANGELOG](../CHANGELOG.md). Flag details ar
 Run these from the repository root, starting from a clean working tree (`git status` shows nothing to commit).
 
 ```bash
-# 1. Upgrade the CLI. The git hooks call `npx charter`, so the local devDependency must be 2.0 too.
+# 1. Upgrade the CLI. The pre-commit hook runs the repo's local @stackbilt/cli, so the devDependency must be 2.x too.
 npm install --save-dev @stackbilt/cli@latest      # or: pnpm add -D @stackbilt/cli@latest
 npx charter --version
 
@@ -89,9 +89,9 @@ Installed hooks are not upgraded for you. Replace every pre-2.0 hook by re-runni
 
 The new pre-commit hook calls `charter adf tidy --print-paths` and `charter doctor --staged`. With a 1.x CLI in `node_modules`, `--print-paths` is unknown, so the hook reports files as clean and tidies nothing. Upgrade the CLI as well as the hook.
 
-> **`verify:adf` script.** `charter setup` and `bootstrap` add a `verify:adf` script. The hook runs it after the scoped doctor, with your package manager: `pnpm` (with `pnpm-lock.yaml` and pnpm installed), `yarn` (with `yarn.lock` and yarn installed), otherwise `npm`. pnpm is no longer required. Inside the hook, the doctor in `verify:adf` reports vendor bloat as INFO, `adf vendor bloat (checked by pre-commit hook)`, because the scoped check already ran. Its other checks still block. Running `npm run verify:adf` (or your package manager's equivalent) by hand or in CI still checks every vendor file. The hook runs `npx charter doctor …` even if your custom `verify:adf` leaves doctor out.
+> **`verify:adf` script.** `charter setup` and `bootstrap` add a `verify:adf` script. The hook runs it after the scoped doctor, with your package manager. That is the first match in this order: Yarn for a Plug'n'Play repo (`.pnp.cjs`, `.pnp.js`, or `.yarnrc.yml` with `nodeLinker: pnp`) with yarn installed, then `pnpm` (with `pnpm-lock.yaml` and pnpm installed), then `yarn` (with `yarn.lock` and yarn installed), otherwise `npm`. pnpm is no longer required. Inside the hook, the doctor in `verify:adf` reports vendor bloat as INFO, `adf vendor bloat (checked by pre-commit hook)`, because the scoped check already ran. Its other checks still block. Running `npm run verify:adf` (or your package manager's equivalent) by hand or in CI still checks every vendor file. The hook runs the scoped `charter doctor …` even if your custom `verify:adf` leaves doctor out.
 >
-> **Known limitation:** Yarn Plug'n'Play repos are not supported by the hook yet ([#366](https://github.com/Stackbilt-dev/charter/issues/366)).
+> **How the hook runs Charter** ([#366](https://github.com/Stackbilt-dev/charter/issues/366)): every Charter call goes through that same package manager, as `yarn charter`, `pnpm exec charter` or (with a local install) `npm exec --no --no-update-notifier --fetch-retries=0 -- @stackbilt/cli`. This works under Yarn Plug'n'Play, and the hook never installs or runs a downloaded package. Install `@stackbilt/cli` as a devDependency. Without a local install, a global `charter` on `PATH` is used under npm and under Yarn with a `node_modules` linker (the hook runs it directly), and under pnpm (`pnpm exec` searches `PATH`). Under Yarn Plug'n'Play it is never used, since there is no `node_modules` to check. A global CLI of any version is used, and the hook warns about 1.x. With nothing found, the hook skips Charter and fails the gate with a hint. A hook installed before this change calls a bare `npx charter`, so re-run `charter hook install --pre-commit` (required under Plug'n'Play). See the `[Unreleased]` entry in the [CHANGELOG](../CHANGELOG.md) and [`charter hook`](./cli-reference.md#charter-hook) for details.
 
 ## What doctor's new lines mean
 
