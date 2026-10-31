@@ -837,7 +837,11 @@ function runSetupPhase(
       updated.push('package.json (devDependencies)');
     }
 
-    const mcpConfig = ensureProjectMcpConfig('.ai', force, options.configPath);
+    const rootManager = contexts.find(ctx => ctx.source === 'package.json')?.packageManager;
+    const declaredManager = typeof rootManager === 'string' ? rootManager.match(/^(npm|pnpm|yarn)@\d/)?.[1] : undefined;
+    const mcpManager = declaredManager === 'npm' || declaredManager === 'pnpm' || declaredManager === 'yarn'
+      ? declaredManager : packageManager === 'pnpm' ? 'pnpm' : detectPackageManagerFromLockfiles();
+    const mcpConfig = ensureProjectMcpConfig('.ai', force, options.configPath, mcpManager);
     if (mcpConfig.created) {
       created.push('.mcp.json');
     } else if (mcpConfig.updated) {
@@ -941,13 +945,18 @@ function ensureProjectMcpConfig(
   aiDir: string,
   force: boolean,
   configDir: string,
+  packageManager: 'npm' | 'pnpm' | 'yarn',
 ): { created: boolean; updated: boolean; warning?: string; backup?: string; notReplaced?: boolean } {
   const configPath = path.resolve('.mcp.json');
+  // Never let an MCP client fetch an unpinned CLI before the project's install.
+  const localArgs = packageManager === 'npm'
+    ? ['exec', '--no', '--package=@stackbilt/cli', '--', 'charter']
+    : packageManager === 'pnpm' ? ['exec', 'charter'] : ['run', 'charter'];
   const desiredServer = {
-    command: 'npx',
+    command: packageManager,
     // Repo-relative on purpose: .mcp.json is committed and shared, and `charter serve`
     // resolves --ai-dir against its own cwd, which MCP clients set to the repo root.
-    args: ['@stackbilt/cli', 'serve', '--ai-dir', aiDir],
+    args: [...localArgs, 'serve', '--ai-dir', aiDir],
   };
 
   const configExists = fs.existsSync(configPath);
