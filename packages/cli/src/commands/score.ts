@@ -14,7 +14,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { detectPackageManager, inferProjectName, loadPackageContexts } from './setup';
 import { hasCommits, isGitRepo, runGit } from '../git-helpers';
-import { CHARTER_OWNED_MARKERS } from './adf';
+import { CHARTER_OWNED_MARKERS, POINTER_CLAUDE_MD } from './adf';
 import { resolveVendorMode, withoutVendorsSection } from './adf-vendor';
 import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 
@@ -438,7 +438,16 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     const raw = readText(file);
     if (!raw) continue;
     // The VENDORS record names vendor files, not paths under .ai/ (#318).
-    const content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
+    let content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
+    if (file === 'CLAUDE.md' && claude.mode === 'pointer') {
+      // The generated fallback explicitly offers to create this optional snapshot (#402).
+      // Remove only that template line, keeping user-authored references to the same path.
+      const fallback = POINTER_CLAUDE_MD.split(/\r?\n/).find((line) => line.startsWith('If `charter serve`'));
+      if (fallback) {
+        const generatedFallback = fallback.replaceAll('.ai/', `${aiDir}/`);
+        content = content.split(/\r?\n/).filter((line) => line !== generatedFallback).join('\n');
+      }
+    }
 
     for (const candidate of extractPathCandidates(content)) {
       const reference = resolveReferencedPath(file, candidate);
