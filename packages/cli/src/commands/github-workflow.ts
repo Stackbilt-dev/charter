@@ -55,6 +55,7 @@ export interface KnownWorkflow {
  * the old templates to the history fixture.
  */
 export const KNOWN_WORKFLOWS: readonly KnownWorkflow[] = [
+  { hash: 'eaad12be45661b0ebac41a66fb1e0b235cf21636534e9fa3f2a5f339ef430f58', origin: '#398, current (pnpm version from packageManager)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
   { hash: '66c71b0e133ffc5d555b941302346211d5b62ea43c8f1b0dc95e16d05f7cdf67', origin: '#380, current (Charter run through the package manager)', packageManager: 'npm', safe: true, refreshChanges: '' },
   { hash: 'afd0be1c5f55dc3628a0012f65e8cf51a3f672030c9af017470ceeb654374fcb', origin: '#380, current (Charter run through the package manager)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
   // Same permissions and triggers as the current template: refreshed silently.
