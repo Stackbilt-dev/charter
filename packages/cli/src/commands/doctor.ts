@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { stripGeneratedPointerSession } from './generated-context';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -673,7 +674,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
         // record that contradicts the file is `adf vendor mode`'s to report.
 
         // Strip charter-managed sentinel blocks before scanning for bloat/keywords.
-        const strippedContent = stripCharterSentinels(content);
+        const strippedContent = stripGeneratedPointerSession(file, stripCharterSentinels(content));
         const lines = strippedContent.split('\n');
         const lineCount = lines.length;
         const fileWarnings: string[] = [];
