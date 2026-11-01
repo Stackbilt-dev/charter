@@ -24,12 +24,15 @@ const COMMIT_MSG_HOOK_MARKER = '# Managed by Charter: commit-msg trailer normali
 // Second marker so doctor can tell a gating hook from the pre-#299 normalizer-only
 // hook; both carry COMMIT_MSG_HOOK_MARKER, which keeps old installs recognised as managed.
 const COMMIT_MSG_GATE_MARKER = '# Charter commit-msg trailer gate: rejects missing trailers when git.requireTrailers is on';
-const COMMIT_MSG_HOOK_CONTENT = `#!/usr/bin/env sh
+function renderCommitMsgHook(configFile: string): string {
+  const quotedConfig = `'${configFile.replace(/'/g, "'\\''")}'`;
+  return `#!/usr/bin/env sh
 ${COMMIT_MSG_HOOK_MARKER}
 ${COMMIT_MSG_GATE_MARKER}
 set -eu
 
 msg_file="$1"
+config_file=${quotedConfig}
 
 governed_by="$(grep -i '^Governed-By:' "$msg_file" | tail -n 1 | sed -E 's/^[Gg]overned-[Bb]y:[[:space:]]*//')"
 resolves_request="$(grep -i '^Resolves-Request:' "$msg_file" | tail -n 1 | sed -E 's/^[Rr]esolves-[Rr]equest:[[:space:]]*//')"
@@ -50,27 +53,27 @@ fi
 # Resolves-Request trailer (either one, key case-insensitive) in the terminal
 # trailer block. It blocks when citationStrictness is FAIL or STRICT, or
 # ci.failOnWarn is set; any other strictness only warns, as CI does.
-# Deliberate exceptions, each announced on stderr: no .charter/config.json at
+# Deliberate exceptions, each announced on stderr: no selected config.json at
 # all (the hook cannot tell the repo opted in) and no node on PATH (the config
 # cannot be evaluated) skip the gate.
 # Comment lines are stripped before the check, as "git commit" does with its
 # default editor cleanup. Under -m or --cleanup=verbatim git keeps "#" lines,
 # so a trailer followed by a "#..." line can pass here and still fail CI.
-if [ ! -f ".charter/config.json" ]; then
-  echo "[commit-msg] Warning: no .charter/config.json; trailer gate skipped." >&2
+if [ ! -f "$config_file" ]; then
+  echo "[commit-msg] Warning: no $config_file; trailer gate skipped." >&2
   exit 0
 fi
 if ! command -v node >/dev/null 2>&1; then
-  echo "[commit-msg] Warning: node not found on PATH; trailer gate skipped (cannot read .charter/config.json)." >&2
+  echo "[commit-msg] Warning: node not found on PATH; trailer gate skipped (cannot read $config_file)." >&2
   exit 0
 fi
 gate_mode="$(node -e '
 var c;
 try {
-  c = JSON.parse(require("fs").readFileSync(".charter/config.json", "utf8"));
+  c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   if (c === null || c === undefined) throw new Error("null config");
 } catch (e) {
-  process.stderr.write("[commit-msg] .charter/config.json is unparseable; applying the defaults charter validate uses (requireTrailers on, citationStrictness FAIL).\\n");
+  process.stderr.write("[commit-msg] " + process.argv[1] + " is unparseable; applying the defaults charter validate uses (requireTrailers on, citationStrictness FAIL).\\n");
   c = {};
 }
 var git = Object.assign({ requireTrailers: true }, c.git);
@@ -82,11 +85,11 @@ if (git.requireTrailers) {
   mode = (v === "FAIL" || v === "STRICT" || ci.failOnWarn) ? "block" : "warn";
 }
 process.stdout.write(mode);
-')" || gate_mode=""
+' -- "$config_file")" || gate_mode=""
 case "$gate_mode" in
   block|warn|off) ;;
   *)
-    echo "[commit-msg] Warning: could not evaluate .charter/config.json with node; trailer gate skipped." >&2
+    echo "[commit-msg] Warning: could not evaluate $config_file with node; trailer gate skipped." >&2
     gate_mode="off"
     ;;
 esac
@@ -121,6 +124,7 @@ if [ "$gate_mode" = "block" ] || [ "$gate_mode" = "warn" ]; then
   fi
 fi
 `;
+}
 
 export const PRE_COMMIT_HOOK_MARKER = '# Managed by Charter: pre-commit evidence gate';
 // Second marker so doctor can tell a staged-only tidy hook from the pre-#320 one,
@@ -623,7 +627,7 @@ export async function hookCommand(options: CLIOptions, args: string[]): Promise<
   const results: HookInstallResult[] = [];
 
   if (wantCommitMsg) {
-    results.push(installCommitMsgHook(force));
+    results.push(installCommitMsgHook(force, options.configPath));
   }
   if (wantPreCommit) {
     results.push(installPreCommitHook(force));
@@ -645,7 +649,7 @@ export async function hookCommand(options: CLIOptions, args: string[]): Promise<
   return EXIT_CODE.SUCCESS;
 }
 
-function installCommitMsgHook(force: boolean): HookInstallResult {
+function installCommitMsgHook(force: boolean, configPath: string): HookInstallResult {
   ensureGitRepo();
 
   const hooksDir = resolveHooksDir();
@@ -665,7 +669,13 @@ function installCommitMsgHook(force: boolean): HookInstallResult {
     }
   }
 
-  writeHookFile(hookPath, hooksDir, COMMIT_MSG_HOOK_CONTENT, exists);
+  // Git runs commit-msg from the worktree root, even when installation ran in
+  // a subdirectory. Keep relative selections portable; absolute ones stay absolute.
+  const configFile = path.join(configPath, 'config.json');
+  const storedConfigFile = path.isAbsolute(configFile)
+    ? configFile
+    : path.relative(runGit(['rev-parse', '--show-toplevel']).trim(), path.resolve(configFile));
+  writeHookFile(hookPath, hooksDir, renderCommitMsgHook(storedConfigFile.replace(/\\/g, '/')), exists);
 
   return {
     status: 'INSTALLED',
@@ -761,7 +771,7 @@ function printHelp(): void {
   console.log('  charter hook');
   console.log('');
   console.log('  Usage:');
-  console.log('    charter hook install --commit-msg [--force]');
+  console.log('    charter hook install --commit-msg [--config <dir>] [--force]');
   console.log('    charter hook install --pre-commit [--force]');
   console.log('    charter hook print --claude');
   console.log('    charter hook print --mcp-config [--client claude|codex|cursor] [--ai-dir <dir>]');
@@ -769,6 +779,8 @@ function printHelp(): void {
   console.log('  --commit-msg: Install a git commit-msg hook that normalizes Governed-By and');
   console.log('  Resolves-Request trailers using git interpret-trailers, and rejects a message with');
   console.log('  neither whenever charter validate --ci would fail it (same .charter/config.json defaults).');
+  console.log('  --config <dir> records that config directory in the commit-msg hook (default: .charter).');
+  console.log('  Re-run install to change it; a missing selected config warns and skips, with no fallback.');
   console.log('');
   console.log('  --pre-commit: Install a git pre-commit hook that auto-tidies the staged vendor config');
   console.log('  files (CLAUDE.md, .cursorrules, AGENTS.md, etc.) and runs ADF evidence checks.');
