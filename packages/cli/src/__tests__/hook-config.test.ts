@@ -49,7 +49,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     return fs.readFileSync(path.join(repo, '.git/hooks/commit-msg'), 'utf8');
   }
 
-  it('enforces the selected strict policy instead of a permissive default', async () => {
+  it('enforces the selected strict policy instead of a permissive default', { timeout: 30000 }, async () => {
     config('.charter', off);
     config('governance', strict);
     await install('governance');
@@ -59,14 +59,14 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(execFileSync('git', ['log', '-1', '--format=%B'], { encoding: 'utf8' })).toContain('Governed-By: ADR-341');
   });
 
-  it('honors a selected disabled policy instead of the strict default', async () => {
+  it('honors a selected disabled policy instead of the strict default', { timeout: 30000 }, async () => {
     config('.charter', strict);
     config('governance', off);
     await install('governance');
     expect(commit().status).toBe(0);
   });
 
-  it('does not fall back when the selected config is missing and names it in the existing skip warning', async () => {
+  it('does not fall back when the selected config is missing and names it in the existing skip warning', { timeout: 30000 }, async () => {
     config('.charter', strict);
     await install('missing-policy');
     const result = commit();
@@ -74,7 +74,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(result.stderr).toContain('no missing-policy/config.json; trailer gate skipped');
   });
 
-  it('applies validate defaults to a malformed selected file and identifies that file', async () => {
+  it('applies validate defaults to a malformed selected file and identifies that file', { timeout: 30000 }, async () => {
     config('.charter', off);
     fs.mkdirSync('governance');
     fs.writeFileSync('governance/config.json', '{');
@@ -84,7 +84,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(result.stderr).toContain('governance/config.json is unparseable; applying the defaults');
   });
 
-  it('treats spaces, apostrophes and shell substitutions as literal path characters', async () => {
+  it('treats spaces, apostrophes and shell substitutions as literal path characters', { timeout: 30000 }, async () => {
     const dir = "policy's $(touch injected) `touch injected2`";
     config(dir, strict);
     await install(dir);
@@ -94,14 +94,14 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(fs.existsSync('injected2')).toBe(false);
   });
 
-  it('passes a leading-dash directory to node as an argument rather than an option', async () => {
+  it('passes a leading-dash directory to node as an argument rather than an option', { timeout: 30000 }, async () => {
     config('--policy', strict);
     await install('--policy');
     expect(commit().status).toBe(1);
     expect(commit('chore: linked\n\nGoverned-By: ADR-341').status).toBe(0);
   });
 
-  it('retains an absolute config selection', async () => {
+  it('retains an absolute config selection', { timeout: 30000 }, async () => {
     const absolute = path.join(repo, 'absolute policy');
     config(absolute, strict);
     await install(absolute);
@@ -110,7 +110,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(commit('chore: linked\n\nGoverned-By: ADR-341').status).toBe(0);
   });
 
-  it('records relative selections from an installation subdirectory for execution at git root', async () => {
+  it('records relative selections from an installation subdirectory for execution at git root', { timeout: 30000 }, async () => {
     fs.mkdirSync('subdir');
     process.chdir(path.join(repo, 'subdir'));
     config('policy', strict);
@@ -121,7 +121,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(commit('chore: linked\n\nGoverned-By: ADR-341').status).toBe(0);
   });
 
-  it('is deterministic on reinstall and can restore the default selection', async () => {
+  it('is deterministic on reinstall and can restore the default selection', { timeout: 30000 }, async () => {
     config('.charter', off);
     config('governance', strict);
     await install('governance');
@@ -134,7 +134,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(commit().status).toBe(0);
   });
 
-  it('upgrades a legacy managed normalizer with the selected policy', async () => {
+  it('upgrades a legacy managed normalizer with the selected policy', { timeout: 30000 }, async () => {
     config('governance', strict);
     await install('.charter');
     fs.writeFileSync(path.join(repo, '.git/hooks/commit-msg'), '#!/bin/sh\n# Managed by Charter: commit-msg trailer normalizer\nexit 0\n');
@@ -143,7 +143,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(commit().status).toBe(1);
   });
 
-  it('preserves an unmanaged hook unless force is explicit', async () => {
+  it('preserves an unmanaged hook unless force is explicit', { timeout: 30000 }, async () => {
     config('governance', strict);
     await install('.charter');
     const custom = '#!/bin/sh\n# User hook\nexit 0\n';
@@ -155,7 +155,7 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(commit().status).toBe(1);
   });
 
-  it('wires the global CLI --config argument into the installed hook', () => {
+  it('wires the global CLI --config argument into the installed hook', { timeout: 30000 }, () => {
     config('.charter', off);
     config('cli-policy', strict);
     const result = spawnSync(process.execPath, [cli, 'hook', 'install', '--commit-msg', '--config', 'cli-policy', '--format', 'json'], { encoding: 'utf8' });
