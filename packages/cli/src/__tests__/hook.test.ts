@@ -551,7 +551,7 @@ fi
       hooks: { UserPromptSubmit: Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }> };
     };
     expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('charter context-refresh --once');
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].command).toBe('npm exec --no --package=@stackbilt/cli -- charter context-refresh --once');
   });
 
   it('hook print without --claude throws', async () => {

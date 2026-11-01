@@ -532,19 +532,36 @@ fi
 
 // Charter cannot write to .claude/settings.json safely — it's user-controlled.
 // `print --claude` emits the config snippet for the user to paste instead.
-const CLAUDE_SESSION_HOOK_CONFIG = {
-  hooks: {
-    UserPromptSubmit: [
-      {
-        matcher: '.*',
-        hooks: [{ type: 'command', command: 'charter context-refresh --once' }],
-      },
-    ],
-  },
-};
+function claudeHookCliCommand(): string {
+  let manager: string | undefined;
+  try {
+    const pkg: unknown = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+    if (pkg && typeof pkg === 'object' && 'packageManager' in pkg && typeof pkg.packageManager === 'string') {
+      manager = /^(npm|pnpm|yarn)@\d+\.\d+\.\d+(?:[-+][^\s]+)?$/.exec(pkg.packageManager)?.[1];
+    }
+  } catch {
+    // A missing or malformed manifest does not prevent printing a usable snippet.
+  }
+  if (!manager) {
+    const pnp = PNP_MARKER_FILES.some(file => fs.existsSync(file))
+      || (fs.existsSync('.yarnrc.yml') && yarnrcPnpLinkerRegExp().test(fs.readFileSync('.yarnrc.yml', 'utf-8')));
+    manager = pnp ? 'yarn' : fs.existsSync('pnpm-lock.yaml') ? 'pnpm' : fs.existsSync('yarn.lock') ? 'yarn' : 'npm';
+  }
+  return manager === 'pnpm' ? 'pnpm exec charter'
+    : manager === 'yarn' ? 'yarn run charter'
+    : 'npm exec --no --package=@stackbilt/cli -- charter';
+}
 
 export function printClaudeHookConfig(): void {
-  console.log(JSON.stringify(CLAUDE_SESSION_HOOK_CONFIG, null, 2));
+  const config = {
+    hooks: {
+      UserPromptSubmit: [{
+        matcher: '.*',
+        hooks: [{ type: 'command', command: `${claudeHookCliCommand()} context-refresh --once` }],
+      }],
+    },
+  };
+  console.log(JSON.stringify(config, null, 2));
 }
 
 // MCP server entry shapes for each supported client (#191)
@@ -769,6 +786,7 @@ function printHelp(): void {
   console.log('  Skip tidy with CHARTER_SKIP_TIDY=1. Only gates when .ai/manifest.adf exists.');
   console.log('');
   console.log('  print --claude: Print the Claude Code session hook config snippet to stdout.');
+  console.log('  Uses the repo package manager and installed CLI; never installs a missing package.');
   console.log('  Paste into .claude/settings.json → hooks.UserPromptSubmit to auto-refresh');
   console.log('  context at session start so charter_context returns live state.');
   console.log('');
