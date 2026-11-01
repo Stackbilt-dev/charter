@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isGeneratedContextModule } from './generated-context';
 import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
@@ -1141,7 +1142,14 @@ function runAdfInitPhase(
           ...manifest.defaultLoad,
           ...manifest.onDemand.map(m => m.path),
         ].map(m => moduleKey(m, fold)));
-        const orphans = allAdfFiles.filter(f => !registeredModules.has(moduleKey(f, fold)));
+        const orphans = allAdfFiles.filter(f => {
+          if (registeredModules.has(moduleKey(f, fold))) return false;
+          try {
+            return !isGeneratedContextModule(f, fs.readFileSync(path.join(aiDir, f), 'utf-8'), fold);
+          } catch {
+            return true; // An unreadable module must still be reported, not silently exempted.
+          }
+        });
         if (orphans.length > 0) {
           detectedOrphans.push(...orphans);
           warnings.push(`Found ${orphans.length} unregistered .adf module(s): ${orphans.join(', ')}`);
