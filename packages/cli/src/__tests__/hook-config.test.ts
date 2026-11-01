@@ -110,6 +110,25 @@ describe('installed commit-msg hook config selection (#341)', () => {
     expect(commit('chore: linked\n\nGoverned-By: ADR-341').status).toBe(0);
   });
 
+  it.skipIf(process.platform === 'win32').each(['relative', 'absolute'] as const)(
+    'preserves literal POSIX backslashes in a %s selection and on reinstall',
+    { timeout: 30000 },
+    async kind => {
+      const dir = 'policy\\name';
+      config('.charter', off);
+      config(dir, strict);
+      const selected = kind === 'absolute' ? path.join(repo, dir) : dir;
+      await install(selected);
+      const installed = content();
+      expect(installed).toContain(`config_file='${selected}/config.json'`);
+      expect(commit().status).toBe(1);
+      expect(commit('chore: linked\n\nGoverned-By: ADR-341').status).toBe(0);
+      await install(selected);
+      expect(content()).toBe(installed);
+      expect(commit().status).toBe(1);
+    },
+  );
+
   it('records relative selections from an installation subdirectory for execution at git root', { timeout: 30000 }, async () => {
     fs.mkdirSync('subdir');
     process.chdir(path.join(repo, 'subdir'));

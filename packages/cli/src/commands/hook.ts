@@ -675,7 +675,7 @@ function installCommitMsgHook(force: boolean, configPath: string): HookInstallRe
   const storedConfigFile = path.isAbsolute(configFile)
     ? configFile
     : path.relative(runGit(['rev-parse', '--show-toplevel']).trim(), path.resolve(configFile));
-  writeHookFile(hookPath, hooksDir, renderCommitMsgHook(storedConfigFile.replace(/\\/g, '/')), exists);
+  writeHookFile(hookPath, hooksDir, renderCommitMsgHook(storedConfigFile.split(path.sep).join('/')), exists);
 
   return {
     status: 'INSTALLED',
