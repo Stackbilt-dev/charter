@@ -68,9 +68,10 @@ npx charter hook install --commit-msg                # trailer gate + normalizat
 npx charter hook install --pre-commit                # vendor tidy + ADF evidence gate hook
 npx charter hook install --commit-msg --pre-commit   # both hooks
 npx charter hook install --commit-msg --force        # overwrite existing hooks
+npx charter hook install --commit-msg --config governance  # use the same config as CI
 ```
 
-- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading `.charter/config.json` with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No `.charter/config.json` at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
+- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading the recorded config directory's `config.json` (default: `.charter/config.json`) with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No selected config file at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
 - `--pre-commit` — tidies the staged vendor files, then runs ADF evidence checks (LOC ceiling validation) before each commit. Only gates when `.ai/manifest.adf` exists.
   - Tidy covers only staged vendor files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`, `agents.md`, `GEMINI.md`, `copilot-instructions.md`), each passed with `adf tidy --source`. A file carrying the compile banner is skipped without calling the CLI.
   - A staged vendor file that also has unstaged changes is skipped, with a message.
@@ -115,6 +116,8 @@ npx charter hook install --commit-msg --force        # overwrite existing hooks
 - `--force` — overwrite existing non-Charter hooks
 
 Must specify at least one of `--commit-msg` or `--pre-commit`.
+
+`hook install --commit-msg --config <dir>` records the selected configuration directory in the hook (default: `.charter`). Use the same directory as `validate --config <dir>` in CI. Relative selections are resolved from the installation directory and stored relative to the Git worktree root, where Git runs the hook; absolute selections remain absolute. Re-run installation to update the selection. The hook reads only that directory's `config.json`: a missing selected file warns with its path and skips the gate, following the existing missing-config behavior, without falling back to `.charter/config.json`. Paths containing spaces or shell characters are passed literally, not executed.
 
 ### charter bootstrap
 
