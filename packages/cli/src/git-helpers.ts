@@ -135,10 +135,10 @@ export function parseChangedFilesByCommit(logOutput: string): Map<string, string
 // Commit range helpers (shared by audit, validate)
 // ---------------------------------------------------------------------------
 
-/** Return a short recent-commits range like `HEAD~5..HEAD`. */
+/** Return a recent range whose first-parent boundary exists, even at a merge. */
 export function getRecentCommitRange(): string {
   try {
-    const count = Number.parseInt(runGit(['rev-list', '--count', 'HEAD']).trim(), 10);
+    const count = Number.parseInt(runGit(['rev-list', '--first-parent', '--count', 'HEAD']).trim(), 10);
     if (!Number.isFinite(count) || count <= 1) {
       return 'HEAD';
     }

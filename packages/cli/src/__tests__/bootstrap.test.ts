@@ -58,6 +58,21 @@ describe('bootstrapCommand', () => {
     vi.restoreAllMocks();
   });
 
+  it.each(['pnpm@10.34.6', 'pnpm@10.34.6+sha512.abc123', undefined])('generates the pnpm workflow from packageManager %s (#398)', async (declaration) => {
+    fs.writeFileSync('package.json', JSON.stringify({ name: 'app', version: '1.0.0', packageManager: declaration }));
+    fs.writeFileSync('pnpm-lock.yaml', 'lockfileVersion: 9.0\n');
+    const exitCode = await bootstrapCommand(
+      { ...baseOptions, yes: true },
+      ['--yes', '--preset', 'fullstack', '--ci', 'github', '--mode', 'lean', '--skip-install', '--skip-doctor'],
+    );
+    expect(exitCode).toBe(0);
+    const workflow = fs.readFileSync(path.join('.github', 'workflows', 'charter-governance.yml'), 'utf8');
+    expect(workflow).toContain('pnpm/action-setup@v4');
+    expect(workflow).toContain('pnpm install --frozen-lockfile');
+    if (declaration) expect(workflow).not.toContain('version: 9');
+    else expect(workflow).toContain('version: 9');
+  });
+
   it('keeps custom ADF files when run with --yes but without --force', async () => {
     fs.mkdirSync('.ai', { recursive: true });
     const customCore = `ADF: 0.1
