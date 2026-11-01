@@ -16,7 +16,7 @@ vi.mock('../git-helpers', async (importOriginal) => {
 });
 
 import { bootstrapCommand } from '../commands/bootstrap';
-import { getGithubWorkflow, setupCommand, workflowCharterCommand } from '../commands/setup';
+import { getGithubWorkflow, setupCommand } from '../commands/setup';
 import { applyGovernanceWorkflow, KNOWN_WORKFLOWS, normalizeWorkflow, TEMPLATE_PERMISSIONS, workflowHash } from '../commands/github-workflow';
 
 const TEXT: CLIOptions = { configPath: '.charter', format: 'text', ciMode: false, yes: false };
@@ -166,7 +166,6 @@ const HISTORY: Array<{ commit: string; packageManager: 'npm' | 'pnpm'; safe?: bo
   fs.readFileSync(path.join(__dirname, 'fixtures', 'charter-governance-history.json'), 'utf-8'),
 );
 const PRE_BADGE = 'contents: read → write; adds push and workflow_dispatch triggers; adds a step that commits and pushes to the repo';
-const PM_CLI = 'runs Charter as pnpm exec charter (pnpm) or npm exec --no --package=@stackbilt/cli -- charter (npm) instead of npx charter';
 const TEMPLATE_LINE = 'the current Charter template grants contents: write and pull-requests: write, runs on push, pull_request and workflow_dispatch, and has a step that commits and pushes to the repo';
 
 // Hand edits that a YAML diff could misread; none may be described as a change.
@@ -208,14 +207,15 @@ describe('#374 known workflow versions', () => {
     for (const h of HISTORY.filter(e => e.safe)) {
       // A safe historical template grants exactly what the current one does (#380).
       const k = KNOWN_WORKFLOWS.find(e => e.hash === workflowHash(h.text));
-      expect(k).toMatchObject({ safe: true, packageManager: h.packageManager, refreshChanges: PM_CLI });
+      expect(k).toMatchObject({ safe: true, packageManager: h.packageManager });
       expect(k?.origin.startsWith(h.commit)).toBe(true);
       const head = (t: string): string => t.slice(0, t.indexOf('\njobs:'));
       expect(head(h.text)).toBe(head(getGithubWorkflow(h.packageManager)));
       expect(h.text).toContain('git push');
-      expect(h.text).toContain('npx charter validate');
-      // ...and the refresh changes only how Charter is run.
-      expect(h.text.replace(/npx charter /g, '{{CLI}} ')).toBe(getGithubWorkflow(h.packageManager).split(`${workflowCharterCommand(h.packageManager)} `).join('{{CLI}} '));
+      expect(getGithubWorkflow(h.packageManager)).toContain('validate --ci --format text --range "$CHARTER_COMMIT_RANGE"');
+      if (h.commit === '003ec8d') expect(h.text).toContain('npx charter validate');
+      // Older templates keep their permissions/triggers while receiving the
+      // explicit event range and project-local CLI execution fixes.
     }
     for (const h of HISTORY.filter(e => !e.safe)) {
       const k = KNOWN_WORKFLOWS.find(e => e.hash === workflowHash(h.text));

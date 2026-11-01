@@ -15,6 +15,7 @@ import { initExitCode, initializeCharter, printInitChanges, type StackPreset } f
 import { applyGovernanceWorkflow, canRefreshSilently } from './github-workflow';
 import type { PackageManagerChange, WorkflowKeepReason } from './github-workflow';
 import packageJson from '../../package.json';
+import { GITHUB_COMMIT_RANGE_SCRIPT } from './github-commit-range';
 
 const CLI_VERSION = packageJson.version;
 
@@ -75,6 +76,7 @@ permissions:
 jobs:
   governance:
     name: Charter
+    if: github.event.deleted != true
     runs-on: ubuntu-latest
 
     steps:
@@ -82,10 +84,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve Commit Range
+        id: commit_range
+        shell: bash
+        env:
+          BASE_SHA: \${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: \${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+${GITHUB_COMMIT_RANGE_SCRIPT.split('\n').map(line => `          ${line}`).join('\n')}
+
 ${installStep}
 
       - name: Validate Commits
-        run: ${cli} validate --ci --format text
+        run: ${cli} validate --ci --format text --range "$CHARTER_COMMIT_RANGE"
 
       - name: Drift Scan
         run: ${cli} drift --ci --format text
@@ -99,8 +110,8 @@ ${installStep}
         if: hashFiles('.ai/manifest.adf') != ''
 
       - name: Audit Report
-        run: ${cli} audit --format json > /tmp/audit.json
-        if: always()
+        run: ${cli} audit --format json --range "$CHARTER_COMMIT_RANGE" > /tmp/audit.json
+        if: always() && steps.commit_range.outcome == 'success'
 
       - name: Refresh Score Badge
         run: ${cli} score --badge --write

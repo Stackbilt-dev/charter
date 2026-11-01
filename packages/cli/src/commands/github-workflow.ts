@@ -55,6 +55,9 @@ export interface KnownWorkflow {
  * the old templates to the history fixture.
  */
 export const KNOWN_WORKFLOWS: readonly KnownWorkflow[] = [
+  { hash: '2aff571396e8bdbcf3f67380c9dd19d70fc8b05b9c73d4f68fc07834452f7877', origin: '#409, current (npm event commit range)', packageManager: 'npm', safe: true, refreshChanges: '' },
+  { hash: 'c0cc7675b7bcc0103088a8edd02df00b1eac46a23dbd679ac4c58d9f03d8ff0b', origin: '#409, current (pnpm event commit range)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
+  { hash: 'b98ff9e499bca77656aa220863f2e7b79136aee805f0b63ea87b315ff6b897f2', origin: '#409, current (pnpm pinned event commit range)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
   { hash: 'eaad12be45661b0ebac41a66fb1e0b235cf21636534e9fa3f2a5f339ef430f58', origin: '#398, current (pnpm version from packageManager)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
   { hash: '66c71b0e133ffc5d555b941302346211d5b62ea43c8f1b0dc95e16d05f7cdf67', origin: '#380, current (Charter run through the package manager)', packageManager: 'npm', safe: true, refreshChanges: '' },
   { hash: 'afd0be1c5f55dc3628a0012f65e8cf51a3f672030c9af017470ceeb654374fcb', origin: '#380, current (Charter run through the package manager)', packageManager: 'pnpm', safe: true, refreshChanges: '' },
