@@ -64,6 +64,36 @@ describe('anti-pattern regex literal delimiters (#410)', () => {
     expect(extractRules('/first\\\nsecond/')).toEqual([]);
   });
 
+  it('does not turn separators after an unterminated class into policy rules', () => {
+    const rules = extractRules('Avoid /[/ and /(/');
+    expect(rules).toEqual([]);
+    expect(rules.some(rule => rule.test('please and thank you'))).toBe(false);
+  });
+
+  it('retains earlier literals but discards the rest of a malformed literal line', () => {
+    const rules = extractRules('Avoid /valid/i then /[/ and /other/');
+    expect(rules).toHaveLength(1);
+    expect(rules[0].source).toBe('valid');
+    expect(rules[0].flags).toBe('i');
+    expect(rules[0].test('VALID')).toBe(true);
+    expect(rules[0].test('please and other')).toBe(false);
+  });
+
+  it.each(['\n', '\r\n', '\r'])('recovers at a new line after malformed classes (%j)', newline => {
+    const text = 'Avoid /[/ and /(/' + newline + String.raw`Avoid /test\/support/ and ` + '\x60eval\x60';
+    const rules = extractRules(text);
+    expect(rules).toHaveLength(2);
+    expect(rules[0].test('test/support')).toBe(true);
+    expect(rules[1].test('eval(1)')).toBe(true);
+    expect(rules.some(rule => rule.test('please and thank you'))).toBe(false);
+  });
+
+  it('does not reuse an empty literal delimiter as a new opener', () => {
+    const rules = extractRules('Avoid // and /valid/');
+    expect(rules).toHaveLength(1);
+    expect(rules[0].source).toBe('valid');
+  });
+
   it('reports the actual escaped-slash rule against matching files only', () => {
     const pattern: Pattern = {
       id: 'escaped-slash', name: 'No test support imports', category: 'SECURITY',
