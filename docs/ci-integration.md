@@ -34,6 +34,14 @@ On every push and pull request, the CI workflow runs:
 
 If any step exits `1`, the check fails and the merge is blocked.
 
+### Drift violations and the score threshold
+
+`charter drift --ci` uses the configured `drift.minScore` threshold; an ordinary blessed-pattern violation does not automatically fail the step. The default threshold is `0.7`, so a report with one ordinary violation and a score of `90%` passes the `70%` threshold and exits `0`. The text report explains when reported violations are within the allowed threshold.
+
+For strict adoption, set `"drift": { "minScore": 1 }` in `.charter/config.json` (or the selected `--config` directory). Then any detected ordinary pattern violation lowers the score below the threshold and `--ci` exits `1`. Patterns in `patterns/security-deny.json` always block `--ci` when matched, regardless of the score or threshold.
+
+Without `--ci`, drift still reports the score and CI policy result but does not return a policy-failure exit code. JSON output retains its `status`, `score`, `minScore`, `securityBlockers`, and `violations` fields; consumers should use the policy `status` rather than treating a nonempty violations list as an automatic failure.
+
 Each step runs the `@stackbilt/cli` that the install step put in `node_modules`, through the repo's package manager: `pnpm exec charter …` for pnpm, and `npm exec --no --package=@stackbilt/cli -- charter …` for npm. Neither installs anything. A bare `npx charter` would fetch the unrelated `charter` package from the registry whenever the CLI is not installed. `charter setup` and `charter bootstrap` add `@stackbilt/cli` to `devDependencies` (not under `--no-dependency-sync`, nor in a repo with no root `package.json`); without it the steps fail. The template has no Yarn form; a Yarn repo gets the npm one.
 
 ## Score Badge Refresh
