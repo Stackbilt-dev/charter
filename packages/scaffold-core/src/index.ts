@@ -168,7 +168,7 @@ export function buildScaffold(
           const pkg = JSON.parse(f.content) as { dependencies?: Record<string, string> };
           pkg.dependencies = {
             ...pkg.dependencies,
-            zod: '^4.3.6',
+            zod: '^4.6.6',
             '@stackbilt/contracts': '^0.8.0',
           };
           return { ...f, content: JSON.stringify(pkg, null, 2) };
