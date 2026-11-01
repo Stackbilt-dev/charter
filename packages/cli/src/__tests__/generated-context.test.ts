@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CLIOptions } from '../index';
 import { bootstrapCommand } from '../commands/bootstrap';
+import { isCaseInsensitiveDir } from '../commands/adf-manifest-register';
 import { contextRefreshCommand } from '../commands/context-refresh';
 import { doctorCommand } from '../commands/doctor';
 import { POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID } from '../commands/adf';
@@ -69,6 +70,23 @@ describe('generated context does not become routed instructions (#401)', () => {
     expect(await doctor()).toMatchObject({ exit: 0, bloat: { status: 'PASS' } });
     fs.appendFileSync('CLAUDE.md', '\n## Project notes\ncontext context\n');
     expect(await doctor()).toMatchObject({ exit: 1, bloat: { status: 'WARN' } });
+  });
+
+  it('uses filesystem filename identity for a case-variant runtime snapshot', async () => {
+    await bootstrap();
+    await contextRefreshCommand(options, ['--once', '--sources', 'git']);
+    const fold = isCaseInsensitiveDir('.ai');
+    const generated = fs.readFileSync('.ai/context.adf', 'utf8');
+    fs.renameSync('.ai/context.adf', '.ai/Context.adf');
+    await bootstrap();
+    const manifest = fs.readFileSync('.ai/manifest.adf', 'utf8');
+    expect(manifest.includes('Context.adf')).toBe(!fold);
+    expect(fs.readFileSync('.ai/Context.adf', 'utf8')).toBe(generated);
+    expect(isGeneratedContextModule('Context.adf', generated, true)).toBe(true);
+    expect(isGeneratedContextModule('Context.adf', generated, false)).toBe(false);
+    expect(isGeneratedContextModule('CONTEXT.adf', generated, true)).toBe(true);
+    expect(isGeneratedContextModule('manual.adf', generated, true)).toBe(false);
+    expect(await doctor()).toMatchObject({ exit: 0, bloat: { status: 'PASS' } });
   });
 
   it('still registers a hand-authored context module and reports genuine user trigger density', async () => {

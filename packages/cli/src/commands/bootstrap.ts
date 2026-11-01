@@ -1145,7 +1145,7 @@ function runAdfInitPhase(
         const orphans = allAdfFiles.filter(f => {
           if (registeredModules.has(moduleKey(f, fold))) return false;
           try {
-            return !isGeneratedContextModule(f, fs.readFileSync(path.join(aiDir, f), 'utf-8'));
+            return !isGeneratedContextModule(f, fs.readFileSync(path.join(aiDir, f), 'utf-8'), fold);
           } catch {
             return true; // An unreadable module must still be reported, not silently exempted.
           }

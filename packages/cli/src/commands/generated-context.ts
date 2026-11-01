@@ -2,8 +2,8 @@ import { POINTER_CLAUDE_MD } from './adf';
 import { parseAdf } from '@stackbilt/adf';
 
 /** Identify the runtime artifact, not a hand-authored module named context.adf. */
-export function isGeneratedContextModule(file: string, content: string): boolean {
-  if (file !== 'context.adf') return false;
+export function isGeneratedContextModule(file: string, content: string, caseInsensitive = false): boolean {
+  if ((caseInsensitive ? file.toLowerCase() : file) !== 'context.adf') return false;
   const lines = content.replace(/\r\n/g, '\n').split('\n');
   const generatedSections = new Set(['ROLE', 'STATE', 'OPEN_WORK', 'RECENT_ACTIVITY', 'PENDING_DECISIONS', 'WARNINGS']);
   if (parseAdf(content).sections.some(section => !generatedSections.has(section.key))) return false;
