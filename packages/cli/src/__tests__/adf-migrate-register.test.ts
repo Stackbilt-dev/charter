@@ -358,7 +358,7 @@ describe('bootstrap --yes — migrate registers its own modules (INV-4)', () => 
 
     expect(await bootstrapCommand({ ...baseOptions, yes: true }, args)).toBe(0);
     const after = readManifestWithoutVendors(
-      ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'].map(f => `${f}: pointer`),
+      ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', '.github/copilot-instructions.md'].map(f => `${f}: pointer`),
     );
     expect(after).toBe(manifest.replace('DB)\n', 'DB)\n  - Observability.adf (Triggers on: observability)\n'));
   });

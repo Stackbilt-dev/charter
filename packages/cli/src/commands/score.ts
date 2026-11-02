@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer } from './copilot-pointer';
 import { compileAdf, parseAdf, parseManifest } from '@stackbilt/adf';
 import type { AdfDocument, CompileTarget } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -173,7 +174,7 @@ interface ResolvedPathReference {
   resolved: string;
 }
 
-const AGENT_FILES = ['CLAUDE.md', 'AGENTS.md', 'agents.md', 'GEMINI.md', 'copilot-instructions.md'];
+const AGENT_FILES = ['CLAUDE.md', 'AGENTS.md', 'agents.md', 'GEMINI.md', 'copilot-instructions.md', '.github/copilot-instructions.md'];
 const ROOT_DOC_FILES = ['README.md', 'CONTRIBUTING.md'];
 const KNOWN_COMMANDS = new Set([
   'bash',
@@ -438,7 +439,21 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     const raw = readText(file);
     if (!raw) continue;
     // The VENDORS record names vendor files, not paths under .ai/ (#318).
-    const content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
+    let content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
+    // Generated nested pointers can refer to directories containing spaces. Validate their
+    // exact targets directly rather than tokenizing their known preamble into path fragments.
+    if (file === COPILOT_INSTRUCTIONS_FILE && resolveVendorMode(aiDir, file).mode === 'pointer') {
+      const template = copilotPointer(aiDir);
+      const normalized = content.replace(/\r\n/g, '\n');
+      if (normalized.startsWith(template)) {
+        content = normalized.slice(template.length);
+        for (const target of [aiDir, path.join(aiDir, 'manifest.adf')]) {
+          const resolved = path.relative(process.cwd(), path.resolve(target)).split(path.sep).join('/') || '.';
+          const candidate = path.relative(path.dirname(path.resolve(file)), path.resolve(target)).split(path.sep).join('/') || '.';
+          pathReferences.set(file + ':' + resolved, { source: file, candidate, resolved });
+        }
+      }
+    }
 
     for (const candidate of extractPathCandidates(content)) {
       const reference = resolveReferencedPath(file, candidate);

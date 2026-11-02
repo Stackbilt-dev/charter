@@ -8,6 +8,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { copilotPointer, isGithubCopilotFile } from './copilot-pointer';
 import {
   parseAdf,
   formatAdf,
@@ -271,7 +272,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
     if (result.migrateItems.length === 0) {
       if (result.needsRestore) {
         fileResults.push({ ...base, status: 'tidied', itemsExtracted: 0, routing: {} });
-        if (!dryRun) restorePointer(file, result.stayItems);
+        if (!dryRun) restorePointer(file, result.stayItems, aiDir);
       } else {
         fileResults.push({ ...base, status: 'clean', itemsExtracted: 0, routing: {} });
       }
@@ -301,7 +302,7 @@ export async function adfTidyCommand(options: CLIOptions, args: string[]): Promi
 
     // Restore thin pointer (if not dry-run)
     if (!dryRun) {
-      restorePointer(file, result.stayItems);
+      restorePointer(file, result.stayItems, aiDir);
     }
   }
 
@@ -417,7 +418,7 @@ function analyzeVendorFile(
   }
 
   // Extract content beyond the thin pointer
-  const beyondPointer = extractBeyondPointer(content, filePath);
+  const beyondPointer = extractBeyondPointer(content, filePath, aiDir);
   if (!beyondPointer.trim()) {
     return { migrateItems: [], stayItems: [], needsRestore: false };
   }
@@ -487,9 +488,9 @@ export function readRetainedSections(content: string): string {
   return out.length > 0 ? '\n\n' + out.join('\n') + '\n' : '';
 }
 
-function extractBeyondPointer(content: string, fileName: string): string {
+function extractBeyondPointer(content: string, fileName: string, aiDir: string): string {
   const baseName = path.basename(fileName);
-  const template = getPointerTemplates()[baseName];
+  const template = isGithubCopilotFile(fileName) ? copilotPointer(aiDir) : getPointerTemplates()[baseName];
 
   if (!template) return '';
 
@@ -676,10 +677,10 @@ function formatStayItem(content: string): string {
   return content.trimStart().startsWith('#') ? content : `- ${content}`;
 }
 
-function restorePointer(filePath: string, stayItems: MigrationItem[]): void {
+function restorePointer(filePath: string, stayItems: MigrationItem[], aiDir: string): void {
   const fullPath = path.resolve(filePath);
   const baseName = path.basename(filePath);
-  let pointer = getPointerTemplates()[baseName];
+  let pointer = isGithubCopilotFile(filePath) ? copilotPointer(aiDir) : getPointerTemplates()[baseName];
 
   if (!pointer) {
     pointer = `# ${baseName}\n\n` +

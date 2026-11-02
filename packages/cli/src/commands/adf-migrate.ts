@@ -8,6 +8,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer, isGithubCopilotFile, isProtectedCopilotAlias } from './copilot-pointer';
 import {
   parseAdf,
   formatAdf,
@@ -35,7 +36,7 @@ import {
 } from './adf';
 import { registerModules, toRegisterAction, dedupePlannedRegistrations } from './adf-manifest-register';
 import type { ModuleRegistration, RegisterAction } from './adf-manifest-register';
-import { isVendorFile, recordedModeOf, recordVendorModes, recordWrittenVendorModes } from './adf-vendor';
+import { inferVendorMode, isVendorFile, recordedModeOf, recordVendorModes, recordWrittenVendorModes } from './adf-vendor';
 
 export const MIGRATE_RECORDED_UNMANAGED = '{file} is recorded as unmanaged; skipped. Name it explicitly to migrate it: charter adf migrate --source {file}';
 
@@ -54,6 +55,7 @@ export const AGENT_CONFIG_FILES = [
   'AGENTS.md',
   'agents.md',
   'GEMINI.md',
+  COPILOT_INSTRUCTIONS_FILE,
   'copilot-instructions.md',
 ];
 
@@ -243,6 +245,8 @@ export function generateModuleIndex(aiDir: string): string {
  * No-op if the file doesn't exist or lacks sentinels.
  */
 export function updateModuleIndex(filePath: string, aiDir: string): void {
+  if (isProtectedCopilotAlias(filePath, recordedModeOf(aiDir, COPILOT_INSTRUCTIONS_FILE) === 'unmanaged',
+    content => inferVendorMode(COPILOT_INSTRUCTIONS_FILE, content).inferredMode === 'unmanaged')) return;
   const fullPath = path.resolve(filePath);
   if (!fs.existsSync(fullPath)) return;
   let content = fs.readFileSync(fullPath, 'utf-8');
@@ -614,7 +618,7 @@ function writePointerWithRetained(
   }
 
   // Replace mode (original behavior): thin pointer for all files
-  let pointer = pointerTemplateFor(baseName);
+  let pointer = isGithubCopilotFile(fileName) ? copilotPointer(aiDir) : pointerTemplateFor(baseName);
 
   if (!pointer) {
     // Generic pointer for files without a template

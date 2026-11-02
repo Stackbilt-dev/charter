@@ -12,7 +12,7 @@ pnpm exec tsc --noEmit
 # doctor --staged --tidy-skipped, so their bloat does not block the commit (#357).
 TIDY_SKIPPED=""
 if [ "${CHARTER_SKIP_TIDY:-0}" != "1" ] && [ -f ".ai/manifest.adf" ]; then
-  VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md"
+  VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md .github/copilot-instructions.md"
   STAGED=$(git diff --cached --name-only --diff-filter=d)
   SOURCES=""
   NAMES=""
