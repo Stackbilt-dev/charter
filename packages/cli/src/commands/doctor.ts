@@ -166,7 +166,7 @@ export const DOCTOR_MSG = {
 } as const;
 
 /** The order `adf agent config` has always listed vendor files in. */
-const AGENT_CONFIG_ORDER: readonly string[] = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
+const AGENT_CONFIG_ORDER: readonly string[] = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md', '.github/copilot-instructions.md'];
 
 export type VendorModeRowKind =
   | 'recorded-ok'

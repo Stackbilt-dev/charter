@@ -248,7 +248,7 @@ describe('hookCommand', () => {
         expect(block).toContain('adf tidy --dry-run --print-paths $SOURCES');
         expect(block).toContain('adf tidy --print-paths $SOURCES');
         expect(block).toContain('git diff --cached --name-only --diff-filter=d');
-        expect(block).toContain('VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md"');
+        expect(block).toContain('VENDOR_FILES="CLAUDE.md .cursorrules AGENTS.md agents.md GEMINI.md copilot-instructions.md .github/copilot-instructions.md"');
         // CP-1: only files tidy wrote are staged; the .ai/ sweep is gone for good.
         expect(block).not.toMatch(/git add[^\n]*\.ai\/\*/);
         expect(block.match(/git add --/g)).toEqual(['git add --']);
