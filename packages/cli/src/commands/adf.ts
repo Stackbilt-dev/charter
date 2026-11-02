@@ -70,6 +70,11 @@ export const CORE_SCAFFOLD = `ADF: 0.1
 \u{1F4CB} CONTEXT:
   - Project context (run 'charter adf populate' to auto-fill from codebase)
 
+\u26A0\uFE0F CONSTRAINTS [load-bearing]:
+  - Use Conventional Commits (feat, fix, docs, chore)
+  - Never commit secrets or credentials
+  - Pure functions in library code; side effects only in entry points
+
 \u{1F4D6} GUIDE [advisory]:
   - Pure runtime/environment? (OS, line endings) \u2192 CLAUDE.md, not ADF
   - Universal architecture constraint? \u2192 core.adf CONSTRAINTS [load-bearing]
@@ -79,11 +84,6 @@ export const CORE_SCAFFOLD = `ADF: 0.1
   - [load-bearing] = violation causes incorrect output
   - [advisory] = best practice, not enforced
   - Section types are open: CONTEXT, CONSTRAINTS, ADVISORY, METRICS, custom
-
-\u26A0\uFE0F CONSTRAINTS [load-bearing]:
-  - Use Conventional Commits (feat, fix, docs, chore)
-  - Never commit secrets or credentials
-  - Pure functions in library code; side effects only in entry points
 
 \uD83D\uDCCA METRICS:
   entry_loc: 0 / 500 [lines]
