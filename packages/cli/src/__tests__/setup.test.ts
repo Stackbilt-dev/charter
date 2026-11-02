@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { detectStack, getGithubWorkflow, loadPackageContexts, syncPackageManifest, workflowCharterCommand } from '../commands/setup';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { detectStack, getGithubWorkflow, loadPackageContexts, setupCommand, syncPackageManifest, workflowCharterCommand } from '../commands/setup';
 import { checkGateEnforcement } from '../commands/doctor-gate-enforcement';
 import { StackPresetSchema, VALID_PRESETS } from '../commands/setup.contract';
 
@@ -10,6 +10,7 @@ const originalCwd = process.cwd();
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   process.chdir(originalCwd);
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -17,6 +18,40 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+});
+
+describe('pnpm workflow version selection (#398)', () => {
+  it.each(['pnpm@10.34.6', 'pnpm@10.34.6+sha512.abc123', 'pnpm@11.0.0-rc.1'])('lets action-setup read %s from package.json', (declaration) => {
+    const workflow = getGithubWorkflow('pnpm', declaration);
+    expect(workflow).toContain('      - uses: pnpm/action-setup@v4\n\n      - uses: actions/setup-node@v4');
+    expect(workflow).not.toContain('version: 9');
+    expect(workflow).toContain('run: pnpm install --frozen-lockfile');
+  });
+
+  it.each([undefined, '', 'npm@10.9.2', 'pnpm@', 'pnpm@latest'])('retains the fallback when no valid pnpm pin exists: %s', (declaration) => {
+    expect(getGithubWorkflow('pnpm', declaration)).toContain('      - uses: pnpm/action-setup@v4\n        with:\n          version: 9');
+  });
+
+  it('does not change npm workflows when a packageManager declaration is provided', () => {
+    expect(getGithubWorkflow('npm', 'npm@10.9.2')).toBe(getGithubWorkflow('npm'));
+    expect(getGithubWorkflow('npm', 'pnpm@10.34.6')).not.toContain('pnpm/action-setup');
+  });
+
+  it.each(['pnpm@10.34.6', 'pnpm@10.34.6+sha512.abc123', undefined])('setup writes a workflow using the root declaration %s', async (declaration) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'charter-pnpm-workflow-'));
+    tempDirs.push(tmp);
+    process.chdir(tmp);
+    fs.writeFileSync('package.json', JSON.stringify({ name: 'app', version: '1.0.0', packageManager: declaration }));
+    fs.writeFileSync('pnpm-lock.yaml', 'lockfileVersion: 9.0\n');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const code = await setupCommand(
+      { configPath: '.charter', format: 'json', ciMode: false, yes: true },
+      ['--preset', 'fullstack', '--ci', 'github', '--yes', '--no-dependency-sync'],
+    );
+    expect(code).toBe(0);
+    expect(fs.readFileSync(path.join('.github', 'workflows', 'charter-governance.yml'), 'utf8'))
+      .toBe(getGithubWorkflow('pnpm', declaration));
+  });
 });
 
 describe('loadPackageContexts + detectStack (npm workspaces)', () => {

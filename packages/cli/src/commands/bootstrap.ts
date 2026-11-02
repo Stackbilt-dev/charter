@@ -797,7 +797,8 @@ function runSetupPhase(
       // created/updated/kept use the platform separator, as the .charter/
       // entries do; replaced/notReplaced/workflow use '/', as backups do.
       const workflowFile = WORKFLOW_FILE;
-      const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
+      const declaredPackageManager = contexts.find(ctx => ctx.source === 'package.json')?.packageManager;
+      const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager, declaredPackageManager), {
         force,
         configDir: options.configPath,
         command: 'bootstrap',
