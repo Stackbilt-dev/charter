@@ -233,8 +233,8 @@ Codex/Cursor can use the same MCP wiring via `.mcp.json`:
 {
   "mcpServers": {
     "charter": {
-      "command": "npx",
-      "args": ["@stackbilt/cli", "serve", "--ai-dir", ".ai"]
+      "command": "npm",
+      "args": ["exec", "--no", "--package=@stackbilt/cli", "--", "charter", "serve", "--ai-dir", ".ai"]
     }
   }
 }

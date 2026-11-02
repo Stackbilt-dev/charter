@@ -826,12 +826,14 @@ npx charter serve --name "my-project"         # override the server name shown i
 {
   "mcpServers": {
     "charter": {
-      "command": "npx",
-      "args": ["@stackbilt/cli", "serve", "--ai-dir", ".ai"]
+      "command": "npm",
+      "args": ["exec", "--no", "--package=@stackbilt/cli", "--", "charter", "serve", "--ai-dir", ".ai"]
     }
   }
 }
 ```
+
+This npm example resolves the project's installed `@stackbilt/cli`; `--no` refuses an implicit install when it is missing. Install project dependencies before starting the MCP client. Bootstrap uses `pnpm` with `args: ["exec", "charter", "serve", "--ai-dir", ".ai"]` for pnpm projects and `yarn` with `args: ["run", "charter", "serve", "--ai-dir", ".ai"]` for Yarn projects. Existing entries, including older `npx` entries and custom AI directories, stay unchanged without `--force`; a forced replacement is backed up first.
 
 Use the repo-relative `.ai` — this is what `charter bootstrap` generates. `.mcp.json` is committed and shared, so an absolute path here leaks your local directory layout and breaks the server for every other clone and for CI.
 

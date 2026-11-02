@@ -25,7 +25,7 @@ const YES: CLIOptions = { ...TEXT, yes: true };
 const BOOT = ['--preset', 'worker', '--skip-install', '--skip-doctor'];
 const WF = '.github/workflows/charter-governance.yml';
 const P = (rel: string): string => path.normalize(rel);
-const CHARTER_ENTRY = { command: 'npx', args: ['@stackbilt/cli', 'serve', '--ai-dir', '.ai'] };
+const CHARTER_ENTRY = { command: 'npm', args: ['exec', '--no', '--package=@stackbilt/cli', '--', 'charter', 'serve', '--ai-dir', '.ai'] };
 
 let out: string[] = [];
 let tempDir = '';
