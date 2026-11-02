@@ -30,7 +30,7 @@ export const CreateLedgerEntrySchema = z.object({
   }).optional(),
   stamp: z.object({
     stamp_id: z.string().min(1),
-    ledger_ids: z.array(z.string().uuid()).min(1),
+    ledger_ids: z.array(z.guid()).min(1),
     issued_at: z.string().min(1),
     policy_hash: z.string().regex(/^sha256:[A-Fa-f0-9]{64}$/),
     signature: z.string().min(8)
@@ -72,7 +72,7 @@ export const CreatePatternSchema = z.object({
   rationale: z.string().max(1000).optional(),
   anti_patterns: z.string().max(500).optional(),
   documentation_url: z.string().url().optional(),
-  related_ledger_id: z.string().uuid().optional(),
+  related_ledger_id: z.guid().optional(),
   project_id: z.string().optional()
 });
 
@@ -122,7 +122,7 @@ export const CreateGovernanceRequestSchema = z.object({
 
 export const ResolveGovernanceRequestSchema = z.object({
   resolution_summary: z.string().min(10).max(500),
-  resolution_ledger_id: z.string().uuid().optional()
+  resolution_ledger_id: z.guid().optional()
 });
 
 // ============================================================================

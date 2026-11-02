@@ -268,7 +268,7 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions, se
     maxDepth: z.number().optional().describe(
       'Maximum BFS depth when traversing reverse dependencies. Positive integer, defaults to 3. 1 = direct importers only.',
     ),
-    aliases: z.record(z.string()).optional().describe(
+    aliases: z.record(z.string(), z.string()).optional().describe(
       'Optional tsconfig-style path alias map (e.g. { "@/": "src/" }). If omitted, aliases are auto-detected from tsconfig.json at the scan root.',
     ),
   };
