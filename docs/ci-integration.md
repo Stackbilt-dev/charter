@@ -16,7 +16,7 @@ Re-running `charter setup --ci github` or `charter bootstrap --ci github` never 
 
 - **Missing:** the workflow is created.
 - **Identical to the current template:** left alone.
-- **The current npm or pnpm template, or the one before it:** refreshed. The previous template (score-badge steps, run with `npx charter`) has the same permissions and triggers, so it is refreshed without a warning ([#380](https://github.com/Stackbilt-dev/charter/issues/380)). A switch between the npm and pnpm forms is named in the output (`package manager npm → pnpm; adds pnpm/action-setup@v4`), since the pnpm form runs the third-party `pnpm/action-setup` action. Copies that differ only in a BOM, CRLF line endings, trailing whitespace or trailing blank lines count as the template.
+- **A recognized Charter template with the current permissions and triggers:** refreshed. This includes the project-local CLI and pnpm-pin variants; the earlier score-badge template (run with `npx charter`) also has the same permissions and triggers, so it is refreshed without a warning ([#380](https://github.com/Stackbilt-dev/charter/issues/380)). A switch between the npm and pnpm forms is named in the output (`package manager npm → pnpm; adds pnpm/action-setup@v4`), since the pnpm form runs the third-party `pnpm/action-setup` action. Copies that differ only in a BOM, CRLF line endings, trailing whitespace or trailing blank lines count as the template.
 - **An older Charter template:** kept, with a warning. Every template before the score-badge steps ran on `pull_request` only with `permissions: contents: read`, and refreshing one changes `contents: read → write`, adds the `push` and `workflow_dispatch` triggers, and adds a step that commits `.charter/badge.json` and pushes to the repo. That gives the workflow's `GITHUB_TOKEN` write access, and on a protected default branch the push step fails unless the token may push. Review it, then run the command again with `--force` to upgrade. The one template that pinned `@stackbilt/cli@x.y.z` is one of these, so a pinned workflow is kept whatever version it pins.
 - **Anything else (edited by hand):** kept byte for byte, with a warning stating what the current template grants (`contents: write` and `pull-requests: write`; runs on `push`, `pull_request` and `workflow_dispatch`; commits and pushes to the repo). Charter does not try to describe what your edit changed.
 
@@ -26,7 +26,7 @@ With `--force`, a kept workflow is first copied to `.charter/.backup/github-work
 
 On every push and pull request, the CI workflow runs:
 
-1. `charter validate --ci` — checks all commits for governance trailers
+1. `charter validate --ci --range "$CHARTER_COMMIT_RANGE"` — checks every commit in the event range for governance trailers
 2. `charter drift --ci` — scans for blessed-stack deviations
 3. `charter adf evidence --auto-measure --ci` — validates metric ceilings (when `.ai/manifest.adf` is present)
 4. `charter audit --format json` — captures governance posture snapshot
@@ -45,6 +45,29 @@ Add the badge to your README after the first workflow run has committed `.charte
 ```markdown
 [![Agent context](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2F<org>%2F<repo>%2F<branch>%2F.charter%2Fbadge.json)](https://github.com/Stackbilt-dev/charter)
 ```
+
+## Commit Ranges
+
+The generated workflow resolves event SHAs before validation. Pull requests use
+the base SHA through the head SHA, excluding GitHub's synthetic merge commit;
+pushes use the before SHA through the pushed SHA. Both `validate` and `audit`
+receive that explicit range, including changes older than five commits. Checkout
+uses `fetch-depth: 0`; if an event commit is unavailable, the range step fails
+with a fetch-history diagnostic instead of silently checking fewer commits.
+
+An initial push (all-zero before SHA), or a manual run with no base SHA, checks
+all commits reachable from the event head. Deleted-branch events are skipped.
+Existing workflows need the updated range step; re-run `setup --ci github` and
+review any preservation/force warning before replacing a customized workflow.
+
+Outside this workflow, `validate` and `audit` still prefer an available local
+`main`/`master` range, then use a recent first-parent boundary. This local fallback
+is a convenience, not a guarantee that every PR commit was checked. Pass
+`--range <base-sha>..<head-sha>` when the complete range matters.
+
+Actual merge commits pushed to the base branch remain subject to the existing
+trailer policy. Give those commits trailers or use a merge strategy consistent
+with your policy; the PR range only excludes GitHub's temporary synthetic merge.
 
 ## Evidence Gating
 
