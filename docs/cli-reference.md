@@ -15,7 +15,7 @@ npx charter validate --ci --format json    # machine-readable output
 npx charter validate --range HEAD~5..HEAD  # specific commit range
 ```
 
-**Default range detection:** When `--range` is omitted, Charter tries `main..HEAD` or `master..HEAD` first, then falls back to the most recent 5 commits.
+**Default range detection:** When `--range` is omitted, Charter tries an available local `main..HEAD` or `master..HEAD` first, then falls back to a boundary at most five first-parent steps behind HEAD (or all reachable commits for a single-commit history). Counting first parents keeps that boundary valid on young merge histories; merge-side commits can make the selected set larger than five. This convenience fallback does not guarantee complete pull-request coverage. Generated CI workflows pass an explicit event base/head SHA range to both `validate` and `audit`, excluding GitHub's synthetic PR merge commit. Use `--range <base-sha>..<head-sha>` for complete coverage in a custom workflow.
 
 JSON output includes `policyOffenders` (missing required trailers) and `riskOffenders` (high-risk paths without governance), plus `effectiveRangeSource` and `defaultCommitRange` for agent transparency.
 
