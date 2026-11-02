@@ -6,6 +6,7 @@ import type { CLIOptions } from '../index';
 import { run } from '../index';
 import { scoreCommand, buildBadgePayload, gradeToColor } from '../commands/score';
 import type { BadgePayload } from '../commands/score';
+import { POINTER_CLAUDE_MD } from '../commands/adf';
 
 const baseOptions: CLIOptions = {
   configPath: '.charter',
@@ -265,6 +266,45 @@ Hostname with port: localhost:3000
     expect(broken.some((b: string) => b === '/chat' || b === '/api/runs' || b.startsWith('/webhooks/'))).toBe(false);
     expect(broken.some((b: string) => b.includes('example.com'))).toBe(false);
     expect(broken.some((b: string) => b === 'localhost:3000')).toBe(false);
+  });
+
+  it.each(['.ai', '.context'])('does not penalize the generated optional snapshot fallback in %s', async (aiDir) => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+    fs.mkdirSync(path.join(tmp, aiDir));
+    fs.writeFileSync(path.join(tmp, aiDir, 'manifest.adf'), 'ADF: 0.1\nDEFAULT_LOAD:\n  - core.adf\n');
+    fs.writeFileSync(path.join(tmp, aiDir, 'core.adf'), 'ADF: 0.1\nTASK: Test repository\n');
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER_CLAUDE_MD.replaceAll('.ai/', `${aiDir}/`));
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, ['--ai-dir', aiDir]));
+
+    expect(report.signals.grounding.pathReferences.broken).toEqual([]);
+    expect(findCategory(report, 'grounding')?.score).toBe(10);
+    expect(fs.existsSync(path.join(tmp, aiDir, 'context.snapshot.json'))).toBe(false);
+  });
+
+  it('still checks user references to the snapshot and other missing paths in a managed pointer', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), POINTER_CLAUDE_MD
+      + '\n## Project requirements\nRead `.ai/context.snapshot.json` and `docs/missing.md` before editing.\n');
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    expect(report.signals.grounding.pathReferences.broken).toContain('.ai/context.snapshot.json');
+    expect(report.signals.grounding.pathReferences.broken).toContain('docs/missing.md');
+  });
+
+  it('does not exempt the same snapshot fallback in an unmanaged file or README', async () => {
+    const tmp = createTempRepo();
+    process.chdir(tmp);
+    const fallback = POINTER_CLAUDE_MD.split('\n').find((line) => line.startsWith('If `charter serve`'))!;
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), `# Project instructions\n\n${fallback}\n`);
+    fs.writeFileSync(path.join(tmp, 'README.md'), `# Project\n\n${fallback}\n`);
+
+    const { report } = await captureJson(() => scoreCommand(baseOptions, []));
+
+    expect(report.signals.grounding.pathReferences.broken.filter((ref: string) => ref === '.ai/context.snapshot.json')).toHaveLength(2);
   });
 
   it('grounding checker correctly tracks ./path-without-extension as a broken reference', async () => {
