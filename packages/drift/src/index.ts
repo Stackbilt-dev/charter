@@ -143,18 +143,27 @@ export function extractTemplateLiterals(content: string, filename: string): Reco
 export function extractRules(antiPatternText: string): RegExp[] {
   const rules: RegExp[] = [];
 
-  // Look for regex-like strings: /regex/flags
-  const regexMatches = [...antiPatternText.matchAll(/\/([^\/]+)\/([gimsuy]*)/g)];
-  if (regexMatches.length > 0) {
-    regexMatches.forEach(match => {
-      const pattern = match[1];
-      const flags = match[2] || '';
-      try {
-        rules.push(new RegExp(pattern, flags));
-      } catch {
-        // Ignore invalid regex
-      }
-    });
+  // A slash closes a literal only outside a character class and when unescaped.
+  for (let start = 0; start < antiPatternText.length; start++) {
+    if (antiPatternText[start] !== '/') continue;
+    const { end, resume } = findRegexLiteralEnd(antiPatternText, start + 1);
+    if (end < 0) {
+      // An unterminated literal owns the rest of its line; do not reinterpret its slashes.
+      start = resume - 1;
+      continue;
+    }
+    if (end === start + 1) {
+      start = end;
+      continue;
+    }
+    let flagsEnd = end + 1;
+    while (flagsEnd < antiPatternText.length && /[gimsuy]/.test(antiPatternText[flagsEnd])) flagsEnd++;
+    try {
+      rules.push(new RegExp(antiPatternText.slice(start + 1, end), antiPatternText.slice(end + 1, flagsEnd)));
+    } catch {
+      // Preserve the existing behavior for invalid regexes.
+    }
+    start = flagsEnd - 1;
   }
 
   // Look for code-like tokens: `code`
@@ -168,4 +177,24 @@ export function extractRules(antiPatternText: string): RegExp[] {
   }
 
   return rules;
+}
+
+/** Find a literal's closing delimiter without consuming escaped slashes or classes. */
+function findRegexLiteralEnd(text: string, start: number): { end: number; resume: number } {
+  let inClass = false;
+  for (let index = start; index < text.length; index++) {
+    const char = text[index];
+    if (char === '\n' || char === '\r') return { end: -1, resume: index + 1 };
+    if (char === '\\') {
+      if (text[index + 1] === '\n' || text[index + 1] === '\r') return { end: -1, resume: index + 2 };
+      index++;
+    } else if (char === '[') {
+      inClass = true;
+    } else if (char === ']') {
+      inClass = false;
+    } else if (char === '/' && !inClass) {
+      return { end: index, resume: index + 1 };
+    }
+  }
+  return { end: -1, resume: text.length };
 }

@@ -132,6 +132,15 @@ function printReport(report: DriftReport, minScore: number, patternsCustomized: 
         console.log(`      ... and ${violations.length - 5} more`);
       }
     }
+
+    if (securityBlockers > 0) {
+      console.log('\n  CI policy: FAIL. Security deny violations block regardless of the score threshold.');
+    } else if (report.score < minScore) {
+      console.log('\n  CI policy: FAIL. The drift score is below the configured threshold.');
+    } else {
+      console.log('\n  CI policy: PASS. Reported pattern violations are within the configured score threshold and do not fail --ci.');
+      console.log('  To block any detected pattern violation, set drift.minScore to 1 in your config.');
+    }
   } else {
     console.log('  No violations found.');
   }
