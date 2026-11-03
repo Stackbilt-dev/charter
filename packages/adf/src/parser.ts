@@ -8,10 +8,10 @@
 import type { AdfDocument, AdfSection, AdfContent, AdfMapEntry, AdfMetricEntry } from './types';
 import { AdfParseError } from './errors';
 
-// Matches section headers: optional emoji + UPPERCASE_KEY: optional inline value
+// Matches section headers: optional emoji + uppercase key (including words): optional inline value
 // Optional weight annotation: [load-bearing] or [advisory]
 // Emoji is any Emoji_Presentation or Extended_Pictographic codepoint
-const SECTION_HEADER_RE = /^(?:(\p{Emoji_Presentation}|\p{Extended_Pictographic})\uFE0F?\s+)?([A-Z][A-Z0-9_]*)\s*(?:\[(load-bearing|advisory)\]\s*)?:\s*(.*)$/u;
+const SECTION_HEADER_RE = /^(?:(\p{Emoji_Presentation}|\p{Extended_Pictographic})\uFE0F*\s+)?([A-Z][A-Z0-9_]*(?:[ \t]+[A-Z0-9_]+)*)\s*(?:\[(load-bearing|advisory)\]\s*)?:\s*(.*)$/u;
 const VERSION_RE = /^ADF\s*:\s*(.+)$/i;
 const LIST_ITEM_RE = /^\s*-\s+(.*)$/;
 const MAP_ENTRY_RE = /^\s*([A-Z][A-Z0-9_]*)\s*:\s*(.*)$/;

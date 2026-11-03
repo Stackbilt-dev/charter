@@ -433,7 +433,7 @@ const FIRST_PARTY_DEPS: FirstPartyDep[] = [
     pkg: '@stackbilt/contracts',
     version: '^0.8.0',
     depType: 'devDep',
-    deps: { zod: '^4.3.6' },
+    deps: { zod: '^4.6.6' },
     trigger: () => true,
     starterFiles: (facts, projectName, prd) => [{
       path: `src/contracts/${projectName}.contract.ts`,

@@ -1,7 +1,7 @@
 {
   "name": "@stackbilt/surface",
   "sideEffects": false,
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "API surface extraction: routes (Hono/Express) + D1 SQL schema",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/Stackbilt-dev/charter#readme",
   "dependencies": {
-    "zod": "^3.24.1"
+    "zod": "^4.6.6"
   },
   "publishConfig": {
     "access": "public",

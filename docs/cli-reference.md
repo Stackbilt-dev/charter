@@ -15,7 +15,7 @@ npx charter validate --ci --format json    # machine-readable output
 npx charter validate --range HEAD~5..HEAD  # specific commit range
 ```
 
-**Default range detection:** When `--range` is omitted, Charter tries `main..HEAD` or `master..HEAD` first, then falls back to the most recent 5 commits.
+**Default range detection:** When `--range` is omitted, Charter tries an available local `main..HEAD` or `master..HEAD` first, then falls back to a boundary at most five first-parent steps behind HEAD (or all reachable commits for a single-commit history). Counting first parents keeps that boundary valid on young merge histories; merge-side commits can make the selected set larger than five. This convenience fallback does not guarantee complete pull-request coverage. Generated CI workflows pass an explicit event base/head SHA range to both `validate` and `audit`, excluding GitHub's synthetic PR merge commit. Use `--range <base-sha>..<head-sha>` for complete coverage in a custom workflow.
 
 JSON output includes `policyOffenders` (missing required trailers) and `riskOffenders` (high-risk paths without governance), plus `effectiveRangeSource` and `defaultCommitRange` for agent transparency.
 
@@ -68,9 +68,10 @@ npx charter hook install --commit-msg                # trailer gate + normalizat
 npx charter hook install --pre-commit                # vendor tidy + ADF evidence gate hook
 npx charter hook install --commit-msg --pre-commit   # both hooks
 npx charter hook install --commit-msg --force        # overwrite existing hooks
+npx charter hook install --commit-msg --config governance  # use the same config as CI
 ```
 
-- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading `.charter/config.json` with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No `.charter/config.json` at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
+- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading the recorded config directory's `config.json` (default: `.charter/config.json`) with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No selected config file at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
 - `--pre-commit` — tidies the staged vendor files, then runs ADF evidence checks (LOC ceiling validation) before each commit. Only gates when `.ai/manifest.adf` exists.
   - Tidy covers only staged vendor files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`, `agents.md`, `GEMINI.md`, `.github/copilot-instructions.md` and legacy root `copilot-instructions.md`), each passed with `adf tidy --source`. A file carrying the compile banner is skipped without calling the CLI.
   - A staged vendor file that also has unstaged changes is skipped, with a message.
@@ -115,6 +116,8 @@ npx charter hook install --commit-msg --force        # overwrite existing hooks
 - `--force` — overwrite existing non-Charter hooks
 
 Must specify at least one of `--commit-msg` or `--pre-commit`.
+
+`hook install --commit-msg --config <dir>` records the selected configuration directory in the hook (default: `.charter`). Use the same directory as `validate --config <dir>` in CI. Relative selections are resolved from the installation directory and stored relative to the Git worktree root, where Git runs the hook; absolute selections remain absolute. Re-run installation to update the selection. The hook reads only that directory's `config.json`: a missing selected file warns with its path and skips the gate, following the existing missing-config behavior, without falling back to `.charter/config.json`. Paths containing spaces or shell characters are passed literally, not executed.
 
 ### charter bootstrap
 
@@ -830,12 +833,14 @@ npx charter serve --name "my-project"         # override the server name shown i
 {
   "mcpServers": {
     "charter": {
-      "command": "npx",
-      "args": ["@stackbilt/cli", "serve", "--ai-dir", ".ai"]
+      "command": "npm",
+      "args": ["exec", "--no", "--package=@stackbilt/cli", "--", "charter", "serve", "--ai-dir", ".ai"]
     }
   }
 }
 ```
+
+This npm example resolves the project's installed `@stackbilt/cli`; `--no` refuses an implicit install when it is missing. Install project dependencies before starting the MCP client. Bootstrap uses `pnpm` with `args: ["exec", "charter", "serve", "--ai-dir", ".ai"]` for pnpm projects and `yarn` with `args: ["run", "charter", "serve", "--ai-dir", ".ai"]` for Yarn projects. Existing entries, including older `npx` entries and custom AI directories, stay unchanged without `--force`; a forced replacement is backed up first.
 
 Use the repo-relative `.ai` — this is what `charter bootstrap` generates. `.mcp.json` is committed and shared, so an absolute path here leaks your local directory layout and breaks the server for every other clone and for CI.
 
