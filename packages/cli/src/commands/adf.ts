@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer } from './copilot-pointer';
 import {
   parseAdf,
   formatAdf,
@@ -474,7 +475,7 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
       { file: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
       { file: 'AGENTS.md', content: POINTER_AGENTS_MD, label: 'AGENTS.md (thin pointer)' },
       { file: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
-      { file: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
+      { file: COPILOT_INSTRUCTIONS_FILE, content: copilotPointer(aiDir), label: `${COPILOT_INSTRUCTIONS_FILE} (thin pointer)` },
     ];
     const createdPointers: string[] = [];
     const skippedPointers: string[] = [];
@@ -483,6 +484,7 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
       if (fs.existsSync(spec.file)) {
         skippedPointers.push(spec.file);
       } else {
+        if (spec.file === COPILOT_INSTRUCTIONS_FILE) fs.mkdirSync(path.dirname(spec.file), { recursive: true });
         fs.writeFileSync(spec.file, spec.content);
         createdPointers.push(spec.file);
         result.files.push(spec.file);

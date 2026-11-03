@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { stripGeneratedPointerSession } from './generated-context';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
@@ -165,7 +166,7 @@ export const DOCTOR_MSG = {
 } as const;
 
 /** The order `adf agent config` has always listed vendor files in. */
-const AGENT_CONFIG_ORDER: readonly string[] = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'];
+const AGENT_CONFIG_ORDER: readonly string[] = ['CLAUDE.md', '.cursorrules', 'agents.md', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md', '.github/copilot-instructions.md'];
 
 export type VendorModeRowKind =
   | 'recorded-ok'
@@ -673,7 +674,7 @@ export async function doctorCommand(options: CLIOptions, args: string[] = []): P
         // record that contradicts the file is `adf vendor mode`'s to report.
 
         // Strip charter-managed sentinel blocks before scanning for bloat/keywords.
-        const strippedContent = stripCharterSentinels(content);
+        const strippedContent = stripGeneratedPointerSession(file, stripCharterSentinels(content));
         const lines = strippedContent.split('\n');
         const lineCount = lines.length;
         const fileWarnings: string[] = [];

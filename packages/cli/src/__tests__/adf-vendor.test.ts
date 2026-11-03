@@ -391,7 +391,7 @@ describe('adf vendor set', () => {
     scaffold();
     await expect(run(['vendor', 'set', 'README.md', 'pointer'])).rejects.toMatchObject({
       exitCode: 2,
-      message: "Unknown vendor file 'README.md'. Expected one of: CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md, agents.md, copilot-instructions.md",
+      message: "Unknown vendor file 'README.md'. Expected one of: CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md, agents.md, copilot-instructions.md, .github/copilot-instructions.md",
     });
     await expect(run(['vendor', 'set', 'CLAUDE.md', 'thin'])).rejects.toMatchObject({ exitCode: 2 });
     await expect(run(['vendor', 'set', 'CLAUDE.md'])).rejects.toMatchObject({
@@ -600,7 +600,7 @@ describe('implicit writers', () => {
     const r = await run(['init', '--emit-pointers']);
     expect(r.code).toBe(0);
     const text = manifestText();
-    for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'copilot-instructions.md']) {
+    for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', '.github/copilot-instructions.md']) {
       expect(text).toContain(`  - ${f}: pointer\n`);
     }
     // Skipped because it already existed: not written, so not recorded.
@@ -661,13 +661,13 @@ describe('implicit writers', () => {
     const args = ['--yes', '--skip-install', '--skip-doctor'];
     expect(await bootstrapCommand({ ...TEXT, yes: true }, args)).toBe(0);
     const text = manifestText();
-    for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md']) {
+    for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', '.github/copilot-instructions.md']) {
       expect(text).toContain(`  - ${f}: pointer\n`);
     }
 
     // A record that cannot be written: the warning joins the adf-init step's JSON
     // warnings, and bootstrap's exit code is unchanged.
-    for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md']) fs.rmSync(f);
+    for (const f of ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', '.github/copilot-instructions.md']) fs.rmSync(f);
     const broken = `${text.slice(0, text.indexOf('\n\u{1F3F7} VENDORS:'))}\n\n\u{1F3F7} VENDORS: hand-written\n`;
     fs.writeFileSync(path.join('.ai', 'manifest.adf'), broken);
     out = [];

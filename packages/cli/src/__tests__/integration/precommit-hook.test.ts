@@ -21,6 +21,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HOOK_CLI, HOOK_CLI_RESOLVE_BLOCK, HOOK_SCOPED_DOCTOR_FILE, PRE_COMMIT_HOOK_CONTENT } from '../../commands/hook';
 import { BLOAT_SCOPE_MSG } from '../../commands/doctor';
+import { copilotPointer } from '../../commands/copilot-pointer';
 
 // ============================================================================
 // Fixture Helpers
@@ -267,6 +268,24 @@ ${DB_BLOAT}`);
     expect(committedClaude).toContain('## Environment');
     // Everything tidy wrote was committed; nothing is left behind.
     expect(porcelain(tmp)).toEqual([]);
+  });
+
+  it('tidies staged canonical Copilot instructions through the real generated hook (#403)', { timeout: 60000 }, () => {
+    const repo = writeHookFixtureRepo('copilot');
+    const file = '.github/copilot-instructions.md';
+    fs.mkdirSync(path.join(repo.dir, '.github'), { recursive: true });
+    // The helper is called from this test's cwd; the default links are repo-relative in either fixture.
+    fs.writeFileSync(path.join(repo.dir, file), copilotPointer() + DB_BLOAT);
+    git(repo.dir, 'add', file);
+    const result = repo.commit('migrate staged copilot rules');
+    expect(result.status, result.output).toBe(0);
+    expect(tidyCalls(repo)).toEqual([
+      'adf tidy --dry-run --print-paths --source .github/copilot-instructions.md',
+      'adf tidy --print-paths --source .github/copilot-instructions.md',
+    ]);
+    expect(show(repo.dir, 'HEAD:' + file)).toContain('See ../.ai/manifest.adf');
+    expect(show(repo.dir, 'HEAD:' + file)).not.toContain('## Database Rules');
+    expect(porcelain(repo.dir)).toEqual([]);
   });
 
   it('passes through cleanly when CLAUDE.md has no bloat', { timeout: 60000 }, () => {
