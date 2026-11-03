@@ -7,6 +7,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer } from './copilot-pointer';
+import { isGeneratedContextModule } from './generated-context';
 import { execSync } from 'node:child_process';
 import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
@@ -44,13 +46,12 @@ import {
   POINTER_CURSORRULES,
   POINTER_AGENTS_MD,
   POINTER_GEMINI_MD,
-  POINTER_COPILOT_MD,
   manifestForPreset,
 } from './adf';
 import { loadPatterns } from '../config';
 import { parseAdf, parseManifest, TARGET_FILENAMES } from '@stackbilt/adf';
 import type { CompileTarget } from '@stackbilt/adf';
-import { discoverAgentConfigFiles, migrateSource, updateModuleIndex } from './adf-migrate';
+import { discoverAgentConfigFiles, fileIdentity, migrateSource, updateModuleIndex } from './adf-migrate';
 import { inferVendorMode, recordedModeOf, recordWrittenVendorModes, resolveVendorMode } from './adf-vendor';
 import type { VendorFile } from './adf-vendor';
 import { isCaseInsensitiveDir, moduleKey, registerModules } from './adf-manifest-register';
@@ -495,7 +496,7 @@ export async function bootstrapCommand(options: CLIOptions, args: string[]): Pro
       reason: 'Customize blessed stack patterns',
     });
     result.nextSteps.push({
-      cmd: 'git add .charter .ai CLAUDE.md .cursorrules AGENTS.md GEMINI.md copilot-instructions.md && git commit -m "chore: bootstrap charter governance"',
+      cmd: 'git add .charter .ai CLAUDE.md .cursorrules AGENTS.md GEMINI.md .github/copilot-instructions.md && git commit -m "chore: bootstrap charter governance"',
       required: false,
       reason: 'Commit governance baseline',
     });
@@ -797,7 +798,8 @@ function runSetupPhase(
       // created/updated/kept use the platform separator, as the .charter/
       // entries do; replaced/notReplaced/workflow use '/', as backups do.
       const workflowFile = WORKFLOW_FILE;
-      const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
+      const declaredPackageManager = contexts.find(ctx => ctx.source === 'package.json')?.packageManager;
+      const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager, declaredPackageManager), {
         force,
         configDir: options.configPath,
         command: 'bootstrap',
@@ -837,7 +839,11 @@ function runSetupPhase(
       updated.push('package.json (devDependencies)');
     }
 
-    const mcpConfig = ensureProjectMcpConfig('.ai', force, options.configPath);
+    const rootManager = contexts.find(ctx => ctx.source === 'package.json')?.packageManager;
+    const declaredManager = typeof rootManager === 'string' ? rootManager.match(/^(npm|pnpm|yarn)@\d/)?.[1] : undefined;
+    const mcpManager = declaredManager === 'npm' || declaredManager === 'pnpm' || declaredManager === 'yarn'
+      ? declaredManager : packageManager === 'pnpm' ? 'pnpm' : detectPackageManagerFromLockfiles();
+    const mcpConfig = ensureProjectMcpConfig('.ai', force, options.configPath, mcpManager);
     if (mcpConfig.created) {
       created.push('.mcp.json');
     } else if (mcpConfig.updated) {
@@ -941,13 +947,18 @@ function ensureProjectMcpConfig(
   aiDir: string,
   force: boolean,
   configDir: string,
+  packageManager: 'npm' | 'pnpm' | 'yarn',
 ): { created: boolean; updated: boolean; warning?: string; backup?: string; notReplaced?: boolean } {
   const configPath = path.resolve('.mcp.json');
+  // Never let an MCP client fetch an unpinned CLI before the project's install.
+  const localArgs = packageManager === 'npm'
+    ? ['exec', '--no', '--package=@stackbilt/cli', '--', 'charter']
+    : packageManager === 'pnpm' ? ['exec', 'charter'] : ['run', 'charter'];
   const desiredServer = {
-    command: 'npx',
+    command: packageManager,
     // Repo-relative on purpose: .mcp.json is committed and shared, and `charter serve`
     // resolves --ai-dir against its own cwd, which MCP clients set to the repo root.
-    args: ['@stackbilt/cli', 'serve', '--ai-dir', aiDir],
+    args: [...localArgs, 'serve', '--ai-dir', aiDir],
   };
 
   const configExists = fs.existsSync(configPath);
@@ -1066,6 +1077,19 @@ function ensureProjectMcpConfig(
 // Phase 3: ADF Init
 // ============================================================================
 
+/** Preserve unmanaged Copilot content even when another vendor name aliases its file. */
+function protectedCopilotIdentity(aiDir: string): string | null {
+  const fullPath = path.resolve(COPILOT_INSTRUCTIONS_FILE);
+  if (!fs.existsSync(fullPath)) return null;
+  if (recordedModeOf(aiDir, COPILOT_INSTRUCTIONS_FILE) === 'unmanaged') return fileIdentity(fullPath);
+  try {
+    return inferVendorMode(COPILOT_INSTRUCTIONS_FILE, fs.readFileSync(fullPath, 'utf-8')).inferredMode === 'unmanaged'
+      ? fileIdentity(fullPath) : null;
+  } catch {
+    return fileIdentity(fullPath); // Cannot prove ownership: do not mutate an unreadable file through an alias.
+  }
+}
+
 function getAdfScaffolds(preset?: StackPreset): ScaffoldSpec[] {
   const scaffolds: ScaffoldSpec[] = [
     { name: 'manifest.adf', content: manifestForPreset(preset) },
@@ -1141,7 +1165,14 @@ function runAdfInitPhase(
           ...manifest.defaultLoad,
           ...manifest.onDemand.map(m => m.path),
         ].map(m => moduleKey(m, fold)));
-        const orphans = allAdfFiles.filter(f => !registeredModules.has(moduleKey(f, fold)));
+        const orphans = allAdfFiles.filter(f => {
+          if (registeredModules.has(moduleKey(f, fold))) return false;
+          try {
+            return !isGeneratedContextModule(f, fs.readFileSync(path.join(aiDir, f), 'utf-8'), fold);
+          } catch {
+            return true; // An unreadable module must still be reported, not silently exempted.
+          }
+        });
         if (orphans.length > 0) {
           detectedOrphans.push(...orphans);
           warnings.push(`Found ${orphans.length} unregistered .adf module(s): ${orphans.join(', ')}`);
@@ -1162,14 +1193,21 @@ function runAdfInitPhase(
       { name: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
       { name: 'AGENTS.md', content: POINTER_AGENTS_MD, label: 'AGENTS.md (thin pointer)' },
       { name: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
-      { name: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
+      { name: COPILOT_INSTRUCTIONS_FILE, content: copilotPointer(aiDir), label: `${COPILOT_INSTRUCTIONS_FILE} (thin pointer)` },
     ];
 
+    const protectedCopilot = protectedCopilotIdentity(aiDir);
     const writtenPointers: string[] = [];
     for (const pf of pointerFiles) {
       const pointerPath = path.resolve(pf.name);
+      if (protectedCopilot && fs.existsSync(pointerPath) && fileIdentity(pointerPath) === protectedCopilot) {
+        warnings.push(pf.name + ' is the unmanaged Copilot file or its alias; leaving it unchanged. ' +
+          "Run 'charter adf migrate --source " + COPILOT_INSTRUCTIONS_FILE + "' to migrate it explicitly.");
+        continue;
+      }
       const action = pointerAction(aiDir, pf.name as VendorFile, force);
       if (action === 'write-pointer') {
+        if (pf.name === COPILOT_INSTRUCTIONS_FILE) fs.mkdirSync(path.dirname(pointerPath), { recursive: true });
         fs.writeFileSync(pointerPath, pf.content);
         pointers.push(pf.label);
         writtenPointers.push(pf.name);
@@ -1263,8 +1301,10 @@ function runMigratePhase(
   try {
     // Migrate hand-authored files with no recorded mode (#318). A file recorded
     // unmanaged is left alone with a note; any other recorded file is not a source.
+    const protectedCopilot = protectedCopilotIdentity(aiDir);
     const sources = discoverAgentConfigFiles().filter(f => {
       const fullPath = path.resolve(f);
+      if (protectedCopilot && fileIdentity(fullPath) === protectedCopilot) return false;
       const content = fs.readFileSync(fullPath, 'utf-8');
       if (CHARTER_OWNED_MARKERS.some(marker => content.includes(marker))) return false;
       const resolved = resolveVendorMode(aiDir, f as VendorFile);

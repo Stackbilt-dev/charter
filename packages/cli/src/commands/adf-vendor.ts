@@ -19,6 +19,7 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer } from './copilot-pointer';
 import { compileAdf, parseAdf, parseManifest, COMPILE_BANNER_MARKER, TARGET_FILENAMES } from '@stackbilt/adf';
 import type { AdfDocument, CompileTarget, ManifestVendorEntry } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -50,7 +51,7 @@ import { insertManifestBullet, lastSectionIndex, removeManifestBullet, replaceMa
 export const COMPILABLE_VENDOR_FILES = ['CLAUDE.md', 'AGENTS.md', '.cursorrules', 'GEMINI.md'] as const;
 
 /** Pointer-only names: no compile target renders them. agents.md is the legacy spelling (#302). */
-export const POINTER_ONLY_VENDOR_FILES = ['agents.md', 'copilot-instructions.md'] as const;
+export const POINTER_ONLY_VENDOR_FILES = ['agents.md', 'copilot-instructions.md', COPILOT_INSTRUCTIONS_FILE] as const;
 
 /** Every name the record may hold, in the order `adf vendor status` prints. */
 export const VENDOR_FILES = [...COMPILABLE_VENDOR_FILES, ...POINTER_ONLY_VENDOR_FILES] as const;
@@ -67,6 +68,7 @@ export const ALLOWED_MODES: Record<VendorFile, readonly VendorMode[]> = {
   'GEMINI.md': ['pointer', 'compiled', 'unmanaged'],
   'agents.md': ['pointer', 'unmanaged'],
   'copilot-instructions.md': ['pointer', 'unmanaged'],
+  [COPILOT_INSTRUCTIONS_FILE]: ['pointer', 'unmanaged'],
 };
 
 export type ModeSource = 'recorded' | 'inferred';
@@ -123,7 +125,7 @@ export const VENDORS_SECTION_KEY = 'VENDORS';
 export const VENDORS_DECORATION = '\u{1F3F7}';
 
 export const MSG = {
-  unknownFile: "Unknown vendor file '{file}'. Expected one of: CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md, agents.md, copilot-instructions.md",
+  unknownFile: "Unknown vendor file '{file}'. Expected one of: CLAUDE.md, AGENTS.md, .cursorrules, GEMINI.md, agents.md, copilot-instructions.md, .github/copilot-instructions.md",
   unknownMode: "Unknown mode '{mode}'. Expected one of: pointer, compiled, unmanaged",
   modeNotAllowed: "{file} cannot be 'compiled': no compile target writes it. Allowed: pointer, unmanaged",
   usageSet: 'Usage: charter adf vendor set <file> <pointer|compiled|unmanaged> [--dry-run]',
@@ -814,13 +816,14 @@ export interface RestoreResult {
 }
 
 /** The template each vendor name is restored to (CLAUDE.md: the hybrid one bootstrap writes). */
-function restoreTemplate(file: VendorFile): string {
+function restoreTemplate(file: VendorFile, aiDir: string): string {
   switch (file) {
     case 'CLAUDE.md': return POINTER_CLAUDE_MD_HYBRID;
     case 'AGENTS.md':
     case 'agents.md': return POINTER_AGENTS_MD;
     case '.cursorrules': return POINTER_CURSORRULES;
     case 'GEMINI.md': return POINTER_GEMINI_MD;
+    case COPILOT_INSTRUCTIONS_FILE: return copilotPointer(aiDir);
     default: return POINTER_COPILOT_MD;
   }
 }
@@ -847,7 +850,7 @@ function withoutModuleIndexSection(block: string): string {
  * as plain sections in place of reading `current` (#303).
  */
 export function restoredPointer(file: VendorFile, current: string | null, aiDir: string, carried = ''): string {
-  let pointer = restoreTemplate(file);
+  let pointer = restoreTemplate(file, aiDir);
   const hasIndex = pointer.includes(MODULE_INDEX_START);
   let retained = carried ? `\n\n${carried}\n` : current === null ? '' : readRetainedSections(current);
   if (hasIndex) retained = withoutModuleIndexSection(retained);
@@ -887,7 +890,7 @@ const LEGACY_POINTER_LINES = [
 /** Every line some Charter pointer template has ever held (trimmed, non-blank). */
 function charterTemplateLines(): Set<string> {
   const templates = [
-    POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID, POINTER_AGENTS_MD, POINTER_CURSORRULES, POINTER_GEMINI_MD, POINTER_COPILOT_MD,
+    POINTER_CLAUDE_MD, POINTER_CLAUDE_MD_HYBRID, POINTER_AGENTS_MD, POINTER_CURSORRULES, POINTER_GEMINI_MD, POINTER_COPILOT_MD, copilotPointer(),
     ...LEGACY_POINTER_LINES, ...VENDOR_FILES.map(name => `# ${name}`),
   ];
   return new Set(templates.flatMap(t => t.split('\n')).map(l => l.trim()).filter(Boolean));
@@ -1032,6 +1035,7 @@ export function restoreVendorFile(aiDir: string, file: VendorFile, options: Rest
     if (!recorded) return refuse('record-write', 'charter adf vendor status', fill(MSG.restoreRecord, { file, manifestPath }));
   }
   try {
+    if (file === COPILOT_INSTRUCTIONS_FILE) fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
     fs.writeFileSync(path.resolve(file), next);
   } catch (err: unknown) {
     // Revert the entry just added by putting the manifest's previous bytes back,

@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer } from './copilot-pointer';
 import { compileAdf, parseAdf, parseManifest } from '@stackbilt/adf';
 import type { AdfDocument, CompileTarget } from '@stackbilt/adf';
 import type { CLIOptions } from '../index';
@@ -14,7 +15,7 @@ import { EXIT_CODE } from '../index';
 import { getFlag } from '../flags';
 import { detectPackageManager, inferProjectName, loadPackageContexts } from './setup';
 import { hasCommits, isGitRepo, runGit } from '../git-helpers';
-import { CHARTER_OWNED_MARKERS } from './adf';
+import { CHARTER_OWNED_MARKERS, POINTER_CLAUDE_MD } from './adf';
 import { resolveVendorMode, withoutVendorsSection } from './adf-vendor';
 import type { ModeSource, VendorFile, VendorMode } from './adf-vendor';
 
@@ -173,7 +174,7 @@ interface ResolvedPathReference {
   resolved: string;
 }
 
-const AGENT_FILES = ['CLAUDE.md', 'AGENTS.md', 'agents.md', 'GEMINI.md', 'copilot-instructions.md'];
+const AGENT_FILES = ['CLAUDE.md', 'AGENTS.md', 'agents.md', 'GEMINI.md', 'copilot-instructions.md', '.github/copilot-instructions.md'];
 const ROOT_DOC_FILES = ['README.md', 'CONTRIBUTING.md'];
 const KNOWN_COMMANDS = new Set([
   'bash',
@@ -438,7 +439,30 @@ function buildScoreReport(inventory: RepoInventory, aiDir: string): ScoreReport 
     const raw = readText(file);
     if (!raw) continue;
     // The VENDORS record names vendor files, not paths under .ai/ (#318).
-    const content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
+    let content = file === (manifestPathInInventory ?? manifestPath) ? withoutVendorsSection(raw) : raw;
+    // Generated nested pointers can refer to directories containing spaces. Validate their
+    // exact targets directly rather than tokenizing their known preamble into path fragments.
+    if (file === COPILOT_INSTRUCTIONS_FILE && resolveVendorMode(aiDir, file).mode === 'pointer') {
+      const template = copilotPointer(aiDir);
+      const normalized = content.replace(/\r\n/g, '\n');
+      if (normalized.startsWith(template)) {
+        content = normalized.slice(template.length);
+        for (const target of [aiDir, path.join(aiDir, 'manifest.adf')]) {
+          const resolved = path.relative(process.cwd(), path.resolve(target)).split(path.sep).join('/') || '.';
+          const candidate = path.relative(path.dirname(path.resolve(file)), path.resolve(target)).split(path.sep).join('/') || '.';
+          pathReferences.set(file + ':' + resolved, { source: file, candidate, resolved });
+        }
+      }
+    }
+    if (file === 'CLAUDE.md' && claude.mode === 'pointer') {
+      // The generated fallback explicitly offers to create this optional snapshot (#402).
+      // Remove only that template line, keeping user-authored references to the same path.
+      const fallback = POINTER_CLAUDE_MD.split(/\r?\n/).find((line) => line.startsWith('If `charter serve`'));
+      if (fallback) {
+        const generatedFallback = fallback.replaceAll('.ai/', `${aiDir}/`);
+        content = content.split(/\r?\n/).filter((line) => line !== generatedFallback).join('\n');
+      }
+    }
 
     for (const candidate of extractPathCandidates(content)) {
       const reference = resolveReferencedPath(file, candidate);

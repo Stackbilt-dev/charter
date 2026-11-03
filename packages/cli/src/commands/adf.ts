@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { COPILOT_INSTRUCTIONS_FILE, copilotPointer } from './copilot-pointer';
 import {
   parseAdf,
   formatAdf,
@@ -70,6 +71,11 @@ export const CORE_SCAFFOLD = `ADF: 0.1
 \u{1F4CB} CONTEXT:
   - Project context (run 'charter adf populate' to auto-fill from codebase)
 
+\u26A0\uFE0F CONSTRAINTS [load-bearing]:
+  - Use Conventional Commits (feat, fix, docs, chore)
+  - Never commit secrets or credentials
+  - Pure functions in library code; side effects only in entry points
+
 \u{1F4D6} GUIDE [advisory]:
   - Pure runtime/environment? (OS, line endings) \u2192 CLAUDE.md, not ADF
   - Universal architecture constraint? \u2192 core.adf CONSTRAINTS [load-bearing]
@@ -79,11 +85,6 @@ export const CORE_SCAFFOLD = `ADF: 0.1
   - [load-bearing] = violation causes incorrect output
   - [advisory] = best practice, not enforced
   - Section types are open: CONTEXT, CONSTRAINTS, ADVISORY, METRICS, custom
-
-\u26A0\uFE0F CONSTRAINTS [load-bearing]:
-  - Use Conventional Commits (feat, fix, docs, chore)
-  - Never commit secrets or credentials
-  - Pure functions in library code; side effects only in entry points
 
 \uD83D\uDCCA METRICS:
   entry_loc: 0 / 500 [lines]
@@ -474,7 +475,7 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
       { file: '.cursorrules', content: POINTER_CURSORRULES, label: '.cursorrules (thin pointer)' },
       { file: 'AGENTS.md', content: POINTER_AGENTS_MD, label: 'AGENTS.md (thin pointer)' },
       { file: 'GEMINI.md', content: POINTER_GEMINI_MD, label: 'GEMINI.md (thin pointer)' },
-      { file: 'copilot-instructions.md', content: POINTER_COPILOT_MD, label: 'copilot-instructions.md (thin pointer)' },
+      { file: COPILOT_INSTRUCTIONS_FILE, content: copilotPointer(aiDir), label: `${COPILOT_INSTRUCTIONS_FILE} (thin pointer)` },
     ];
     const createdPointers: string[] = [];
     const skippedPointers: string[] = [];
@@ -483,6 +484,7 @@ async function adfInit(options: CLIOptions, args: string[]): Promise<number> {
       if (fs.existsSync(spec.file)) {
         skippedPointers.push(spec.file);
       } else {
+        if (spec.file === COPILOT_INSTRUCTIONS_FILE) fs.mkdirSync(path.dirname(spec.file), { recursive: true });
         fs.writeFileSync(spec.file, spec.content);
         createdPointers.push(spec.file);
         result.files.push(spec.file);

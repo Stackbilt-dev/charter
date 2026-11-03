@@ -15,6 +15,7 @@ import { initExitCode, initializeCharter, printInitChanges, type StackPreset } f
 import { applyGovernanceWorkflow, canRefreshSilently } from './github-workflow';
 import type { PackageManagerChange, WorkflowKeepReason } from './github-workflow';
 import packageJson from '../../package.json';
+import { GITHUB_COMMIT_RANGE_SCRIPT } from './github-commit-range';
 
 const CLI_VERSION = packageJson.version;
 
@@ -30,12 +31,15 @@ export function workflowCharterCommand(packageManager: 'npm' | 'pnpm'): string {
   return packageManager === 'pnpm' ? 'pnpm exec charter' : 'npm exec --no --package=@stackbilt/cli -- charter';
 }
 
-export function getGithubWorkflow(packageManager: 'npm' | 'pnpm'): string {
+export function getGithubWorkflow(packageManager: 'npm' | 'pnpm', declaredPackageManager?: string): string {
   const cli = workflowCharterCommand(packageManager);
+  // Let the action read the complete pin (including a Corepack integrity suffix)
+  // from package.json. Repositories without a valid pin retain the pnpm 9 fallback.
+  const pnpmVersion = typeof declaredPackageManager === 'string'
+    && /^pnpm@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(declaredPackageManager)
+    ? '' : '\n        with:\n          version: 9';
   const installStep = packageManager === 'pnpm'
-    ? `      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
+    ? `      - uses: pnpm/action-setup@v4${pnpmVersion}
 
       - uses: actions/setup-node@v4
         with:
@@ -72,6 +76,7 @@ permissions:
 jobs:
   governance:
     name: Charter
+    if: github.event.deleted != true
     runs-on: ubuntu-latest
 
     steps:
@@ -79,10 +84,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve Commit Range
+        id: commit_range
+        shell: bash
+        env:
+          BASE_SHA: \${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: \${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+${GITHUB_COMMIT_RANGE_SCRIPT.split('\n').map(line => `          ${line}`).join('\n')}
+
 ${installStep}
 
       - name: Validate Commits
-        run: ${cli} validate --ci --format text
+        run: ${cli} validate --ci --format text --range "$CHARTER_COMMIT_RANGE"
 
       - name: Drift Scan
         run: ${cli} drift --ci --format text
@@ -96,8 +110,8 @@ ${installStep}
         if: hashFiles('.ai/manifest.adf') != ''
 
       - name: Audit Report
-        run: ${cli} audit --format json > /tmp/audit.json
-        if: always()
+        run: ${cli} audit --format json --range "$CHARTER_COMMIT_RANGE" > /tmp/audit.json
+        if: always() && steps.commit_range.outcome == 'success'
 
       - name: Refresh Score Badge
         run: ${cli} score --badge --write
@@ -247,6 +261,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const contexts = loadPackageContexts();
   const detection = detectStack(contexts);
   const packageManager = detectPackageManager(contexts);
+  const declaredPackageManager = contexts.find(ctx => ctx.source === 'package.json')?.packageManager;
   const selectedPreset: StackPreset = isValidPreset(presetFlag) ? presetFlag : detection.suggestedPreset;
   const inferenceMode = presetFlag
     ? 'preset-override'
@@ -289,7 +304,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   const baselinePlan = planBaselineMutation(baselinePath, explicitForce);
   const workflowPath = path.join('.github', 'workflows', 'charter-governance.yml');
   const workflowPlan = ciMode === 'github'
-    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager), explicitForce)
+    ? planManagedFile(workflowPath, getGithubWorkflow(packageManager, declaredPackageManager), explicitForce)
     : { action: 'skip' as const };
   const manifestPlan = syncPackageManifest(selectedPreset, !noDependencySync, false);
 
@@ -381,7 +396,7 @@ export async function setupCommand(options: CLIOptions, args: string[]): Promise
   if (ciMode === 'github') {
     // #374: refresh only a safe Charter template; any other workflow is kept,
     // or under --force backed up to .charter/.backup/ and replaced.
-    const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager), {
+    const workflow = applyGovernanceWorkflow(workflowPath, getGithubWorkflow(packageManager, declaredPackageManager), {
       force,
       configDir: options.configPath,
       command: 'setup',

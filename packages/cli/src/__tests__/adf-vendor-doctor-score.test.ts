@@ -98,7 +98,7 @@ const read = (file: string): string => fs.readFileSync(file, 'utf-8');
 function snapshot(): Record<string, string> {
   const files = [
     ...fs.readdirSync('.ai').map(f => path.join('.ai', f)),
-    ...['CLAUDE.md', 'AGENTS.md', 'agents.md', '.cursorrules', 'GEMINI.md', 'copilot-instructions.md'].filter(f => fs.existsSync(f)),
+    ...['CLAUDE.md', 'AGENTS.md', 'agents.md', '.cursorrules', 'GEMINI.md', 'copilot-instructions.md', '.github/copilot-instructions.md'].filter(f => fs.existsSync(f)),
   ].sort();
   return Object.fromEntries(files.map(f => [f, read(f)]));
 }
@@ -629,7 +629,7 @@ describe('bootstrap: pointer decision table', () => {
     scaffold(vendors('GEMINI.md: compiled', 'AGENTS.md: unmanaged', 'CLAUDE.md: pointer'));
     await bootstrapCommand({ ...TEXT, yes: true }, ['--reset-adf', '--force', '--yes', '--skip-install', '--skip-doctor']);
     const record = manifestText().slice(manifestText().indexOf('VENDORS:'));
-    expect(record).toBe('VENDORS:\n  - GEMINI.md: compiled\n  - AGENTS.md: unmanaged\n  - CLAUDE.md: pointer\n  - .cursorrules: pointer\n  - copilot-instructions.md: pointer\n');
+    expect(record).toBe('VENDORS:\n  - GEMINI.md: compiled\n  - AGENTS.md: unmanaged\n  - CLAUDE.md: pointer\n  - .cursorrules: pointer\n  - .github/copilot-instructions.md: pointer\n');
     expect(fs.existsSync('GEMINI.md')).toBe(false);
     expect(fs.existsSync('AGENTS.md')).toBe(false);
   });
@@ -779,7 +779,7 @@ describe('adf vendor restore', () => {
   it('an unchanged pointer is byte-equal: status unchanged, nothing written', async () => {
     await bootstrapCommand({ ...TEXT, yes: true }, ['--yes', '--skip-install', '--skip-doctor']);
     const before = snapshot();
-    for (const f of ['CLAUDE.md', 'AGENTS.md', '.cursorrules', 'GEMINI.md', 'copilot-instructions.md']) {
+    for (const f of ['CLAUDE.md', 'AGENTS.md', '.cursorrules', 'GEMINI.md', '.github/copilot-instructions.md']) {
       const r = await restore(f);
       expect(r.json, f).toMatchObject({ status: 'unchanged', refusal: null });
     }

@@ -97,7 +97,7 @@ const HAND_MANIFEST = MANIFEST_BACKEND_SCAFFOLD
 
 // Bootstrap records each pointer it writes in VENDORS (#318). Fixtures carry the
 // record already, so a byte comparison sees only what phase 3's merge does.
-const VENDORS_BLOCK = ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', 'copilot-instructions.md'].map(f => `  - ${f}: pointer`).join('\n');
+const VENDORS_BLOCK = ['CLAUDE.md', '.cursorrules', 'AGENTS.md', 'GEMINI.md', '.github/copilot-instructions.md'].map(f => `  - ${f}: pointer`).join('\n');
 const v = (manifest: string): string => `${manifest.replace(/\n*$/, '')}\n\n\u{1F3F7} VENDORS:\n${VENDORS_BLOCK}\n`;
 const HAND_CORE = CORE_SCAFFOLD
   .replace("  - Project context (run 'charter adf populate' to auto-fill from codebase)", '  - Billing service for Acme')

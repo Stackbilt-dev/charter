@@ -15,7 +15,7 @@ npx charter validate --ci --format json    # machine-readable output
 npx charter validate --range HEAD~5..HEAD  # specific commit range
 ```
 
-**Default range detection:** When `--range` is omitted, Charter tries `main..HEAD` or `master..HEAD` first, then falls back to the most recent 5 commits.
+**Default range detection:** When `--range` is omitted, Charter tries an available local `main..HEAD` or `master..HEAD` first, then falls back to a boundary at most five first-parent steps behind HEAD (or all reachable commits for a single-commit history). Counting first parents keeps that boundary valid on young merge histories; merge-side commits can make the selected set larger than five. This convenience fallback does not guarantee complete pull-request coverage. Generated CI workflows pass an explicit event base/head SHA range to both `validate` and `audit`, excluding GitHub's synthetic PR merge commit. Use `--range <base-sha>..<head-sha>` for complete coverage in a custom workflow.
 
 JSON output includes `policyOffenders` (missing required trailers) and `riskOffenders` (high-risk paths without governance), plus `effectiveRangeSource` and `defaultCommitRange` for agent transparency.
 
@@ -68,11 +68,12 @@ npx charter hook install --commit-msg                # trailer gate + normalizat
 npx charter hook install --pre-commit                # vendor tidy + ADF evidence gate hook
 npx charter hook install --commit-msg --pre-commit   # both hooks
 npx charter hook install --commit-msg --force        # overwrite existing hooks
+npx charter hook install --commit-msg --config governance  # use the same config as CI
 ```
 
-- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading `.charter/config.json` with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No `.charter/config.json` at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
+- `--commit-msg` — normalizes `Governed-By` and `Resolves-Request` trailers via `git interpret-trailers`; rejects a message with neither trailer in its final trailer block whenever `charter validate --ci` would fail it, reading the recorded config directory's `config.json` (default: `.charter/config.json`) with `validate`'s defaults (`requireTrailers` on unless falsy, `citationStrictness` `FAIL`, an unparseable file treated as the defaults). It blocks under `FAIL`/`STRICT` or `ci.failOnWarn` and warns under advisory strictness. No selected config file at all, or no `node` on `PATH`, skips the gate with a warning. `#` lines are stripped before the check, as the default editor cleanup does, so under `-m` or `--cleanup=verbatim` a trailer followed by a `#...` line can pass locally and fail CI.
 - `--pre-commit` — tidies the staged vendor files, then runs ADF evidence checks (LOC ceiling validation) before each commit. Only gates when `.ai/manifest.adf` exists.
-  - Tidy covers only staged vendor files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`, `agents.md`, `GEMINI.md`, `copilot-instructions.md`), each passed with `adf tidy --source`. A file carrying the compile banner is skipped without calling the CLI.
+  - Tidy covers only staged vendor files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`, `agents.md`, `GEMINI.md`, `.github/copilot-instructions.md` and legacy root `copilot-instructions.md`), each passed with `adf tidy --source`. A file carrying the compile banner is skipped without calling the CLI.
   - A staged vendor file that also has unstaged changes is skipped, with a message.
   - If tidy would write into a `.ai/` module that has unstaged changes or is untracked, nothing is tidied for that commit, with a message.
   - Only the files tidy wrote that its dry run planned are re-staged, never `.ai/*.adf` as a whole. A gitignored module is written but not staged, and the hook says so. A file the hook cannot stage, or one the real run wrote beyond the plan, is named and left unstaged. Skip tidy with `CHARTER_SKIP_TIDY=1`.
@@ -115,6 +116,8 @@ npx charter hook install --commit-msg --force        # overwrite existing hooks
 - `--force` — overwrite existing non-Charter hooks
 
 Must specify at least one of `--commit-msg` or `--pre-commit`.
+
+`hook install --commit-msg --config <dir>` records the selected configuration directory in the hook (default: `.charter`). Use the same directory as `validate --config <dir>` in CI. Relative selections are resolved from the installation directory and stored relative to the Git worktree root, where Git runs the hook; absolute selections remain absolute. Re-run installation to update the selection. The hook reads only that directory's `config.json`: a missing selected file warns with its path and skips the gate, following the existing missing-config behavior, without falling back to `.charter/config.json`. Paths containing spaces or shell characters are passed literally, not executed.
 
 ### charter bootstrap
 
@@ -451,7 +454,7 @@ npx charter adf create api-patterns --force                   # overwrite existi
 
 ### charter adf migrate
 
-Scans existing agent config files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` or legacy `agents.md`, `GEMINI.md`, `copilot-instructions.md`), classifies their content, and migrates structured blocks into ADF modules. Replaces originals with thin pointers.
+Scans existing agent config files (`CLAUDE.md`, `.cursorrules`, `AGENTS.md` or legacy `agents.md`, `GEMINI.md`, `.github/copilot-instructions.md` and legacy root `copilot-instructions.md`), classifies their content, and migrates structured blocks into ADF modules. Replaces originals with thin pointers.
 
 ```bash
 npx charter adf migrate --dry-run                # preview migration plan
@@ -761,7 +764,7 @@ npx charter adf vendor rename-legacy --dry-run      # plan renaming a pre-#297 a
 ```
 
 - `status`: read-only. A file with a valid entry shows its recorded mode, plus `(recorded; file looks compiled)` when the markers on disk disagree. A file without one shows the mode inferred from its markers, the way `adf tidy` classifies it: the compile banner means `compiled`, a pointer marker means `pointer`, and anything else is `unmanaged`. Malformed, duplicate (the last entry wins), unknown-file and not-allowed entries are reported and ignored. A missing manifest exits 0 with a warning.
-- `set <file> <mode>`: records or replaces one entry, editing only that line. Only `CLAUDE.md`, `AGENTS.md`, `.cursorrules` and `GEMINI.md` may be `compiled`. `agents.md` and `copilot-instructions.md` have no compile target, so `compiled` is refused with exit 1. An unknown file or mode, or a missing manifest, exits 2. The file does not have to exist yet.
+- `set <file> <mode>`: records or replaces one entry, editing only that line. Only `CLAUDE.md`, `AGENTS.md`, `.cursorrules` and `GEMINI.md` may be `compiled`. `agents.md`, `.github/copilot-instructions.md` and legacy root `copilot-instructions.md` have no compile target, so `compiled` is refused with exit 1. An unknown file or mode, or a missing manifest, exits 2. The file does not have to exist yet.
 - `init`: records the inferred mode of every vendor file on disk that has no entry. It never changes an existing entry, and a second run writes nothing.
 - `restore <file>`: rewrites one file as its thin pointer template (`CLAUDE.md` gets the hybrid template with the module index filled in, as bootstrap writes it). It runs only when the file's mode is `pointer` (recorded or inferred), or the file is absent with no entry, and it refuses (exit 1, file untouched) whenever content would be lost: `mode-not-pointer` (record the intent first with `vendor set <file> pointer`), `hand-authored` (run `adf migrate --source <file>`), `pointer-bloated` (run `adf tidy --source <file>`), and `compiled-differs` (a compiled file that differs from what `.ai/` compiles to now, checked in memory; keep it with `vendor set <file> compiled`). A compiled file's retained block, and retained sections outside one, are not a difference: they are carried into the pointer as plain sections and listed in `keptSections`. The `retained-divergent` refusal is retired. A block holding anything a pointer cannot keep as a retained section is refused as `would-drop`, naming it, and the file is left as it is. That covers a non-retained heading such as `## My Notes`, and text before the first heading (`adf tidy` would move it out of the pointer). The first remedy is `vendor set <file> compiled`, which keeps the file compiled. Otherwise, move that content under `## Environment` or into a `.ai/` module first. For a pointer, every non-blank line must survive: a line that is not from a Charter pointer template (current or earlier) or the generated module index, and that the new pointer would not carry, is refused as `hand-authored` with the first few lines named. Retained sections of a pointer are carried over verbatim and listed. It is the fix for a recorded pointer that now holds compiled output. A file with no entry gets `pointer` recorded before the file is written; if that cannot be recorded, nothing is written (`record-write`), and if the file write fails, the manifest is put back byte for byte (`write-failed`, with `writeError`). A result identical to the file on disk is `unchanged` and writes nothing. `--dry-run` reports `planned`. An unknown file name exits 2. JSON output: `file`, `status` (`restored`, `planned`, `unchanged`, `refused`), `refusal`, `keptSections`, `remedy`, `writeError`; text lines go to stderr under `--format json`.
 
@@ -775,6 +778,10 @@ One physical file has one entry. When two vendor names are the same file (`AGENT
 - `--dry-run`: with `set`, `init`, `restore` or `rename-legacy`, report the change without writing
 - `--all`: with `status`, also list vendor names that are absent and unrecorded
 - `--ai-dir <dir>`: custom `.ai/` directory (default: `.ai`)
+
+`bootstrap` and `adf init --emit-pointers` create Copilot pointers at `.github/copilot-instructions.md` (creating `.github` when needed), with links relative to that file. Existing root `copilot-instructions.md` files and their vendor records remain supported and are never moved or deleted automatically. Existing hand-authored or recorded-unmanaged canonical files are preserved under bootstrap, including `--force`; use the explicit migration command to move their rules into ADF. `adf init --emit-pointers` skips any existing pointer file.
+
+`adf compile --target all` covers the four compilable targets (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `GEMINI.md`). Copilot is pointer-only, so a fresh scaffold has five vendors but four compile targets; `adf vendor status`, `doctor`, `adf tidy` and `adf migrate` include it. No Copilot compile target is added. Re-run `charter hook install --pre-commit` to refresh an existing generated hook's staged-vendor list.
 
 `bootstrap` and `adf init --emit-pointers` record `pointer` for each pointer file they write. `adf migrate` records `pointer` for each source it replaces with a pointer, and `adf compile --write` records `compiled` for each target it writes (with `--mode compiled`, replacing the entry). The other writers only add missing entries. If a file is already recorded with another mode, the entry is kept and a warning names `adf vendor set` as the way to change it. Nothing is recorded under `--dry-run`, and a failed record write is only a warning, except under `adf compile --write --mode compiled`, where the target is refused (`refused-record`) and its file is not written. Every manifest edit is text-level and keeps line endings and every other byte, and the block it writes is already in `adf fmt` canonical form. It is re-parsed before writing, and if the result would change anything else, nothing is written.
 
@@ -826,12 +833,14 @@ npx charter serve --name "my-project"         # override the server name shown i
 {
   "mcpServers": {
     "charter": {
-      "command": "npx",
-      "args": ["@stackbilt/cli", "serve", "--ai-dir", ".ai"]
+      "command": "npm",
+      "args": ["exec", "--no", "--package=@stackbilt/cli", "--", "charter", "serve", "--ai-dir", ".ai"]
     }
   }
 }
 ```
+
+This npm example resolves the project's installed `@stackbilt/cli`; `--no` refuses an implicit install when it is missing. Install project dependencies before starting the MCP client. Bootstrap uses `pnpm` with `args: ["exec", "charter", "serve", "--ai-dir", ".ai"]` for pnpm projects and `yarn` with `args: ["run", "charter", "serve", "--ai-dir", ".ai"]` for Yarn projects. Existing entries, including older `npx` entries and custom AI directories, stay unchanged without `--force`; a forced replacement is backed up first.
 
 Use the repo-relative `.ai` — this is what `charter bootstrap` generates. `.mcp.json` is committed and shared, so an absolute path here leaks your local directory layout and breaks the server for every other clone and for CI.
 
