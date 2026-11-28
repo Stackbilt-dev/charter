@@ -19,6 +19,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
+import { filePathToTokens } from './adf-path-tokens';
 
 /**
  * Extract keywords from file paths using extension and directory signals.
@@ -70,6 +71,8 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   if (filesFlag) {
     const filePaths = filesFlag.split(',').map(f => f.trim()).filter(Boolean);
     allKeywords.push(...filePathToKeywords(filePaths));
+    // The path's own name tokens (e.g. `adf`, `manifest`) -- see adf-path-tokens.ts.
+    allKeywords.push(...filePathToTokens(filePaths));
   }
   if (keywordsFlag) {
     allKeywords.push(...tokenizeTask(keywordsFlag));
@@ -113,18 +116,20 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
     }
   } else {
     // Module list only
+    const triggerMatches = buildTriggerReport(manifest, resolvedModules, dedupKeywords);
     recordAdfResolutionEvent(options.configPath, {
       source: 'context',
       keywords: dedupKeywords,
       candidateModules,
       resolvedModules,
-      triggerMatches: buildTriggerReport(manifest, resolvedModules, dedupKeywords),
+      triggerMatches,
     });
 
     if (options.format === 'json') {
       console.log(JSON.stringify({
         keywords: dedupKeywords,
         resolvedModules,
+        triggerMatches,
       }, null, 2));
     } else {
       console.log(`  Keywords: ${dedupKeywords.join(', ')}`);
