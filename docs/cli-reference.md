@@ -745,8 +745,8 @@ Run first: unknown
 Fresh:     unknown
 ```
 
-- `Binds` lists the `[load-bearing]` rules of each resolved ON_DEMAND module with its source line. DEFAULT_LOAD modules apply to every file, so they are not listed. A module the ADF parser rejects is shown as `(unreadable: <reason>)` and the command still exits 0.
-- `Headroom` is the live line count of each file a manifest METRICS source points at, against its declared ceiling, measured the way `adf evidence --auto-measure` measures it. With several files, each line names its file.
+- `Binds` lists the `[load-bearing]` rules of each resolved ON_DEMAND module with its source line. DEFAULT_LOAD modules apply to every file, so they are not listed. A module the ADF parser rejects is shown as `(unreadable: <reason>)` and the command still exits 0. With several files, a module that only some of them trigger ends each line with `for <file>, ...` (the files whose own path keywords trigger it), and one that none of them trigger ends with `for the task keywords` (it came from `--keywords` only). A module every file triggers has no suffix.
+- `Headroom` is the live line count of each file a manifest METRICS source points at, against its declared ceiling, measured the way `adf evidence --auto-measure` measures it. With several files, each line names its file. Files are matched to METRICS sources through the same repo-relative resolution as the path tokens, so a repo-relative path passed from a subdirectory still finds its ceiling.
 - `Contract`, `Run first` and `Fresh` say `unknown` until those signals exist.
 - When no on-demand module resolves and no ceiling tracks the files, the whole output is one line: `Nothing binds <files>: no on-demand module or ceiling applies. Default modules only.`
 - Locations are relative to the repo root, so the answer is the same from a subdirectory (`--ai-dir ../.ai`), for absolute paths, and over MCP.
@@ -891,7 +891,7 @@ If startup validation fails (missing `.ai/` directory or `manifest.adf`), `chart
 |------|-------------|
 | `charter_brief` | **Call first.** Pre-digested repo brief — routes, hotspots, governance. |
 | `charter_context` | Session continuity snapshot reader/refresher (`.ai/context.snapshot.json`). Use `refresh=true` to run `context-refresh` before reading. |
-| `getProjectContext` | ADF bundle resolved for a given task or trigger keywords. With `files: string[]`, it also returns the `adf context --files` preflight answer: the bundle, the preflight text, then `{ rules, ceilings, unreadable, binds }` JSON. When nothing binds the files, it returns only the one-line answer and that JSON, without the bundle. |
+| `getProjectContext` | ADF bundle resolved for a given task or trigger keywords. With `files: string[]`, it also returns the `adf context --files` preflight answer: the bundle, the preflight text, then `{ rules, ceilings, unreadable, binds }` JSON. When nothing binds the files and no `task` is given, it returns only the one-line answer and that JSON, without the bundle; with a `task`, the task's bundle comes first as usual. |
 | `getProjectState` | Constraint validation results across all loaded modules. |
 | `getArchitecturalDecisions` | Load-bearing constraints from `core.adf`. |
 | `getRecentChanges` | Recent git commits classified by type. |
