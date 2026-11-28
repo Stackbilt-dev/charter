@@ -19,7 +19,7 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
-import { filePathToTokens } from './adf-path-tokens';
+import { filePathToTokens, resolvePathTokenRoot } from './adf-path-tokens';
 import { buildPreflight, formatPreflight, preflightBinds, splitFiles } from './adf-preflight';
 import type { Preflight } from './adf-preflight';
 
@@ -73,8 +73,9 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   if (filesFlag) {
     const filePaths = splitFiles(filesFlag);
     allKeywords.push(...filePathToKeywords(filePaths));
-    // The path's own name tokens (e.g. `adf`, `manifest`) -- see adf-path-tokens.ts.
-    allKeywords.push(...filePathToTokens(filePaths));
+    // The path's own name tokens (e.g. `adf`, `manifest`), taken from the
+    // repo-relative path so checkout-root dirs never route -- see adf-path-tokens.ts.
+    allKeywords.push(...filePathToTokens(filePaths, { root: resolvePathTokenRoot(aiDir) }));
   }
   if (keywordsFlag) {
     allKeywords.push(...tokenizeTask(keywordsFlag));
