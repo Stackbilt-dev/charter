@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { filePathToTokens } from '../commands/adf-path-tokens';
+import { filePathToTokens, relativizeFilePath } from '../commands/adf-path-tokens';
 import { adfContextCommand } from '../commands/adf-context';
 import type { CLIOptions } from '../index';
 
@@ -35,8 +35,22 @@ const GENERIC_TRIGGER_MANIFEST = `ADF: 0.1
 let tmpDir: string;
 let logs: string[];
 
-function runContext(manifest: string, files: string): { keywords: string[]; resolvedModules: string[]; triggerMatches: Array<{ module: string; trigger: string; matched: boolean; matchedKeywords: string[] }> } {
-  const aiDir = path.join(tmpDir, '.ai');
+// Guard fixture: triggers named after the directories a checkout usually sits
+// in, plus the temp dir's own name parts. None may match from an absolute path.
+const CHECKOUT_ROOT_MANIFEST = `ADF: 0.1
+
+📦 DEFAULT_LOAD:
+  - core.adf
+
+📂 ON_DEMAND:
+  - people.adf (Triggers on: user, users, home, projects, documents)
+  - machine.adf (Triggers on: appdata, local, temp, tmp, var, folders, private)
+  - fixture.adf (Triggers on: charter, path, tokens, checkout)
+  - billing.adf (Triggers on: billing, invoice)
+`;
+
+function runContext(manifest: string, files: string, repoDir: string = tmpDir): { keywords: string[]; resolvedModules: string[]; triggerMatches: Array<{ module: string; trigger: string; matched: boolean; matchedKeywords: string[] }> } {
+  const aiDir = path.join(repoDir, '.ai');
   fs.mkdirSync(aiDir, { recursive: true });
   fs.writeFileSync(path.join(aiDir, 'manifest.adf'), manifest);
   const options: CLIOptions = { configPath: path.join(tmpDir, '.charter'), format: 'json', ciMode: false, yes: true };
@@ -122,5 +136,96 @@ describe('adf context --files path-token routing (#442)', () => {
     );
     expect(out.resolvedModules).toEqual(['core.adf']);
     expect(out.triggerMatches.filter(tm => tm.matched)).toEqual([]);
+  });
+
+  describe('repo under checkout-root directories', () => {
+    let repoDir: string;
+    beforeEach(() => {
+      repoDir = path.join(tmpDir, 'home', 'users', 'projects', 'documents', 'user', 'checkout');
+      fs.mkdirSync(repoDir, { recursive: true });
+    });
+
+    it('guard: absolute paths do not leak the dirs above the repo', () => {
+      const files = [
+        path.join(repoDir, 'src', 'index.ts'),
+        path.join(repoDir, 'packages', 'core', 'lib', 'main.ts'),
+      ].join(',');
+      const out = runContext(CHECKOUT_ROOT_MANIFEST, files, repoDir);
+      expect(out.resolvedModules).toEqual(['core.adf']);
+      expect(out.triggerMatches.filter(tm => tm.matched)).toEqual([]);
+      expect(out.keywords).toEqual(['core']);
+    });
+
+    it('guard: a path outside the repo contributes no path tokens', () => {
+      const outside = path.join(tmpDir, 'home', 'users', 'billing', 'invoice.ts');
+      const out = runContext(CHECKOUT_ROOT_MANIFEST, outside, repoDir);
+      expect(out.resolvedModules).toEqual(['core.adf']);
+      expect(out.keywords).toEqual([]);
+    });
+
+    it('still routes from the repo-relative part of an absolute path', () => {
+      const files = [
+        path.join(repoDir, 'src', 'billing', 'invoice.ts'),
+        path.join(repoDir, 'src', 'index.ts'),
+      ].join(',');
+      const out = runContext(CHECKOUT_ROOT_MANIFEST, files, repoDir);
+      expect(out.resolvedModules).toEqual(['core.adf', 'billing.adf']);
+      expect(out.triggerMatches.filter(tm => tm.matched).map(tm => tm.module)).toEqual(['billing.adf', 'billing.adf']);
+    });
+  });
+});
+
+describe('relativizeFilePath', () => {
+  it('relativizes absolute POSIX paths to the root', () => {
+    expect(relativizeFilePath('/home/user/projects/repo/packages/adf/src/manifest.ts', '/home/user/projects/repo'))
+      .toBe('packages/adf/src/manifest.ts');
+  });
+
+  it('relativizes absolute Windows paths, case-insensitively, with either separator', () => {
+    const root = 'C:\\Users\\x\\repo';
+    expect(relativizeFilePath('C:\\Users\\x\\repo\\packages\\adf\\src\\manifest.ts', root)).toBe('packages/adf/src/manifest.ts');
+    expect(relativizeFilePath('c:/users/X/Repo/packages/adf/src/manifest.ts', root)).toBe('packages/adf/src/manifest.ts');
+    expect(relativizeFilePath('C:/Users/x/repo/packages/adf/src/manifest.ts', 'C:/Users/x/repo')).toBe('packages/adf/src/manifest.ts');
+  });
+
+  it('returns null for paths outside the root', () => {
+    expect(relativizeFilePath('/home/user/other/src/a.ts', '/home/user/repo')).toBeNull();
+    expect(relativizeFilePath('D:\\work\\repo\\src\\a.ts', 'C:\\Users\\x\\repo')).toBeNull();
+    expect(relativizeFilePath('C:\\Users\\x\\repo-other\\a.ts', 'C:\\Users\\x\\repo')).toBeNull();
+    expect(relativizeFilePath('/home/user/repo', '/home/user/repo')).toBeNull();
+  });
+
+  it('resolves ./ and ../ against cwd', () => {
+    const root = '/home/user/repo';
+    expect(relativizeFilePath('./packages/adf/src/manifest.ts', root, root)).toBe('packages/adf/src/manifest.ts');
+    expect(relativizeFilePath('src/manifest.ts', root, '/home/user/repo/packages/adf')).toBe('packages/adf/src/manifest.ts');
+    expect(relativizeFilePath('../blast/src/index.ts', root, '/home/user/repo/packages/adf')).toBe('packages/blast/src/index.ts');
+    expect(relativizeFilePath('../../other/a.ts', root, '/home/user/repo/packages')).toBeNull();
+    expect(relativizeFilePath('.\\packages\\adf\\src\\manifest.ts', 'C:\\Users\\x\\repo', 'C:\\Users\\x\\repo')).toBe('packages/adf/src/manifest.ts');
+  });
+
+  it('takes relative paths as repo-relative when cwd is outside the root', () => {
+    expect(relativizeFilePath('./packages/adf/manifest.ts', '/srv/repo', '/home/user')).toBe('packages/adf/manifest.ts');
+    expect(relativizeFilePath('../escape/a.ts', '/srv/repo', '/home/user')).toBeNull();
+  });
+});
+
+describe('filePathToTokens with a root', () => {
+  it('drops checkout-root dirs from absolute POSIX and Windows paths', () => {
+    expect(filePathToTokens(['/home/users/projects/repo/packages/adf/src/manifest.ts'], { root: '/home/users/projects/repo' }))
+      .toEqual(['adf', 'manifest']);
+    expect(filePathToTokens(['C:\\Users\\x\\repo\\packages\\adf\\src\\manifest.ts'], { root: 'C:\\Users\\x\\repo' }))
+      .toEqual(['adf', 'manifest']);
+  });
+
+  it('handles a mixed set of absolute, relative, dotted and outside paths', () => {
+    const root = '/home/users/repo';
+    expect(filePathToTokens([
+      '/home/users/repo/packages/adf/src/manifest.ts',
+      './packages/blast/src/index.ts',
+      '../repo/packages/cli/src/commands/validate.ts',
+      '/home/users/elsewhere/secret-billing.ts',
+      'packages\\classifier\\src\\rules.ts',
+    ], { root, cwd: root })).toEqual(['adf', 'manifest', 'blast', 'cli', 'commands', 'validate', 'classifier', 'rules']);
   });
 });

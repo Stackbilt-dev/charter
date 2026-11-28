@@ -711,7 +711,10 @@ Without `--force` (or `--yes`), `CONTEXT` is filled only while it is absent, emp
 
 ### charter adf context
 
-Resolves which ADF modules apply to a set of file paths and/or explicit keywords, deriving keywords from file extensions and directory names (for example `src/components/*.tsx` → `react`, `ui`, `frontend`).
+Resolves which ADF modules apply to a set of file paths and/or explicit keywords. Keywords come from two path signals plus `--keywords`:
+
+- **Extension and directory signals** — fixed mappings, for example `src/components/*.tsx` → `react`, `ui`, `frontend`.
+- **Path tokens** — the path's own names, split on `/`, `\`, `-`, `_`, `.` and camelCase and lowercased: `packages/adf/src/manifest.ts` → `adf`, `manifest`, which matches a module triggered on `ADF`. Each path is first made relative to the repo root (`git rev-parse --show-toplevel` from the `--ai-dir`'s parent, or that parent itself outside git). Absolute POSIX and Windows paths (`C:\Users\x\repo\packages\adf\src\manifest.ts`), `./` and `../` are handled, and relative paths are resolved against the current directory. The directories the checkout sits in (`Users`, `home`, ...) never become keywords, and a path outside the repo adds no path tokens. A stop-list drops generic segments: layout roots (`packages`, `src`, `lib`, `dist`, `build`, `bin`, `vendor`, ...), checkout roots (`home`, `documents`, `desktop`, `repo`, `repos`), entry points (`index`, `main`, `mod`), test scaffolding (`test`, `tests`, `spec`, `fixtures`, `mock`, ...), extensions (`ts`, `js`, `json`, `md`, `yaml`, ...), `node_modules`, single characters and pure numbers. Words that are also common domain names (`users`, `projects`, `workspace`, `code`) are not stop-listed, so `src/users/` inside a repo still routes.
 
 ```bash
 npx charter adf context --files "src/api/routes.ts,src/db/schema.sql"
@@ -724,7 +727,7 @@ npx charter adf context --files "src/ui/Button.tsx" --bundle
 - `--bundle` — emit the merged ADF document instead of the resolution summary
 - `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
 
-Reports the derived keywords and each resolved module as `DEFAULT` or `ON_DEMAND`.
+Reports the derived keywords and each resolved module as `DEFAULT` or `ON_DEMAND`. With `--format json`, the output has `keywords` and `resolvedModules`, plus `triggerMatches`: one row per on-demand trigger (`module`, `trigger`, `matched`, `matchedKeywords`, ...), the same shape `--bundle` emits, so you can see which keyword or path token loaded which module. `triggerMatches` is additive; existing keys and exit codes are unchanged.
 
 ### charter adf suggest
 
