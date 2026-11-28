@@ -20,8 +20,8 @@ import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
 import { filePathToTokens } from './adf-path-tokens';
-import { computeFileCeilings } from './adf-ceilings';
-import type { FileCeiling } from './adf-ceilings';
+import { buildPreflight, formatPreflight, preflightBinds, splitFiles } from './adf-preflight';
+import type { Preflight } from './adf-preflight';
 
 /**
  * Extract keywords from file paths using extension and directory signals.
@@ -71,7 +71,7 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   // Collect keywords from both sources
   const allKeywords: string[] = [];
   if (filesFlag) {
-    const filePaths = filesFlag.split(',').map(f => f.trim()).filter(Boolean);
+    const filePaths = splitFiles(filesFlag);
     allKeywords.push(...filePathToKeywords(filePaths));
     // The path's own name tokens (e.g. `adf`, `manifest`) -- see adf-path-tokens.ts.
     allKeywords.push(...filePathToTokens(filePaths));
@@ -112,7 +112,7 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         tokenEstimate: result.tokenEstimate,
         triggerMatches: result.triggerMatches,
         content: formatAdf(result.mergedDocument),
-        ...ceilingsField(aiDir, manifest, filesFlag),
+        ...filesFields(aiDir, manifest, result.resolvedModules, filesFlag),
       }, null, 2));
     } else {
       console.log(formatAdf(result.mergedDocument));
@@ -133,16 +133,23 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         keywords: dedupKeywords,
         resolvedModules,
         triggerMatches,
-        ...ceilingsField(aiDir, manifest, filesFlag),
+        ...filesFields(aiDir, manifest, resolvedModules, filesFlag),
       }, null, 2));
     } else {
+      if (filesFlag) {
+        // Preflight answer (#447): what binds the file, before the module detail.
+        const files = splitFiles(filesFlag);
+        const preflight = buildPreflight(aiDir, manifest, resolvedModules, files);
+        for (const line of formatPreflight(manifest, resolvedModules, preflight, files)) console.log(line);
+        if (!preflightBinds(manifest, resolvedModules, preflight)) return EXIT_CODE.SUCCESS;
+        console.log('');
+      }
       console.log(`  Keywords: ${dedupKeywords.join(', ')}`);
       console.log(`  Resolved modules:`);
       for (const mod of resolvedModules) {
         const isDefault = manifest.defaultLoad.includes(mod);
         console.log(`    ${mod} (${isDefault ? 'DEFAULT' : 'ON_DEMAND'})`);
       }
-      printCeilings(ceilingsField(aiDir, manifest, filesFlag).ceilings);
     }
   }
 
@@ -150,23 +157,17 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
 }
 
 /**
- * Live ceiling headroom (#443) for `--files` entries that map to a manifest
- * METRICS source. Additive: the key is present only when --files was given.
+ * Preflight fields for `--files` (#447): live ceiling headroom (#443) and the
+ * load-bearing rules of resolved on-demand modules, with source locations.
+ * Additive: both keys are present only when --files was given.
  */
-function ceilingsField(
+function filesFields(
   aiDir: string,
   manifest: ReturnType<typeof parseManifest>,
+  resolvedModules: string[],
   filesFlag: string | undefined,
-): { ceilings?: FileCeiling[] } {
+): Partial<Preflight> {
   if (!filesFlag) return {};
-  const files = filesFlag.split(',').map(f => f.trim()).filter(Boolean);
-  return { ceilings: computeFileCeilings(aiDir, manifest, files) };
-}
-
-function printCeilings(ceilings: FileCeiling[] | undefined): void {
-  if (!ceilings || ceilings.length === 0) return;
-  console.log('  Ceilings:');
-  for (const c of ceilings) {
-    console.log(`    [${c.status}] ${c.file}: ${c.value} / ${c.ceiling} (${c.metric}, headroom ${c.headroom}, ${c.module})`);
-  }
+  const { rules, ceilings } = buildPreflight(aiDir, manifest, resolvedModules, splitFiles(filesFlag));
+  return { ceilings, rules };
 }
