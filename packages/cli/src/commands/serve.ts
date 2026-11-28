@@ -24,13 +24,13 @@ import {
   applyPatches,
   parseManifest,
   bundleModules,
-  resolveModules,
   validateConstraints,
   evaluateEvidence,
 } from '@stackbilt/adf';
 import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
 import { generateBrief } from './context';
 import { contextRefreshCommand } from './context-refresh';
+import { resolveProjectContext } from './project-context';
 import {
   analyze as analyzeSurface,
   SurfaceInputSchema,
@@ -161,16 +161,8 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions, se
     },
     async ({ task }: { task?: string }) => {
       try {
-        const manifest = loadManifest(aiDir);
-        const keywords = task ? [...new Set(task.toLowerCase().split(/\s+/))] : [];
-        const modulePaths = resolveModules(manifest, keywords);
-        const bundle = bundleModules(
-          aiDir,
-          modulePaths,
-          (p) => fs.readFileSync(p, 'utf-8'),
-          keywords,
-          manifest,
-        );
+        // Shared with the CLI (tokenizeTask) so "ADF." and "ADF" resolve the same modules (#438).
+        const { keywords, manifest, bundle } = resolveProjectContext(aiDir, task);
         recordAdfResolutionEvent(options.configPath, {
           source: 'mcp.getProjectContext',
           keywords,
