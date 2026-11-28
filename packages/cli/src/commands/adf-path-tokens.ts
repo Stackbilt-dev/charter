@@ -7,14 +7,17 @@
  * not only from generic extension and directory signals.
  *
  * Over-triggering is the main risk, so two guards apply:
- * - Each path is first made relative to the repo root. The directories the
- *   checkout happens to sit in (`C:\Users\...`, `/home/...`) never become
- *   keywords, and a path outside the repo contributes no tokens at all.
+ * - Each path is first made relative to the repo root, for path tokens and
+ *   for the extension/directory signals alike. The directories the checkout
+ *   happens to sit in (`C:\Users\...`, `/home/...`, an `api/` or `test/`
+ *   folder above the repo) never become keywords, and a path outside the
+ *   repo contributes no tokens and no directory signals.
  * - Generic scaffolding segments (packages, src, lib, dist, index, test dirs,
  *   extensions, ...) are dropped.
  */
 
 import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 /**
@@ -55,44 +58,99 @@ function isWindowsStyle(p: string): boolean {
 }
 
 /**
+ * Resolve symlinks and junctions so a checkout
+ * reached through a link compares equal to the real path git reports. A path
+ * that does not exist keeps its missing tail on top of its deepest existing
+ * ancestor's real path.
+ */
+function canonicalPath(p: string): string {
+  const abs = path.resolve(p);
+  const tail: string[] = [];
+  let cur = abs;
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(cur), ...tail);
+    } catch {
+      try {
+        return path.join(fs.realpathSync(cur), ...tail);
+      } catch {
+        const parent = path.dirname(cur);
+        if (parent === cur) return abs;
+        tail.unshift(path.basename(cur));
+        cur = parent;
+      }
+    }
+  }
+}
+
+/**
  * Make one file path relative to the repo root, with `/` separators.
  * Returns null when the path lies outside the root (it then contributes no
- * tokens). Handles Windows drive letters, backslashes, `./` and `../`.
+ * tokens or directory signals). Handles Windows drive letters, backslashes,
+ * `./`, `../`, and roots reached through a symlink or junction.
  *
- * A relative path is resolved against `cwd`. If `cwd` itself is outside the
- * root, the relative path is taken as already repo-relative (unless it
- * climbs out with `../`).
+ * A relative path is resolved against `cwd`. When that file does not exist
+ * but the same path does exist under the root (an agent passing a
+ * repo-relative path from a subdirectory), it is taken as repo-relative. If
+ * `cwd` itself is outside the root, the relative path is taken as already
+ * repo-relative (unless it climbs out with `../`).
  */
 export function relativizeFilePath(filePath: string, root: string, cwd: string = root): string | null {
   const flavor = isWindowsStyle(filePath) || isWindowsStyle(root) || isWindowsStyle(cwd) ? path.win32 : path.posix;
+  // Only touch the filesystem when the paths are in this host's own format.
+  const native = (flavor === path.win32) === (process.platform === 'win32');
   const inside = (rel: string): boolean =>
     rel !== '' && rel !== '.' && rel !== '..' &&
     !rel.startsWith('../') && !rel.startsWith('..\\') && !flavor.isAbsolute(rel);
+  /** `abs` relative to the root: '' for the root itself, null when outside. */
+  const fromRoot = (abs: string): string | null => {
+    const rel = flavor.relative(root, abs);
+    if (rel === '' || inside(rel)) return rel;
+    if (!native) return null;
+    const real = path.relative(canonicalPath(root), canonicalPath(abs));
+    return real === '' || inside(real) ? real : null;
+  };
+  const clean = (rel: string | null): string | null =>
+    rel === null || !inside(rel) ? null : rel.split(/[\\/]+/).filter(s => s && s !== '.').join('/');
 
-  let rel: string;
-  if (flavor.isAbsolute(filePath)) {
-    rel = flavor.relative(root, filePath);
-    if (!inside(rel)) return null;
-  } else {
-    rel = flavor.relative(root, flavor.resolve(cwd, filePath));
-    if (!inside(rel)) {
-      const cwdRel = flavor.relative(root, cwd);
-      if (cwdRel === '' || inside(cwdRel)) return null;
-      // cwd is outside the root: take the path as already repo-relative.
-      rel = flavor.normalize(filePath);
-      if (!inside(rel)) return null;
+  if (flavor.isAbsolute(filePath)) return clean(fromRoot(filePath));
+
+  const fromCwd = flavor.resolve(cwd, filePath);
+  if (native && !fs.existsSync(fromCwd)) {
+    const underRoot = flavor.resolve(root, filePath);
+    if (fs.existsSync(underRoot)) {
+      const rel = clean(fromRoot(underRoot));
+      if (rel !== null) return rel;
     }
   }
-  return rel.split(/[\\/]+/).filter(s => s && s !== '.').join('/');
+  const rel = fromRoot(fromCwd);
+  if (rel !== null) return clean(rel);
+  // Resolved outside the root. From a cwd inside the root that is a real
+  // escape; from a cwd outside it, take the path as already repo-relative.
+  if (fromRoot(cwd) !== null) return null;
+  return clean(flavor.normalize(filePath));
 }
+
+/** `relativizeFilePath` over a list, null for each path outside the root. */
+export function relativizeFilePaths(filePaths: string[], options: PathTokenOptions = {}): Array<string | null> {
+  const cwd = options.cwd ?? process.cwd();
+  const root = options.root ?? cwd;
+  return filePaths.map(fp => relativizeFilePath(fp, root, cwd));
+}
+
+const rootCache = new Map<string, string>();
 
 /**
  * The repo root for path relativizing: `git rev-parse --show-toplevel` run
  * from the directory that holds the `.ai/` dir, falling back to that
- * directory itself.
+ * directory itself. Memoized per directory, so git is spawned at most once
+ * per `.ai/` location in a process (including a long-running `charter serve`).
  */
 export function resolvePathTokenRoot(aiDir: string, cwd: string = process.cwd()): string {
   const aiParent = path.dirname(path.resolve(cwd, aiDir));
+  const cached = rootCache.get(aiParent);
+  if (cached !== undefined) return cached;
+  let root = aiParent;
   try {
     const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: aiParent,
@@ -100,11 +158,17 @@ export function resolvePathTokenRoot(aiDir: string, cwd: string = process.cwd())
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
     }).trim();
-    if (top) return path.resolve(top);
+    if (top) root = path.resolve(top);
   } catch {
     // Not a git checkout (or git is missing): the .ai/ dir's parent is the root.
   }
-  return aiParent;
+  rootCache.set(aiParent, root);
+  return root;
+}
+
+/** Test hook: forget memoized repo roots. */
+export function clearPathTokenRootCache(): void {
+  rootCache.clear();
 }
 
 /** Split one path segment into lowercase word tokens (kebab, snake, dot, camelCase). */
@@ -117,17 +181,10 @@ function splitSegment(segment: string): string[] {
     .filter(t => t.length > 1 && !/^\d+$/.test(t));
 }
 
-/**
- * Derive routing tokens from the file paths' own segments, after making each
- * path relative to the repo root (see `relativizeFilePath`).
- * Returns deduplicated lowercase tokens with generic segments removed.
- */
-export function filePathToTokens(filePaths: string[], options: PathTokenOptions = {}): string[] {
-  const cwd = options.cwd ?? process.cwd();
-  const root = options.root ?? cwd;
+/** Path tokens from already repo-relative paths; null entries are skipped. */
+export function tokensFromRelativePaths(relPaths: Array<string | null>): string[] {
   const tokens: string[] = [];
-  for (const fp of filePaths) {
-    const rel = relativizeFilePath(fp, root, cwd);
+  for (const rel of relPaths) {
     if (rel === null) continue;
     for (const segment of rel.split('/')) {
       if (segment === 'node_modules') continue;
@@ -140,11 +197,19 @@ export function filePathToTokens(filePaths: string[], options: PathTokenOptions 
 }
 
 /**
+ * Derive routing tokens from the file paths' own segments, after making each
+ * path relative to the repo root (see `relativizeFilePath`).
+ * Returns deduplicated lowercase tokens with generic segments removed.
+ */
+export function filePathToTokens(filePaths: string[], options: PathTokenOptions = {}): string[] {
+  return tokensFromRelativePaths(relativizeFilePaths(filePaths, options));
+}
+
+/**
  * Extract keywords from file paths using extension and directory signals.
  * Maps file system structure to domain keywords for module resolution.
- *
- * Lives in this leaf module (no CLI imports) so MCP `getProjectContext` can use
- * it without importing adf-context.ts; adf-context.ts re-exports it unchanged.
+ * Callers pass repo-relative paths (see `filePathRoutingKeywords`) so the
+ * directories above the checkout never produce signals.
  */
 export function filePathToKeywords(filePaths: string[]): string[] {
   const keywords: string[] = [];
@@ -170,18 +235,27 @@ export function filePathToKeywords(filePaths: string[]): string[] {
 }
 
 /**
- * All routing keywords for `--files` (CLI) and `files` (MCP), in one order so
- * both transports resolve the same modules: extension and directory signals,
- * then path tokens. Both see repo-relative paths, so the directories the
- * checkout sits in (`C:\Users\...`) never become signals. A path outside the
- * repo keeps only its file name, so extension signals still apply.
+ * Every routing keyword `--files` contributes: extension and directory
+ * signals plus path tokens, all taken from the repo-relative path. A path
+ * outside the repo keeps only its extension signals (its file name alone).
+ * Each path is relativized once.
  */
-export function fileRoutingKeywords(filePaths: string[], aiDir: string, cwd: string = process.cwd()): string[] {
-  const root = resolvePathTokenRoot(aiDir, cwd);
-  const relPaths = filePaths.map(fp => relativizeFilePath(fp, root, cwd) ?? baseName(fp));
-  return [...new Set([...filePathToKeywords(relPaths), ...filePathToTokens(filePaths, { root, cwd })])];
+export function filePathRoutingKeywords(filePaths: string[], options: PathTokenOptions = {}): string[] {
+  const relPaths = relativizeFilePaths(filePaths, options);
+  const forSignals = relPaths.map((rel, i) => rel ?? (filePaths[i].split(/[\\/]+/).pop() ?? ''));
+  return [...new Set([...filePathToKeywords(forSignals), ...tokensFromRelativePaths(relPaths)])];
 }
 
-function baseName(fp: string): string {
-  return fp.split(/[\\/]+/).filter(Boolean).pop() ?? fp;
+/**
+ * All routing keywords for `--files` (CLI) and `files` (MCP), so both
+ * transports resolve the same modules. Resolves the repo root from the
+ * `.ai/` dir (memoized) unless the caller already has it.
+ */
+export function fileRoutingKeywords(
+  filePaths: string[],
+  aiDir: string,
+  cwd: string = process.cwd(),
+  root: string = resolvePathTokenRoot(aiDir, cwd),
+): string[] {
+  return filePathRoutingKeywords(filePaths, { root, cwd });
 }

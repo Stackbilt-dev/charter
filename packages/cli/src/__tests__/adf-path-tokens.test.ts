@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { filePathToTokens, relativizeFilePath } from '../commands/adf-path-tokens';
+import { filePathRoutingKeywords, filePathToTokens, relativizeFilePath } from '../commands/adf-path-tokens';
 import { adfContextCommand } from '../commands/adf-context';
 import type { CLIOptions } from '../index';
 
@@ -18,6 +18,7 @@ const CHARTER_MANIFEST = `ADF: 0.1
   - governance.adf (Triggers on: validate, drift, audit, trailer, risk, governance)
   - classifier.adf (Triggers on: classifier, routing, auto-route, adf add, classify, rule placement)
   - analysis.adf (Triggers on: blast, surface, dependency graph, blast radius, route extraction, schema extraction)
+  - typed-data-access.adf (Triggers on: tenant, user, subscription, quota, credit, mrr, pii, sensitivity, data registry, ontology, disambiguation, DATA_AUTHORITY, raw D1, service boundary, auth_scoped, billing_critical)
 `;
 
 // Guard fixture: a repo whose triggers are exactly the generic path words.
@@ -104,6 +105,7 @@ describe('adf context --files path-token routing (#442)', () => {
     ['packages/cli/src/commands/serve.ts', null],
     ['packages/cli/src/commands/context-refresh.ts', null],
     ['.github/workflows/ci.yml', null],
+    ['packages/cli/src/commands/tenant-quota.ts', 'typed-data-access.adf'],
   ];
 
   for (const [file, expected] of table) {
@@ -227,5 +229,134 @@ describe('filePathToTokens with a root', () => {
       '/home/users/elsewhere/secret-billing.ts',
       'packages\\classifier\\src\\rules.ts',
     ], { root, cwd: root })).toEqual(['adf', 'manifest', 'blast', 'cli', 'commands', 'validate', 'classifier', 'rules']);
+  });
+});
+
+// The reviewer's reproduction: a repo that sits under api/, test/ and
+// session/ folders, with triggers on the words those folders map to.
+const SIGNAL_TRIGGER_MANIFEST = `ADF: 0.1
+
+📦 DEFAULT_LOAD:
+  - core.adf
+
+📂 ON_DEMAND:
+  - backend.adf (Triggers on: backend, api)
+  - qa.adf (Triggers on: qa)
+  - sec.adf (Triggers on: security, auth)
+`;
+
+describe('directory signals come from the repo-relative path', () => {
+  let repoDir: string;
+  beforeEach(() => {
+    repoDir = path.join(tmpDir, 'api', 'test', 'session', 'repo');
+    fs.mkdirSync(path.join(repoDir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, 'docs', 'readme.txt'), 'x');
+  });
+
+  it('guard: api/test/session dirs above the repo add no signals for an absolute path', () => {
+    const out = runContext(SIGNAL_TRIGGER_MANIFEST, path.join(repoDir, 'docs', 'readme.txt'), repoDir);
+    expect(out.keywords).toEqual(['docs', 'readme']);
+    expect(out.resolvedModules).toEqual(['core.adf']);
+  });
+
+  it('gives the same answer for the absolute and the repo-relative spelling', () => {
+    const abs = runContext(SIGNAL_TRIGGER_MANIFEST, path.join(repoDir, 'docs', 'readme.txt'), repoDir);
+    const rel = runContext(SIGNAL_TRIGGER_MANIFEST, 'docs/readme.txt', repoDir);
+    expect(abs.keywords).toEqual(rel.keywords);
+    expect(abs.resolvedModules).toEqual(rel.resolvedModules);
+  });
+
+  it('guard: a path outside the repo adds no directory signals, only extension ones', () => {
+    const outside = path.join(tmpDir, 'api', 'test', 'session', 'Button.tsx');
+    const out = runContext(SIGNAL_TRIGGER_MANIFEST, outside, repoDir);
+    expect(out.keywords).toEqual(['react', 'ui', 'frontend']);
+    expect(out.resolvedModules).toEqual(['core.adf']);
+  });
+
+  it('still emits directory signals for dirs inside the repo', () => {
+    const out = runContext(SIGNAL_TRIGGER_MANIFEST, path.join(repoDir, 'src', 'api', 'handler.ts'), repoDir);
+    expect(out.keywords).toEqual(expect.arrayContaining(['api', 'backend']));
+    expect(out.resolvedModules).toEqual(['core.adf', 'backend.adf']);
+  });
+
+  it('filePathRoutingKeywords applies the same rule', () => {
+    expect(filePathRoutingKeywords(['/srv/api/test/repo/docs/readme.txt'], { root: '/srv/api/test/repo' }))
+      .toEqual(['docs', 'readme']);
+    expect(filePathRoutingKeywords(['/srv/api/elsewhere.sql'], { root: '/srv/api/test/repo' }))
+      .toEqual(['db', 'migration']);
+  });
+});
+
+describe('symlinked or junctioned checkouts', () => {
+  let realRepo: string;
+  let linkRepo: string;
+  let linked: boolean;
+  beforeEach(() => {
+    realRepo = path.join(tmpDir, 'real', 'repo');
+    linkRepo = path.join(tmpDir, 'link-repo');
+    fs.mkdirSync(path.join(realRepo, 'packages', 'adf', 'src'), { recursive: true });
+    fs.writeFileSync(path.join(realRepo, 'packages', 'adf', 'src', 'manifest.ts'), 'x');
+    try {
+      // 'junction' needs no privileges on Windows and is ignored elsewhere.
+      fs.symlinkSync(realRepo, linkRepo, 'junction');
+      linked = true;
+    } catch {
+      linked = false;
+    }
+  });
+
+  it('relativizes a path reached through the link against the real root, and the reverse', (ctx) => {
+    if (!linked) ctx.skip();
+    const viaLink = path.join(linkRepo, 'packages', 'adf', 'src', 'manifest.ts');
+    const viaReal = path.join(realRepo, 'packages', 'adf', 'src', 'manifest.ts');
+    expect(relativizeFilePath(viaLink, realRepo)).toBe('packages/adf/src/manifest.ts');
+    expect(relativizeFilePath(viaReal, linkRepo)).toBe('packages/adf/src/manifest.ts');
+    // A file that does not exist yet still resolves through its existing parent.
+    expect(relativizeFilePath(path.join(linkRepo, 'packages', 'adf', 'src', 'new-file.ts'), realRepo))
+      .toBe('packages/adf/src/new-file.ts');
+  });
+
+  it('routes an absolute real path when the .ai dir is reached through the link', (ctx) => {
+    if (!linked) ctx.skip();
+    const out = runContext(CHARTER_MANIFEST, path.join(realRepo, 'packages', 'adf', 'src', 'manifest.ts'), linkRepo);
+    expect(out.keywords).toEqual(['adf', 'manifest']);
+    expect(out.resolvedModules).toContain('adf-dev.adf');
+  });
+});
+
+describe('repo-relative paths from a subdirectory cwd', () => {
+  let repoDir: string;
+  let prevCwd: string;
+  beforeEach(() => {
+    prevCwd = process.cwd();
+    repoDir = path.join(tmpDir, 'repo');
+    fs.mkdirSync(path.join(repoDir, 'packages', 'adf', 'src'), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, 'packages', 'cli', 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, 'packages', 'adf', 'src', 'manifest.ts'), 'x');
+    fs.writeFileSync(path.join(repoDir, 'packages', 'cli', 'src', 'local.ts'), 'x');
+    fs.mkdirSync(path.join(repoDir, '.ai'), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, '.ai', 'manifest.adf'), CHARTER_MANIFEST);
+    process.chdir(path.join(repoDir, 'packages', 'cli'));
+  });
+  afterEach(() => {
+    process.chdir(prevCwd);
+  });
+
+  function runFromCli(files: string): { keywords: string[]; resolvedModules: string[] } {
+    const options: CLIOptions = { configPath: path.join(tmpDir, '.charter'), format: 'json', ciMode: false, yes: true };
+    logs = [];
+    expect(adfContextCommand(options, ['--files', files, '--ai-dir', path.join('..', '..', '.ai')])).toBe(0);
+    return JSON.parse(logs.join('\n'));
+  }
+
+  it('reads a path that only exists under the repo root as repo-relative (no cwd segments)', () => {
+    const out = runFromCli('packages/adf/src/manifest.ts');
+    expect(out.keywords).toEqual(['adf', 'manifest']);
+    expect(out.resolvedModules).toContain('adf-dev.adf');
+  });
+
+  it('keeps cwd-relative resolution when the file exists under the cwd', () => {
+    const out = runFromCli('src/local.ts');
+    expect(out.keywords).toEqual(['cli', 'local']);
   });
 });
