@@ -44,3 +44,9 @@ updates:
       - "ci"
     commit-message:
       prefix: "chore(ci):"
+    # codeql-action's init, autobuild and analyze steps must run the same
+    # version; separate PRs for each step fail CodeQL with a version mismatch.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
