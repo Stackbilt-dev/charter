@@ -46,7 +46,14 @@ updates:
       prefix: "chore(ci):"
     # codeql-action's init, autobuild and analyze steps must run the same
     # version; separate PRs for each step fail CodeQL with a version mismatch.
+    # Groups cover version updates only by default, so security updates get
+    # their own group.
     groups:
       codeql-action:
+        applies-to: version-updates
+        patterns:
+          - "github/codeql-action*"
+      codeql-action-security:
+        applies-to: security-updates
         patterns:
           - "github/codeql-action*"

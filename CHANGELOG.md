@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Security
+
+- **Supply-chain advisories** (`#431`): raised the `pnpm.overrides` pins for `hono` (4.13.11 → 4.13.16) and `@hono/node-server` (2.1.3 → 2.1.6) to the first patched versions. This clears GHSA-4h7h-rv7c-7m2v, GHSA-46wx-v44x-9hh2, GHSA-4m76-xfj5-7975, GHSA-h7mg-cq63-vhpq and GHSA-3gg2-335m-rxc6 (hono), and GHSA-qv5m-9pm6-hqp3 and GHSA-jpvv-r467-5p4w (`@hono/node-server`). These advisories were failing `pnpm audit` in CI.
+- **CodeQL action steps updated together** (`#431`): `github/codeql-action` init, autobuild and analyze are pinned to the same v4.39.5 commit. Dependabot now groups these steps for both version and security updates, because CodeQL fails when they run different versions.
+
 ### Changed
 
 - **ON_DEMAND triggers inferred by `adf migrate` and `bootstrap` drop generic heading words and numbers** (`#349`). The router matches a trigger against each word of a task (exactly, or as a long enough prefix stem), so a heading such as `Release Workflow`, `Images and Components`, `Apps via Turborepo` or `Step 1` used to register triggers like `release`, `workflow`, `images`, `components`, `apps`, `via` or `1`, and the module then loaded for almost every task. `GENERIC_HEADING_WORDS` now covers the structure, process and filler words common in CLAUDE.md headings (`workflow`, `release`, `process`, `steps`, `setup`, `commands`, `files`, `code`, `apps`, `components`, `images`, `conventions`, `guide`, `via`, `using`, `when`, `how`, `all`, ...), task verbs (`add`, `fix`, `create`, `remove`, `implement`, `write`, `run`, `make`, ...) and generic nouns (`known`, `considerations`, `instructions`, `requirements`, `prerequisites`, `examples`, `support`, `engineering`): `How to Add a New Endpoint` gives `endpoint`. Domain words (`deployment`, `testing`, `database`, `auth`, `docker`, `api`, ...) are not on it. Numbers and version numbers (`1`, `2024`, `1.2`, `v2.1`, `v20.x`, `v2.0-beta`, `v2.0-beta-2`) are dropped; so is every all-digit token, including one such as `404`. A generic word that is part of the module's own file name is still used (`release` for `release.adf`). When nothing usable is left, the trigger is the module's file stem, as before. Only new registrations are affected; existing manifest entries are never rewritten.
