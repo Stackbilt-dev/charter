@@ -19,13 +19,8 @@ import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, readFlagFile, tokenizeTask } from '../flags';
 import { hashContent, loadLockFile } from './adf-sync';
 import { recordAdfConstraintEvents } from '../telemetry';
-
-interface AutoMeasurement {
-  metric: string;
-  path: string;
-  lines: number | null;
-  error?: string;
-}
+import { measureMetricSources } from './adf-ceilings';
+import type { AutoMeasurement } from './adf-ceilings';
 
 export function adfEvidence(options: CLIOptions, args: string[]): number {
   const task = getFlag(args, '--task');
@@ -76,17 +71,9 @@ export function adfEvidence(options: CLIOptions, args: string[]): number {
   const autoMeasured: AutoMeasurement[] = [];
   if (autoMeasure && manifest.metrics.length > 0) {
     const measured: Record<string, number> = {};
-    for (const ms of manifest.metrics) {
-      const metricKey = ms.key.toLowerCase();
-      const filePath = path.resolve(ms.path);
-      if (fs.existsSync(filePath)) {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n').length;
-        measured[metricKey] = lines;
-        autoMeasured.push({ metric: metricKey, path: ms.path, lines });
-      } else {
-        autoMeasured.push({ metric: metricKey, path: ms.path, lines: null, error: 'file not found' });
-      }
+    for (const m of measureMetricSources(manifest.metrics)) {
+      autoMeasured.push(m);
+      if (m.lines !== null) measured[m.metric] = m.lines;
     }
     // Merge: explicit --context wins over auto-measured
     context = { ...measured, ...context };
