@@ -19,35 +19,12 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
+import { filePathRoutingKeywords, filePathToKeywords, resolvePathTokenRoot } from './adf-path-tokens';
 import { computeFileCeilings } from './adf-ceilings';
 import type { FileCeiling } from './adf-ceilings';
 
-/**
- * Extract keywords from file paths using extension and directory signals.
- * Maps file system structure to domain keywords for module resolution.
- */
-export function filePathToKeywords(filePaths: string[]): string[] {
-  const keywords: string[] = [];
-  for (const fp of filePaths) {
-    const ext = path.extname(fp).slice(1).toLowerCase();
-    const dir = path.dirname(fp).toLowerCase();
-
-    // Extension signals
-    if (['tsx', 'jsx'].includes(ext)) keywords.push('react', 'ui', 'frontend');
-    if (['css', 'scss', 'sass', 'less'].includes(ext)) keywords.push('css', 'ui', 'frontend');
-    if (['prisma'].includes(ext)) keywords.push('db', 'backend');
-    if (['sql'].includes(ext)) keywords.push('db', 'migration');
-    if (ext === 'toml' && fp.includes('wrangler')) keywords.push('deploy', 'cloudflare');
-
-    // Directory signals
-    if (/\b(component|ui|widget|page|layout|view)\b/.test(dir)) keywords.push('frontend', 'ui');
-    if (/\b(api|server|handler|route|middleware|controller)\b/.test(dir)) keywords.push('api', 'backend');
-    if (/\b(test|spec|__tests__|e2e)\b/.test(dir)) keywords.push('test', 'qa');
-    if (/\b(deploy|infra|docker|ci|\.github)\b/.test(dir)) keywords.push('deploy', 'infra');
-    if (/\b(auth|session|permission)\b/.test(dir)) keywords.push('auth', 'security');
-  }
-  return [...new Set(keywords)];
-}
+// Re-exported for existing importers; the implementation lives in adf-path-tokens.ts.
+export { filePathToKeywords };
 
 export function adfContextCommand(options: CLIOptions, args: string[]): number {
   const filesFlag = getFlag(args, '--files');
@@ -71,7 +48,10 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   const allKeywords: string[] = [];
   if (filesFlag) {
     const filePaths = filesFlag.split(',').map(f => f.trim()).filter(Boolean);
-    allKeywords.push(...filePathToKeywords(filePaths));
+    // Extension/directory signals and the path's own name tokens (e.g. `adf`,
+    // `manifest`), all from the repo-relative path so checkout-root dirs
+    // never route -- see adf-path-tokens.ts.
+    allKeywords.push(...filePathRoutingKeywords(filePaths, { root: resolvePathTokenRoot(aiDir) }));
   }
   if (keywordsFlag) {
     allKeywords.push(...tokenizeTask(keywordsFlag));
@@ -116,18 +96,20 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
     }
   } else {
     // Module list only
+    const triggerMatches = buildTriggerReport(manifest, resolvedModules, dedupKeywords);
     recordAdfResolutionEvent(options.configPath, {
       source: 'context',
       keywords: dedupKeywords,
       candidateModules,
       resolvedModules,
-      triggerMatches: buildTriggerReport(manifest, resolvedModules, dedupKeywords),
+      triggerMatches,
     });
 
     if (options.format === 'json') {
       console.log(JSON.stringify({
         keywords: dedupKeywords,
         resolvedModules,
+        triggerMatches,
         ...ceilingsField(aiDir, manifest, filesFlag),
       }, null, 2));
     } else {

@@ -711,7 +711,16 @@ Without `--force` (or `--yes`), `CONTEXT` is filled only while it is absent, emp
 
 ### charter adf context
 
-Resolves which ADF modules apply to a set of file paths and/or explicit keywords, deriving keywords from file extensions and directory names (for example `src/components/*.tsx` → `react`, `ui`, `frontend`).
+Resolves which ADF modules apply to a set of file paths and/or explicit keywords. Keywords come from two path signals plus `--keywords`:
+
+- **Extension and directory signals** — fixed mappings, for example `src/components/*.tsx` → `react`, `ui`, `frontend`.
+- **Path tokens** — the path's own names, split on `/`, `\`, `-`, `_`, `.` and camelCase and lowercased: `packages/adf/src/manifest.ts` → `adf`, `manifest`, which matches a module triggered on `ADF`. A stop-list drops generic segments: layout roots (`packages`, `src`, `lib`, `dist`, `build`, `bin`, `vendor`, ...), checkout roots (`home`, `documents`, `desktop`, `repo`, `repos`), entry points (`index`, `main`, `mod`), test scaffolding (`test`, `tests`, `spec`, `fixtures`, `mock`, ...), extensions (`ts`, `js`, `json`, `md`, `yaml`, ...), `node_modules`, single characters and pure numbers. Words that are also common domain names (`users`, `projects`, `workspace`, `code`) are not stop-listed, so `src/users/` inside a repo still routes.
+
+Both path signals read each path after it is made relative to the repo root (`git rev-parse --show-toplevel` from the `--ai-dir`'s parent, or that parent itself outside git; looked up once per run):
+
+- Absolute POSIX and Windows paths (`C:\Users\x\repo\packages\adf\src\manifest.ts`), `./` and `../` are handled. Symlinks and junctions are resolved on both sides, so a checkout opened through a link still matches the real path git reports.
+- A relative path is resolved against the current directory. If no such file exists there but the same path exists under the repo root, it is read as repo-relative, so `--files packages/adf/src/manifest.ts` from `packages/cli` does not pick up `cli`.
+- The directories the checkout sits in (`Users`, `home`, or an `api/`, `test/` or `session/` folder above the repo) never become keywords. A path outside the repo adds no path tokens and no directory signals; only its extension signals count.
 
 ```bash
 npx charter adf context --files "src/api/routes.ts,src/db/schema.sql"
@@ -724,7 +733,7 @@ npx charter adf context --files "src/ui/Button.tsx" --bundle
 - `--bundle` — emit the merged ADF document instead of the resolution summary
 - `--ai-dir <dir>` — custom `.ai/` directory (default: `.ai`)
 
-Reports the derived keywords and each resolved module as `DEFAULT` or `ON_DEMAND`.
+Reports the derived keywords and each resolved module as `DEFAULT` or `ON_DEMAND`. With `--format json`, the output has `keywords` and `resolvedModules`, plus `triggerMatches`: one row per on-demand trigger (`module`, `trigger`, `matched`, `matchedKeywords`, ...), the same shape `--bundle` emits, so you can see which keyword or path token loaded which module. `triggerMatches` is additive; existing keys and exit codes are unchanged.
 
 ### charter adf suggest
 
