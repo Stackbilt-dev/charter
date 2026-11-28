@@ -735,6 +735,25 @@ npx charter adf context --files "src/ui/Button.tsx" --bundle
 
 Reports the derived keywords and each resolved module as `DEFAULT` or `ON_DEMAND`. With `--format json`, the output has `keywords` and `resolvedModules`, plus `triggerMatches`: one row per on-demand trigger (`module`, `trigger`, `matched`, `matchedKeywords`, ...), the same shape `--bundle` emits, so you can see which keyword or path token loaded which module. `triggerMatches` is additive; existing keys and exit codes are unchanged.
 
+**Preflight answer (`--files`).** Before the module detail, text output starts with what binds the files:
+
+```
+Binds:     adf-dev.adf → "ADF package has zero runtime dependencies"  (.ai/adf-dev.adf:18)
+Headroom:  adf_migrate_loc 792/792 → 0 lines left [warn] (core.adf)
+Contract:  unknown
+Run first: unknown
+Fresh:     unknown
+```
+
+- `Binds` lists the `[load-bearing]` rules of each resolved ON_DEMAND module with its source line. DEFAULT_LOAD modules apply to every file, so they are not listed. A module the ADF parser rejects is shown as `(unreadable: <reason>)` and the command still exits 0. With several files, a module that only some of them trigger ends each line with `for <file>, ...` (the files whose own path keywords trigger it), and one that none of them trigger ends with `for the task keywords` (it came from `--keywords` only). A module every file triggers has no suffix.
+- `Headroom` is the live line count of each file a manifest METRICS source points at, against its declared ceiling, measured the way `adf evidence --auto-measure` measures it. With several files, each line names its file. Files are matched to METRICS sources through the same repo-relative resolution as the path tokens, so a repo-relative path passed from a subdirectory still finds its ceiling.
+- `Contract`, `Run first` and `Fresh` say `unknown` until those signals exist.
+- When no on-demand module resolves and no ceiling tracks the files, the whole output is one line: `Nothing binds <files>: no on-demand module or ceiling applies. Default modules only.`
+- Locations are relative to the repo root, so the answer is the same from a subdirectory (`--ai-dir ../.ai`), for absolute paths, and over MCP.
+- With `--bundle`, the block goes to stderr so stdout stays a pure ADF document.
+
+With `--format json` and `--files`, four additive keys follow the existing ones (list and `--bundle` output): `ceilings[]` (`file`, `metric`, `value`, `ceiling`, `headroom`, `status`, `module`), `rules[]` (`module`, `section`, `rule`, `file`, `line`), `unreadable[]` (`module`, `file`, `reason`) and `binds` (`false` when nothing binds the files). Without `--files` none of them appear.
+
 ### charter adf suggest
 
 Diagnostics over `.charter/telemetry/events.ndjson`: dead modules, recurring unmatched keywords, and modules that load while a downstream command still fails. Report-only — no module attribution is guessed and nothing is applied automatically.
@@ -872,7 +891,7 @@ If startup validation fails (missing `.ai/` directory or `manifest.adf`), `chart
 |------|-------------|
 | `charter_brief` | **Call first.** Pre-digested repo brief — routes, hotspots, governance. |
 | `charter_context` | Session continuity snapshot reader/refresher (`.ai/context.snapshot.json`). Use `refresh=true` to run `context-refresh` before reading. |
-| `getProjectContext` | ADF bundle resolved for a given task or trigger keywords. |
+| `getProjectContext` | ADF bundle resolved for a given task or trigger keywords. With `files: string[]`, it also returns the `adf context --files` preflight answer: the bundle, the preflight text, then `{ rules, ceilings, unreadable, binds }` JSON. When nothing binds the files and no `task` is given, it returns only the one-line answer and that JSON, without the bundle; with a `task`, the task's bundle comes first as usual. |
 | `getProjectState` | Constraint validation results across all loaded modules. |
 | `getArchitecturalDecisions` | Load-bearing constraints from `core.adf`. |
 | `getRecentChanges` | Recent git commits classified by type. |

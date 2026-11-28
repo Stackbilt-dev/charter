@@ -245,3 +245,17 @@ export function filePathRoutingKeywords(filePaths: string[], options: PathTokenO
   const forSignals = relPaths.map((rel, i) => rel ?? (filePaths[i].split(/[\\/]+/).pop() ?? ''));
   return [...new Set([...filePathToKeywords(forSignals), ...tokensFromRelativePaths(relPaths)])];
 }
+
+/**
+ * All routing keywords for `--files` (CLI) and `files` (MCP), so both
+ * transports resolve the same modules. Resolves the repo root from the
+ * `.ai/` dir (memoized) unless the caller already has it.
+ */
+export function fileRoutingKeywords(
+  filePaths: string[],
+  aiDir: string,
+  cwd: string = process.cwd(),
+  root: string = resolvePathTokenRoot(aiDir, cwd),
+): string[] {
+  return filePathRoutingKeywords(filePaths, { root, cwd });
+}

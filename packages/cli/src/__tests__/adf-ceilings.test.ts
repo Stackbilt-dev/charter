@@ -109,7 +109,7 @@ describe('adf context --files ceilings', () => {
   it('gives no entry for files without a metric and keeps existing keys', () => {
     setupRepo();
     const out = runJson(() => adfContextCommand(baseOptions, ['--files', 'src/plain.ts,src/roomy.ts']));
-    expect(Object.keys(out)).toEqual(['keywords', 'resolvedModules', 'triggerMatches', 'ceilings']);
+    expect(Object.keys(out)).toEqual(['keywords', 'resolvedModules', 'triggerMatches', 'ceilings', 'rules', 'unreadable', 'binds']);
     expect(out.ceilings).toEqual([expect.objectContaining({
       file: 'src/roomy.ts', value: 21, ceiling: 50, headroom: 29, status: 'pass',
     })]);
