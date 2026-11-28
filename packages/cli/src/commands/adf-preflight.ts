@@ -12,11 +12,11 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { parseAdf } from '@stackbilt/adf';
+import { parseAdf, resolveModules } from '@stackbilt/adf';
 import type { Manifest, AdfSection } from '@stackbilt/adf';
 import { computeFileCeilings, displayFrom } from './adf-ceilings';
 import type { FileCeiling } from './adf-ceilings';
-import { relativizeFilePath, resolvePathTokenRoot } from './adf-path-tokens';
+import { fileRoutingKeywords, relativizeFilePath, resolvePathTokenRoot } from './adf-path-tokens';
 
 export interface BindingRule {
   module: string;
@@ -48,8 +48,12 @@ export function splitFiles(filesFlag: string): string[] {
  * Labels for the files in the text answer: repo-relative where possible, so
  * `C:\repo\.github\workflows\ci.yml` and `.github/workflows/ci.yml` read the same.
  */
-export function fileLabels(aiDir: string, files: string[], cwd: string = process.cwd()): string[] {
-  const root = resolvePathTokenRoot(aiDir, cwd);
+export function fileLabels(
+  aiDir: string,
+  files: string[],
+  cwd: string = process.cwd(),
+  root: string = resolvePathTokenRoot(aiDir, cwd),
+): string[] {
   return files.map(f => relativizeFilePath(f, root, cwd) ?? f);
 }
 
@@ -80,6 +84,14 @@ export function sectionHeaderRe(key: string): RegExp {
 }
 
 /**
+ * Any section header, as the ADF parser's SECTION_HEADER_RE reads one. A
+ * section's body runs until the next such line, so column-0 list items
+ * (`- item`, which the parser accepts) stay inside their section.
+ */
+const ANY_SECTION_HEADER_RE =
+  /^(?:(?:\p{Emoji_Presentation}|\p{Extended_Pictographic})️*\s+)?[A-Z][A-Z0-9_]*(?:[ \t]+[A-Z0-9_]+)*\s*(?:\[(?:load-bearing|advisory)\]\s*)?:/u;
+
+/**
  * 1-based line of each item in the `occurrence`-th section headed `key`;
  * an item not found falls back to the header line.
  */
@@ -93,7 +105,7 @@ export function locate(lines: string[], key: string, items: string[], occurrence
   let cursor = header + 1;
   return items.map((item) => {
     for (let i = cursor; i < lines.length; i++) {
-      if (/^\S/.test(lines[i])) break;
+      if (ANY_SECTION_HEADER_RE.test(lines[i])) break;
       if (lines[i].includes(item)) {
         cursor = i + 1;
         return i + 1;
@@ -168,16 +180,41 @@ export function buildPreflight(
   resolvedModules: string[],
   files: string[],
   cwd: string = process.cwd(),
+  root: string = resolvePathTokenRoot(aiDir, cwd),
 ): Preflight {
   // Locations are repo-relative, not cwd-relative, so the answer is the same
-  // from any subdirectory and from `charter serve` (absolute aiDir).
-  const root = resolvePathTokenRoot(aiDir, cwd);
+  // from any subdirectory and from `charter serve` (absolute aiDir). Rules,
+  // ceilings and labels all resolve files against this one root.
   const { rules, unreadable } = readBindingRules(path.resolve(cwd, aiDir), manifest, resolvedModules, root);
   return {
     rules,
     ceilings: computeFileCeilings(aiDir, manifest, files, { cwd, root }),
     unreadable,
   };
+}
+
+/**
+ * For each resolved on-demand module, the labels of the files whose own path
+ * keywords trigger it. A module no single file triggers came from the task
+ * or `--keywords` and maps to an empty list. Text output only.
+ */
+export function moduleFileAttribution(
+  manifest: Manifest,
+  resolvedModules: string[],
+  files: string[],
+  labels: string[],
+  aiDir: string,
+  cwd: string = process.cwd(),
+  root: string = resolvePathTokenRoot(aiDir, cwd),
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const mod of resolvedModules) out.set(mod, []);
+  files.forEach((f, i) => {
+    for (const mod of resolveModules(manifest, fileRoutingKeywords([f], aiDir, cwd, root))) {
+      out.get(mod)?.push(labels[i]);
+    }
+  });
+  return out;
 }
 
 /** True when an on-demand module resolved or a ceiling tracks one of the files. */
@@ -192,29 +229,34 @@ export function formatPreflight(
   resolvedModules: string[],
   p: Preflight,
   files: string[],
+  attribution?: Map<string, string[]>,
 ): string[] {
   if (!preflightBinds(manifest, resolvedModules, p)) {
     return [`Nothing binds ${files.join(', ')}: no on-demand module or ceiling applies. Default modules only.`];
   }
   const pad = '           ';
   const out: string[] = [];
+  // With several files, name the file(s) each module and ceiling applies to.
+  const many = files.length > 1;
   const onDemand = resolvedModules.filter(m => manifest.onDemand.some(o => o.path === m) && !manifest.defaultLoad.includes(m));
   const binds: string[] = [];
   for (const mod of onDemand) {
+    const owners = attribution?.get(mod);
+    // No suffix when the module applies to every file: the list would be noise.
+    const forWhom = !many || !owners || owners.length === files.length ? ''
+      : owners.length > 0 ? ` for ${owners.join(', ')}` : ' for the task keywords';
     const bad = p.unreadable.find(u => u.module === mod);
     if (bad) {
-      binds.push(`${mod} (unreadable: ${bad.reason})  (${bad.file})`);
+      binds.push(`${mod} (unreadable: ${bad.reason})  (${bad.file})${forWhom}`);
       continue;
     }
     const modRules = p.rules.filter(r => r.module === mod);
-    if (modRules.length === 0) binds.push(`${mod} (no load-bearing rules)`);
-    for (const r of modRules) binds.push(`${mod} → "${r.rule}"  (${r.file}:${r.line})`);
+    if (modRules.length === 0) binds.push(`${mod} (no load-bearing rules)${forWhom}`);
+    for (const r of modRules) binds.push(`${mod} → "${r.rule}"  (${r.file}:${r.line})${forWhom}`);
   }
   if (binds.length === 0) binds.push('no on-demand module (default modules only)');
   binds.forEach((b, i) => out.push(`${i === 0 ? 'Binds:     ' : pad}${b}`));
 
-  // With several files, name the file each ceiling measures.
-  const many = files.length > 1;
   const head = p.ceilings.length === 0
     ? [many ? 'no ceiling tracks these files' : 'no ceiling tracks this file']
     : p.ceilings.map(c => `${c.metric} ${c.value}/${c.ceiling} → ${c.headroom} lines left [${c.status}] (${c.module})${many ? ` for ${c.file}` : ''}`);
@@ -224,4 +266,36 @@ export function formatPreflight(
   out.push('Run first: unknown');
   out.push('Fresh:     unknown');
   return out;
+}
+
+export interface PreflightAnswer {
+  preflight: Preflight;
+  binds: boolean;
+  /** The human-readable block, one line per entry. */
+  lines: string[];
+}
+
+/**
+ * Everything `--files` (CLI) and `files` (MCP) answer, from one repo root
+ * lookup: rules, ceilings, labels and per-file attribution all resolve the
+ * files the same way, so the answer is the same from any cwd.
+ */
+export function preflightAnswer(
+  aiDir: string,
+  manifest: Manifest,
+  resolvedModules: string[],
+  files: string[],
+  cwd: string = process.cwd(),
+  root: string = resolvePathTokenRoot(aiDir, cwd),
+): PreflightAnswer {
+  const preflight = buildPreflight(aiDir, manifest, resolvedModules, files, cwd, root);
+  const labels = fileLabels(aiDir, files, cwd, root);
+  const attribution = files.length > 1
+    ? moduleFileAttribution(manifest, resolvedModules, files, labels, aiDir, cwd, root)
+    : undefined;
+  return {
+    preflight,
+    binds: preflightBinds(manifest, resolvedModules, preflight),
+    lines: formatPreflight(manifest, resolvedModules, preflight, labels, attribution),
+  };
 }

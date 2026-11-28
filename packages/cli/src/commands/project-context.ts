@@ -18,8 +18,8 @@ import {
 import type { BundleResult, Manifest } from '@stackbilt/adf';
 import { tokenizeTask } from '../flags';
 // Leaf module, not adf-context.ts: avoids an import cycle through ../index.
-import { fileRoutingKeywords } from './adf-path-tokens';
-import { buildPreflight, fileLabels, formatPreflight, preflightBinds } from './adf-preflight';
+import { fileRoutingKeywords, resolvePathTokenRoot } from './adf-path-tokens';
+import { preflightAnswer } from './adf-preflight';
 import type { Preflight } from './adf-preflight';
 
 export interface ProjectContextResult {
@@ -32,15 +32,20 @@ export interface ProjectContextResult {
   preflightText?: string;
   /** Present only when files were given: false means nothing file-specific binds them. */
   binds?: boolean;
+  /** Present only when files were given: true when a non-empty task came with them. */
+  withTask?: boolean;
 }
 
 export function resolveProjectContext(aiDir: string, task?: string, files?: string[]): ProjectContextResult {
   const manifestPath = path.join(aiDir, 'manifest.adf');
   const manifest = parseManifest(parseAdf(fs.readFileSync(manifestPath, 'utf-8')));
   const fileList = (files ?? []).map(f => f.trim()).filter(Boolean);
+  // One repo-root lookup (memoized per .ai/ dir) for routing and the preflight.
+  const cwd = process.cwd();
+  const root = fileList.length > 0 ? resolvePathTokenRoot(aiDir, cwd) : cwd;
   // Same keywords, in the same order, as `charter adf context --files ... --keywords ...`.
   const keywords = [...new Set([
-    ...(fileList.length > 0 ? fileRoutingKeywords(fileList, aiDir) : []),
+    ...(fileList.length > 0 ? fileRoutingKeywords(fileList, aiDir, cwd, root) : []),
     ...(task ? tokenizeTask(task) : []),
   ])];
   const modulePaths = resolveModules(manifest, keywords);
@@ -52,10 +57,16 @@ export function resolveProjectContext(aiDir: string, task?: string, files?: stri
     manifest,
   );
   if (fileList.length === 0) return { keywords, manifest, bundle };
-  const preflight = buildPreflight(aiDir, manifest, bundle.resolvedModules, fileList);
-  const preflightText = formatPreflight(manifest, bundle.resolvedModules, preflight, fileLabels(aiDir, fileList)).join('\n');
-  const binds = preflightBinds(manifest, bundle.resolvedModules, preflight);
-  return { keywords, manifest, bundle, preflight, preflightText, binds };
+  const answer = preflightAnswer(aiDir, manifest, bundle.resolvedModules, fileList, cwd, root);
+  return {
+    keywords,
+    manifest,
+    bundle,
+    preflight: answer.preflight,
+    preflightText: answer.lines.join('\n'),
+    binds: answer.binds,
+    withTask: Boolean(task && task.trim()),
+  };
 }
 
 export interface TextContent {
@@ -68,11 +79,13 @@ export interface TextContent {
  * - No files: one item, the ADF bundle (unchanged).
  * - Files, something binds: the bundle, then the preflight text, then
  *   `{ rules, ceilings, unreadable, binds }` JSON (the CLI's --format json fields).
- * - Files, nothing binds: the short preflight line first, then that JSON. The
- *   default-only bundle is left out, so an agent can skip Charter quickly.
+ * - Files only, nothing binds: the short preflight line first, then that JSON.
+ *   The default-only bundle is left out, so an agent can skip Charter quickly.
+ * - Task and files, nothing binds: the task's bundle is still returned (the
+ *   caller asked for task context), then the nothing-binds line, then the JSON.
  */
 export function projectContextContent(result: ProjectContextResult): TextContent[] {
-  const { bundle, preflight, preflightText, binds } = result;
+  const { bundle, preflight, preflightText, binds, withTask } = result;
   if (!preflight || preflightText === undefined) {
     return [{ type: 'text', text: formatAdf(bundle.mergedDocument) }];
   }
@@ -86,6 +99,6 @@ export function projectContextContent(result: ProjectContextResult): TextContent
     }, null, 2),
   };
   const answer: TextContent = { type: 'text', text: preflightText };
-  if (!binds) return [answer, fields];
+  if (!binds && !withTask) return [answer, fields];
   return [{ type: 'text', text: formatAdf(bundle.mergedDocument) }, answer, fields];
 }

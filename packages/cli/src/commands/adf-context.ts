@@ -19,8 +19,8 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
-import { fileRoutingKeywords } from './adf-path-tokens';
-import { buildPreflight, fileLabels, formatPreflight, preflightBinds, splitFiles } from './adf-preflight';
+import { fileRoutingKeywords, resolvePathTokenRoot } from './adf-path-tokens';
+import { preflightAnswer, splitFiles } from './adf-preflight';
 import type { Preflight } from './adf-preflight';
 
 // Moved to the leaf module adf-path-tokens.ts (breaks the
@@ -48,11 +48,15 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
 
   // Collect keywords from both sources
   const allKeywords: string[] = [];
+  // One repo-root lookup (memoized) for routing, rules, ceilings and labels.
+  const cwd = process.cwd();
+  const files = filesFlag ? splitFiles(filesFlag) : [];
+  const root = filesFlag ? resolvePathTokenRoot(aiDir, cwd) : cwd;
   if (filesFlag) {
     // Extension/directory signals, then the path's own name tokens (e.g. `adf`,
     // `manifest`), both from the repo-relative path so checkout-root dirs never
     // route -- see adf-path-tokens.ts. MCP getProjectContext uses the same helper.
-    allKeywords.push(...fileRoutingKeywords(splitFiles(filesFlag), aiDir));
+    allKeywords.push(...fileRoutingKeywords(files, aiDir, cwd, root));
   }
   if (keywordsFlag) {
     allKeywords.push(...tokenizeTask(keywordsFlag));
@@ -90,15 +94,13 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         tokenEstimate: result.tokenEstimate,
         triggerMatches: result.triggerMatches,
         content: formatAdf(result.mergedDocument),
-        ...filesFields(aiDir, manifest, result.resolvedModules, filesFlag),
+        ...filesFields(aiDir, manifest, result.resolvedModules, files, cwd, root),
       }, null, 2));
     } else {
       if (filesFlag) {
         // Preflight block (#447) on stderr, so stdout stays a pure ADF document
         // for `--bundle > context.adf` pipelines.
-        const files = splitFiles(filesFlag);
-        const preflight = buildPreflight(aiDir, manifest, result.resolvedModules, files);
-        for (const line of formatPreflight(manifest, result.resolvedModules, preflight, fileLabels(aiDir, files))) console.error(line);
+        for (const line of preflightAnswer(aiDir, manifest, result.resolvedModules, files, cwd, root).lines) console.error(line);
       }
       console.log(formatAdf(result.mergedDocument));
     }
@@ -118,15 +120,14 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         keywords: dedupKeywords,
         resolvedModules,
         triggerMatches,
-        ...filesFields(aiDir, manifest, resolvedModules, filesFlag),
+        ...filesFields(aiDir, manifest, resolvedModules, files, cwd, root),
       }, null, 2));
     } else {
       if (filesFlag) {
         // Preflight answer (#447): what binds the file, before the module detail.
-        const files = splitFiles(filesFlag);
-        const preflight = buildPreflight(aiDir, manifest, resolvedModules, files);
-        for (const line of formatPreflight(manifest, resolvedModules, preflight, fileLabels(aiDir, files))) console.log(line);
-        if (!preflightBinds(manifest, resolvedModules, preflight)) return EXIT_CODE.SUCCESS;
+        const answer = preflightAnswer(aiDir, manifest, resolvedModules, files, cwd, root);
+        for (const line of answer.lines) console.log(line);
+        if (!answer.binds) return EXIT_CODE.SUCCESS;
         console.log('');
       }
       console.log(`  Keywords: ${dedupKeywords.join(', ')}`);
@@ -151,10 +152,12 @@ function filesFields(
   aiDir: string,
   manifest: ReturnType<typeof parseManifest>,
   resolvedModules: string[],
-  filesFlag: string | undefined,
+  files: string[],
+  cwd: string,
+  root: string,
 ): Partial<Preflight> & { binds?: boolean } {
-  if (!filesFlag) return {};
-  const preflight = buildPreflight(aiDir, manifest, resolvedModules, splitFiles(filesFlag));
+  if (files.length === 0) return {};
+  const { preflight, binds } = preflightAnswer(aiDir, manifest, resolvedModules, files, cwd, root);
   const { rules, ceilings, unreadable } = preflight;
-  return { ceilings, rules, unreadable, binds: preflightBinds(manifest, resolvedModules, preflight) };
+  return { ceilings, rules, unreadable, binds };
 }

@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseAdf, validateConstraints } from '@stackbilt/adf';
 import type { Manifest, MetricSource, ConstraintStatus } from '@stackbilt/adf';
+import { relativizeFilePath, resolvePathTokenRoot } from './adf-path-tokens';
 
 export interface AutoMeasurement {
   metric: string;
@@ -54,7 +55,8 @@ export interface FileCeilingOptions {
   cwd?: string;
   /**
    * Repo root that `file` is shown relative to. When omitted, `file` is the
-   * manifest METRICS path as written.
+   * manifest METRICS path as written. Requested files are always matched
+   * through the repo root (this one, or the memoized git root of `aiDir`).
    */
   root?: string;
 }
@@ -66,6 +68,18 @@ function pathKey(base: string, p: string): string {
 }
 
 /**
+ * Comparison key for one path: its repo-relative form from
+ * `relativizeFilePath` (the same resolver path tokens and rule locations
+ * use, so every part of the answer reads a file the same way from any cwd),
+ * or its absolute form when it lies outside the repo.
+ */
+function fileKey(root: string, cwd: string, p: string): string {
+  const rel = relativizeFilePath(p, root, cwd);
+  if (rel === null) return `abs:${pathKey(cwd, p)}`;
+  return `rel:${process.platform === 'win32' ? rel.toLowerCase() : rel}`;
+}
+
+/**
  * For each requested file that a manifest METRICS source points at, report
  * its live value against the ceiling declared in the owning ADF module.
  * Files with no metric, missing files, and metrics with no declared ceiling
@@ -74,6 +88,8 @@ function pathKey(base: string, p: string): string {
  * METRICS paths are read relative to the directory holding the `.ai/` dir
  * (with the default `--ai-dir .ai` that is cwd, as for `adf evidence`), so
  * the answer does not change when run from a subdirectory with `--ai-dir ../.ai`.
+ * Requested files go through `relativizeFilePath`, so a repo-relative path
+ * passed from a subdirectory or over MCP (any cwd) still finds its ceiling.
  */
 export function computeFileCeilings(
   aiDir: string,
@@ -83,8 +99,9 @@ export function computeFileCeilings(
 ): FileCeiling[] {
   const cwd = options.cwd ?? process.cwd();
   const metricBase = path.dirname(path.resolve(cwd, aiDir));
-  const wanted = new Set(files.map((f) => pathKey(cwd, f)));
-  const sources = manifest.metrics.filter((ms) => wanted.has(pathKey(metricBase, ms.path)));
+  const root = options.root ?? resolvePathTokenRoot(aiDir, cwd);
+  const wanted = new Set(files.map((f) => fileKey(root, cwd, f)));
+  const sources = manifest.metrics.filter((ms) => wanted.has(fileKey(root, cwd, path.resolve(metricBase, ms.path))));
   if (sources.length === 0) return [];
 
   const modules = [...new Set([...manifest.defaultLoad, ...manifest.onDemand.map((m) => m.path)])];

@@ -157,7 +157,7 @@ export function registerTools(server: McpServer, aiDir: string, options: CLIOpti
   (server.registerTool as Function)(
     'getProjectContext',
     {
-      description: 'Returns the ADF bundle for this project — constraints, context, and advisory rules loaded for the given task or trigger keywords. With files, also returns the preflight answer; when nothing binds the files, returns only that short answer.',
+      description: 'Returns the ADF bundle for this project — constraints, context, and advisory rules loaded for the given task or trigger keywords. With files, also returns the preflight answer; when nothing binds the files and no task is given, returns only that short answer.',
       inputSchema: {
         task: z.string().optional().describe('Task description or trigger keywords to load on-demand modules'),
         files: z.array(z.string()).optional().describe('Files about to be edited; adds the preflight answer (binding rules, ceiling headroom), same as charter adf context --files'),
