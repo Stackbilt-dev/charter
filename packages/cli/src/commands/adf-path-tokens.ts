@@ -138,3 +138,50 @@ export function filePathToTokens(filePaths: string[], options: PathTokenOptions 
   }
   return [...new Set(tokens)];
 }
+
+/**
+ * Extract keywords from file paths using extension and directory signals.
+ * Maps file system structure to domain keywords for module resolution.
+ *
+ * Lives in this leaf module (no CLI imports) so MCP `getProjectContext` can use
+ * it without importing adf-context.ts; adf-context.ts re-exports it unchanged.
+ */
+export function filePathToKeywords(filePaths: string[]): string[] {
+  const keywords: string[] = [];
+  for (const fp of filePaths) {
+    const ext = path.extname(fp).slice(1).toLowerCase();
+    const dir = path.dirname(fp).toLowerCase();
+
+    // Extension signals
+    if (['tsx', 'jsx'].includes(ext)) keywords.push('react', 'ui', 'frontend');
+    if (['css', 'scss', 'sass', 'less'].includes(ext)) keywords.push('css', 'ui', 'frontend');
+    if (['prisma'].includes(ext)) keywords.push('db', 'backend');
+    if (['sql'].includes(ext)) keywords.push('db', 'migration');
+    if (ext === 'toml' && fp.includes('wrangler')) keywords.push('deploy', 'cloudflare');
+
+    // Directory signals
+    if (/\b(component|ui|widget|page|layout|view)\b/.test(dir)) keywords.push('frontend', 'ui');
+    if (/\b(api|server|handler|route|middleware|controller)\b/.test(dir)) keywords.push('api', 'backend');
+    if (/\b(test|spec|__tests__|e2e)\b/.test(dir)) keywords.push('test', 'qa');
+    if (/\b(deploy|infra|docker|ci|\.github)\b/.test(dir)) keywords.push('deploy', 'infra');
+    if (/\b(auth|session|permission)\b/.test(dir)) keywords.push('auth', 'security');
+  }
+  return [...new Set(keywords)];
+}
+
+/**
+ * All routing keywords for `--files` (CLI) and `files` (MCP), in one order so
+ * both transports resolve the same modules: extension and directory signals,
+ * then path tokens. Both see repo-relative paths, so the directories the
+ * checkout sits in (`C:\Users\...`) never become signals. A path outside the
+ * repo keeps only its file name, so extension signals still apply.
+ */
+export function fileRoutingKeywords(filePaths: string[], aiDir: string, cwd: string = process.cwd()): string[] {
+  const root = resolvePathTokenRoot(aiDir, cwd);
+  const relPaths = filePaths.map(fp => relativizeFilePath(fp, root, cwd) ?? baseName(fp));
+  return [...new Set([...filePathToKeywords(relPaths), ...filePathToTokens(filePaths, { root, cwd })])];
+}
+
+function baseName(fp: string): string {
+  return fp.split(/[\\/]+/).filter(Boolean).pop() ?? fp;
+}

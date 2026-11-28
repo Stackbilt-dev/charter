@@ -19,36 +19,14 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
-import { filePathToTokens, resolvePathTokenRoot } from './adf-path-tokens';
-import { buildPreflight, formatPreflight, preflightBinds, splitFiles } from './adf-preflight';
+import { fileRoutingKeywords } from './adf-path-tokens';
+import { buildPreflight, fileLabels, formatPreflight, preflightBinds, splitFiles } from './adf-preflight';
 import type { Preflight } from './adf-preflight';
 
-/**
- * Extract keywords from file paths using extension and directory signals.
- * Maps file system structure to domain keywords for module resolution.
- */
-export function filePathToKeywords(filePaths: string[]): string[] {
-  const keywords: string[] = [];
-  for (const fp of filePaths) {
-    const ext = path.extname(fp).slice(1).toLowerCase();
-    const dir = path.dirname(fp).toLowerCase();
-
-    // Extension signals
-    if (['tsx', 'jsx'].includes(ext)) keywords.push('react', 'ui', 'frontend');
-    if (['css', 'scss', 'sass', 'less'].includes(ext)) keywords.push('css', 'ui', 'frontend');
-    if (['prisma'].includes(ext)) keywords.push('db', 'backend');
-    if (['sql'].includes(ext)) keywords.push('db', 'migration');
-    if (ext === 'toml' && fp.includes('wrangler')) keywords.push('deploy', 'cloudflare');
-
-    // Directory signals
-    if (/\b(component|ui|widget|page|layout|view)\b/.test(dir)) keywords.push('frontend', 'ui');
-    if (/\b(api|server|handler|route|middleware|controller)\b/.test(dir)) keywords.push('api', 'backend');
-    if (/\b(test|spec|__tests__|e2e)\b/.test(dir)) keywords.push('test', 'qa');
-    if (/\b(deploy|infra|docker|ci|\.github)\b/.test(dir)) keywords.push('deploy', 'infra');
-    if (/\b(auth|session|permission)\b/.test(dir)) keywords.push('auth', 'security');
-  }
-  return [...new Set(keywords)];
-}
+// Moved to the leaf module adf-path-tokens.ts (breaks the
+// index -> serve -> project-context -> adf-context -> index cycle); re-exported
+// here so existing imports keep working.
+export { filePathToKeywords } from './adf-path-tokens';
 
 export function adfContextCommand(options: CLIOptions, args: string[]): number {
   const filesFlag = getFlag(args, '--files');
@@ -71,11 +49,10 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   // Collect keywords from both sources
   const allKeywords: string[] = [];
   if (filesFlag) {
-    const filePaths = splitFiles(filesFlag);
-    allKeywords.push(...filePathToKeywords(filePaths));
-    // The path's own name tokens (e.g. `adf`, `manifest`), taken from the
-    // repo-relative path so checkout-root dirs never route -- see adf-path-tokens.ts.
-    allKeywords.push(...filePathToTokens(filePaths, { root: resolvePathTokenRoot(aiDir) }));
+    // Extension/directory signals, then the path's own name tokens (e.g. `adf`,
+    // `manifest`), both from the repo-relative path so checkout-root dirs never
+    // route -- see adf-path-tokens.ts. MCP getProjectContext uses the same helper.
+    allKeywords.push(...fileRoutingKeywords(splitFiles(filesFlag), aiDir));
   }
   if (keywordsFlag) {
     allKeywords.push(...tokenizeTask(keywordsFlag));
@@ -116,6 +93,13 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         ...filesFields(aiDir, manifest, result.resolvedModules, filesFlag),
       }, null, 2));
     } else {
+      if (filesFlag) {
+        // Preflight block (#447) on stderr, so stdout stays a pure ADF document
+        // for `--bundle > context.adf` pipelines.
+        const files = splitFiles(filesFlag);
+        const preflight = buildPreflight(aiDir, manifest, result.resolvedModules, files);
+        for (const line of formatPreflight(manifest, result.resolvedModules, preflight, fileLabels(aiDir, files))) console.error(line);
+      }
       console.log(formatAdf(result.mergedDocument));
     }
   } else {
@@ -141,7 +125,7 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         // Preflight answer (#447): what binds the file, before the module detail.
         const files = splitFiles(filesFlag);
         const preflight = buildPreflight(aiDir, manifest, resolvedModules, files);
-        for (const line of formatPreflight(manifest, resolvedModules, preflight, files)) console.log(line);
+        for (const line of formatPreflight(manifest, resolvedModules, preflight, fileLabels(aiDir, files))) console.log(line);
         if (!preflightBinds(manifest, resolvedModules, preflight)) return EXIT_CODE.SUCCESS;
         console.log('');
       }
@@ -158,17 +142,19 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
 }
 
 /**
- * Preflight fields for `--files` (#447): live ceiling headroom (#443) and the
- * load-bearing rules of resolved on-demand modules, with source locations.
- * Additive: both keys are present only when --files was given.
+ * Preflight fields for `--files` (#447): live ceiling headroom (#443), the
+ * load-bearing rules of resolved on-demand modules with source locations,
+ * modules that could not be parsed (`unreadable`), and `binds` (false means
+ * Charter has nothing file-specific to add). Additive: present only with --files.
  */
 function filesFields(
   aiDir: string,
   manifest: ReturnType<typeof parseManifest>,
   resolvedModules: string[],
   filesFlag: string | undefined,
-): Partial<Preflight> {
+): Partial<Preflight> & { binds?: boolean } {
   if (!filesFlag) return {};
-  const { rules, ceilings } = buildPreflight(aiDir, manifest, resolvedModules, splitFiles(filesFlag));
-  return { ceilings, rules };
+  const preflight = buildPreflight(aiDir, manifest, resolvedModules, splitFiles(filesFlag));
+  const { rules, ceilings, unreadable } = preflight;
+  return { ceilings, rules, unreadable, binds: preflightBinds(manifest, resolvedModules, preflight) };
 }

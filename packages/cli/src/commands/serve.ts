@@ -30,7 +30,7 @@ import {
 import { analyze as analyzeBlast, BlastInputSchema } from '@stackbilt/blast';
 import { generateBrief } from './context';
 import { contextRefreshCommand } from './context-refresh';
-import { resolveProjectContext } from './project-context';
+import { projectContextContent, resolveProjectContext } from './project-context';
 import {
   analyze as analyzeSurface,
   SurfaceInputSchema,
@@ -128,7 +128,8 @@ export async function serveCommand(options: CLIOptions, args: string[]): Promise
 // Tool Registration
 // ============================================================================
 
-function registerTools(server: McpServer, aiDir: string, options: CLIOptions, sessionId: string): void {
+/** Exported for tests, which pass a stub server to capture the handlers. */
+export function registerTools(server: McpServer, aiDir: string, options: CLIOptions, sessionId: string): void {
 
   (server.registerTool as Function)(
     'charter_context',
@@ -156,7 +157,7 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions, se
   (server.registerTool as Function)(
     'getProjectContext',
     {
-      description: 'Returns the ADF bundle for this project — constraints, context, and advisory rules loaded for the given task or trigger keywords.',
+      description: 'Returns the ADF bundle for this project — constraints, context, and advisory rules loaded for the given task or trigger keywords. With files, also returns the preflight answer; when nothing binds the files, returns only that short answer.',
       inputSchema: {
         task: z.string().optional().describe('Task description or trigger keywords to load on-demand modules'),
         files: z.array(z.string()).optional().describe('Files about to be edited; adds the preflight answer (binding rules, ceiling headroom), same as charter adf context --files'),
@@ -165,7 +166,8 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions, se
     async ({ task, files }: { task?: string; files?: string[] }) => {
       try {
         // Shared with the CLI (tokenizeTask) so "ADF." and "ADF" resolve the same modules (#438).
-        const { keywords, manifest, bundle, preflight, preflightText } = resolveProjectContext(aiDir, task, files);
+        const result = resolveProjectContext(aiDir, task, files);
+        const { keywords, manifest, bundle } = result;
         recordAdfResolutionEvent(options.configPath, {
           source: 'mcp.getProjectContext',
           keywords,
@@ -175,13 +177,8 @@ function registerTools(server: McpServer, aiDir: string, options: CLIOptions, se
           tokenEstimate: bundle.tokenEstimate,
           sessionId,
         });
-        const content = [{ type: 'text' as const, text: formatAdf(bundle.mergedDocument) }];
-        if (preflight && preflightText !== undefined) {
-          // Additive (#447): the preflight answer, as text and as the CLI's JSON fields.
-          content.push({ type: 'text' as const, text: preflightText });
-          content.push({ type: 'text' as const, text: JSON.stringify({ rules: preflight.rules, ceilings: preflight.ceilings }, null, 2) });
-        }
-        return { content };
+        // Without files: the bundle only, as before. With files (#447): see projectContextContent.
+        return { content: projectContextContent(result) };
       } catch (err) {
         return { content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }

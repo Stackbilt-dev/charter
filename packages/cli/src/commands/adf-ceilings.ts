@@ -49,10 +49,20 @@ export function measureMetricSources(metrics: MetricSource[]): AutoMeasurement[]
   });
 }
 
-/** Normalize a path to repo-relative POSIX form for comparison. */
-function normalizePath(p: string): string {
-  const posix = p.replace(/\\/g, '/');
-  return path.relative(process.cwd(), path.resolve(posix)).split(path.sep).join('/');
+export interface FileCeilingOptions {
+  /** Directory the requested files are resolved against. Defaults to `process.cwd()`. */
+  cwd?: string;
+  /**
+   * Repo root that `file` is shown relative to. When omitted, `file` is the
+   * manifest METRICS path as written.
+   */
+  root?: string;
+}
+
+/** Absolute comparison key; case-insensitive on Windows, `\` accepted everywhere. */
+function pathKey(base: string, p: string): string {
+  const abs = path.resolve(base, process.platform === 'win32' ? p : p.replace(/\\/g, '/'));
+  return process.platform === 'win32' ? abs.toLowerCase() : abs;
 }
 
 /**
@@ -60,20 +70,27 @@ function normalizePath(p: string): string {
  * its live value against the ceiling declared in the owning ADF module.
  * Files with no metric, missing files, and metrics with no declared ceiling
  * produce no entry.
+ *
+ * METRICS paths are read relative to the directory holding the `.ai/` dir
+ * (with the default `--ai-dir .ai` that is cwd, as for `adf evidence`), so
+ * the answer does not change when run from a subdirectory with `--ai-dir ../.ai`.
  */
 export function computeFileCeilings(
   aiDir: string,
   manifest: Manifest,
   files: string[],
+  options: FileCeilingOptions = {},
 ): FileCeiling[] {
-  const wanted = new Set(files.map(normalizePath));
-  const sources = manifest.metrics.filter((ms) => wanted.has(normalizePath(ms.path)));
+  const cwd = options.cwd ?? process.cwd();
+  const metricBase = path.dirname(path.resolve(cwd, aiDir));
+  const wanted = new Set(files.map((f) => pathKey(cwd, f)));
+  const sources = manifest.metrics.filter((ms) => wanted.has(pathKey(metricBase, ms.path)));
   if (sources.length === 0) return [];
 
   const modules = [...new Set([...manifest.defaultLoad, ...manifest.onDemand.map((m) => m.path)])];
   const docs: Array<{ module: string; doc: ReturnType<typeof parseAdf> }> = [];
   for (const mod of modules) {
-    const modPath = path.join(aiDir, mod);
+    const modPath = path.resolve(cwd, aiDir, mod);
     if (!fs.existsSync(modPath)) continue;
     try {
       docs.push({ module: mod, doc: parseAdf(fs.readFileSync(modPath, 'utf-8')) });
@@ -85,14 +102,16 @@ export function computeFileCeilings(
   const results: FileCeiling[] = [];
   for (const ms of sources) {
     const metric = ms.key.toLowerCase();
-    const value = measureLines(ms.path);
+    const abs = path.resolve(metricBase, ms.path);
+    const value = measureLines(abs);
     if (value === null) continue;
+    const file = options.root ? displayFrom(options.root, abs) : ms.path;
     for (const { module, doc } of docs) {
       const hit = validateConstraints(doc, { [metric]: value }, module)
         .constraints.find((c) => c.metric === metric);
       if (!hit) continue;
       results.push({
-        file: ms.path,
+        file,
         metric,
         value,
         ceiling: hit.ceiling,
@@ -104,4 +123,11 @@ export function computeFileCeilings(
     }
   }
   return results;
+}
+
+/** POSIX path of `abs` relative to `root`; absolute when outside it. */
+export function displayFrom(root: string, abs: string): string {
+  const rel = path.relative(root, abs);
+  const shown = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs;
+  return shown.split(path.sep).join('/');
 }
