@@ -85,11 +85,9 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
   const candidateModules = manifest.onDemand.map(m => m.path);
 
   if (bundle) {
-    // Full bundle output
-    const readFile = (modulePath: string) => {
-      const fullPath = path.join(aiDir, modulePath);
-      return fs.readFileSync(fullPath, 'utf-8');
-    };
+    // Full bundle output. bundleModules already joins aiDir onto each module
+    // path before calling readFile, so read the path as given (#439).
+    const readFile = (resolvedPath: string): string => fs.readFileSync(resolvedPath, 'utf-8');
 
     const result = bundleModules(aiDir, resolvedModules, readFile, dedupKeywords, manifest);
 
