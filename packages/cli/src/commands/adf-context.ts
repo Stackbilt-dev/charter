@@ -19,6 +19,8 @@ import type { CLIOptions } from '../index';
 import { CLIError, EXIT_CODE } from '../index';
 import { getFlag, tokenizeTask } from '../flags';
 import { recordAdfResolutionEvent } from '../telemetry';
+import { computeFileCeilings } from './adf-ceilings';
+import type { FileCeiling } from './adf-ceilings';
 
 /**
  * Extract keywords from file paths using extension and directory signals.
@@ -107,6 +109,7 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         tokenEstimate: result.tokenEstimate,
         triggerMatches: result.triggerMatches,
         content: formatAdf(result.mergedDocument),
+        ...ceilingsField(aiDir, manifest, filesFlag),
       }, null, 2));
     } else {
       console.log(formatAdf(result.mergedDocument));
@@ -125,6 +128,7 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
       console.log(JSON.stringify({
         keywords: dedupKeywords,
         resolvedModules,
+        ...ceilingsField(aiDir, manifest, filesFlag),
       }, null, 2));
     } else {
       console.log(`  Keywords: ${dedupKeywords.join(', ')}`);
@@ -133,8 +137,31 @@ export function adfContextCommand(options: CLIOptions, args: string[]): number {
         const isDefault = manifest.defaultLoad.includes(mod);
         console.log(`    ${mod} (${isDefault ? 'DEFAULT' : 'ON_DEMAND'})`);
       }
+      printCeilings(ceilingsField(aiDir, manifest, filesFlag).ceilings);
     }
   }
 
   return EXIT_CODE.SUCCESS;
+}
+
+/**
+ * Live ceiling headroom (#443) for `--files` entries that map to a manifest
+ * METRICS source. Additive: the key is present only when --files was given.
+ */
+function ceilingsField(
+  aiDir: string,
+  manifest: ReturnType<typeof parseManifest>,
+  filesFlag: string | undefined,
+): { ceilings?: FileCeiling[] } {
+  if (!filesFlag) return {};
+  const files = filesFlag.split(',').map(f => f.trim()).filter(Boolean);
+  return { ceilings: computeFileCeilings(aiDir, manifest, files) };
+}
+
+function printCeilings(ceilings: FileCeiling[] | undefined): void {
+  if (!ceilings || ceilings.length === 0) return;
+  console.log('  Ceilings:');
+  for (const c of ceilings) {
+    console.log(`    [${c.status}] ${c.file}: ${c.value} / ${c.ceiling} (${c.metric}, headroom ${c.headroom}, ${c.module})`);
+  }
 }
